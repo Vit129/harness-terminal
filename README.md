@@ -10,9 +10,11 @@ One self-contained app. The terminal engine, daemon, and CLI are all first-party
 
 ## Download
 
-**[Download Harness for macOS →](https://harnesscli.dev)**
+**[Download Harness 1.0.0 for macOS →](https://github.com/robzilla1738/harness-cli/releases/download/v1.0.0/Harness.dmg)**
 
-Drag it to Applications and open it. Updates install themselves in the background, signed and verified. Requires macOS 15 or later.
+Open the DMG, drag `Harness.app` to Applications, and launch it normally. The release is signed, notarized, and built for Apple silicon Macs running macOS 15 or later.
+
+SHA-256: `da07070a496cb2678b28b816dcd4868af12ac6576bc9cb92e68980e5827a40c5`
 
 Prefer to build it yourself? Jump to [Build from source](#build-from-source).
 
@@ -126,7 +128,7 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug \
 
 ## Requirements
 
-- macOS 15.0 or later
+- Apple silicon Mac running macOS 15.0 or later for the downloadable DMG
 - Xcode 16+ / Swift 6.0 (to build from source)
 
 ## Documentation
