@@ -1,28 +1,11 @@
-# Fish completion for harness-cli. Kept hand-curated so it stays terse and
-# accurate; regenerate after adding a new subcommand or flag.
+# Fish completion for harness-cli — generated from CLICommandCatalog by
+# CompletionGenerator (do not hand-edit; run `harness-cli completions fish`).
 
-set -l __harness_cli_subcommands \
-    ping list-workspaces list-surfaces list-agents get-snapshot \
-    list-sessions list-windows list-panes has-session list-commands \
-    new-workspace new-session new-tab new-split \
-    select-workspace select-session select-tab \
-    close-tab close-session promote-session demote-session \
-    send send-keys capture-pane \
-    kill-pane swap-pane resize-pane zoom-pane copy-mode \
-    rename-tab rename-session rename-workspace \
-    detect-agent install-hooks attach notify \
-    daemon-stats list-clients detach-client \
-    bind-key unbind-key list-keys \
-    set-buffer list-buffers show-buffer delete-buffer paste-buffer \
-    select-layout next-layout previous-layout rotate-window \
-    break-pane join-pane respawn-pane select-pane \
-    set-option show-options bind-hook unbind-hook list-hooks display-message \
-    install
+set -l __harness_cli_subcommands doctor ping daemon-stats list-workspaces list-surfaces list-sessions list-windows list-panes list-agents list-clients has-session list-commands get-snapshot new-workspace new-session new-tab new-split select-workspace select-session select-tab select-pane close-tab close-session promote-session demote-session kill-pane swap-pane resize-pane zoom-pane break-pane join-pane move-pane respawn-pane rotate-window select-layout next-layout previous-layout renumber-windows rename-tab rename-session rename-workspace link-window unlink-window send send-keys capture-pane pipe-pane copy-mode attach attach-window control-mode set-buffer list-buffers show-buffer delete-buffer paste-buffer save-buffer load-buffer set-option show-options set-environment show-environment bind-hook unbind-hook list-hooks wait-for bind-key unbind-key list-keys detect-agent notify detach-client display-message install install-hooks install-shell-integration completions
 
 complete -c harness-cli -f -n "not __fish_seen_subcommand_from $__harness_cli_subcommands" \
     -a "$__harness_cli_subcommands"
 
-# Common flags shared across many subcommands.
 complete -c harness-cli -n "__fish_seen_subcommand_from new-tab new-session" -l workspace -d "Workspace name or UUID"
 complete -c harness-cli -n "__fish_seen_subcommand_from new-tab new-session" -l cwd       -d "Working directory"
 complete -c harness-cli -n "__fish_seen_subcommand_from new-split" -l tab        -d "Tab UUID"
@@ -47,5 +30,7 @@ complete -c harness-cli -n "__fish_seen_subcommand_from bind-hook unbind-hook li
     -a "after-new-tab after-new-session after-kill-tab after-split-pane after-kill-pane after-resize-pane pane-exited client-attached client-detached agent-state-changed notification-posted"
 complete -c harness-cli -n "__fish_seen_subcommand_from install-hooks" \
     -a "codex claude-code cursor pi hermes openclaw aider gemini goose"
+complete -c harness-cli -n "__fish_seen_subcommand_from completions" -a "zsh fish bash" -d "Shell"
 complete -c harness-cli -n "__fish_seen_subcommand_from list-agents" -l waiting -d "Only agents waiting on you"
-complete -c harness-cli -n "__fish_seen_subcommand_from list-agents" -l json    -d "Machine-readable JSON output"
+complete -c harness-cli -n "__fish_seen_subcommand_from doctor daemon-stats list-workspaces list-surfaces list-sessions list-windows list-panes list-agents list-clients list-buffers show-options show-environment list-hooks" -l json   -d "Machine-readable JSON output"
+complete -c harness-cli -n "__fish_seen_subcommand_from doctor daemon-stats list-workspaces list-surfaces list-sessions list-windows list-panes list-agents list-clients list-buffers show-options show-environment list-hooks" -l pretty -d "Indent JSON output (with --json)"

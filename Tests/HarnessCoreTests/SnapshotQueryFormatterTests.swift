@@ -50,4 +50,49 @@ final class SnapshotQueryFormatterTests: XCTestCase {
         XCTAssertTrue(SnapshotQueryFormatter.sessionExists(snap, nameOrID: id.uppercased()))
         XCTAssertFalse(SnapshotQueryFormatter.sessionExists(snap, nameOrID: "nope"))
     }
+
+    // MARK: - Text is rendered from the JSON rows (guards the byte-identical contract)
+
+    func testSessionTextLineMatchesItsRow() {
+        let snap = makeSnapshot()
+        let rows = SnapshotQueryFormatter.sessionRows(snap)
+        let lines = SnapshotQueryFormatter.sessions(snap)
+        XCTAssertEqual(rows.count, lines.count)
+        for (row, line) in zip(rows, lines) {
+            XCTAssertEqual(line, "\(row.id.uuidString): \(row.name) (\(row.windowCount) windows)")
+        }
+    }
+
+    func testWindowTextLineMatchesItsRow() {
+        let snap = makeSnapshot()
+        let rows = SnapshotQueryFormatter.windowRows(snap)
+        let lines = SnapshotQueryFormatter.windows(snap)
+        XCTAssertEqual(rows.count, lines.count)
+        for (row, line) in zip(rows, lines) {
+            XCTAssertEqual(line, "\(row.index): \(row.title)")
+        }
+    }
+
+    func testPaneTextLineMatchesItsRow() {
+        let snap = makeSnapshot()
+        let tab = snap.workspaces.flatMap(\.sessions).first { $0.name == "beta" }!.activeTab!
+        let rows = SnapshotQueryFormatter.paneRows(in: tab)
+        let lines = SnapshotQueryFormatter.panes(in: tab)
+        XCTAssertEqual(rows.count, lines.count)
+        for (row, line) in zip(rows, lines) {
+            let active = row.active ? " (active)" : ""
+            XCTAssertEqual(line, "\(row.index): pane \(row.paneID.uuidString) surface \(row.surfaceID.uuidString)\(active)")
+        }
+    }
+
+    func testRowsEncodeToValidJSON() throws {
+        let snap = makeSnapshot()
+        let tab = snap.workspaces.flatMap(\.sessions).first { $0.name == "beta" }!.activeTab!
+        XCTAssertTrue(try JSONSerialization.jsonObject(
+            with: Data(JSONOutputFormatter.encode(SnapshotQueryFormatter.sessionRows(snap)).utf8)) is [Any])
+        XCTAssertTrue(try JSONSerialization.jsonObject(
+            with: Data(JSONOutputFormatter.encode(SnapshotQueryFormatter.windowRows(snap)).utf8)) is [Any])
+        XCTAssertTrue(try JSONSerialization.jsonObject(
+            with: Data(JSONOutputFormatter.encode(SnapshotQueryFormatter.paneRows(in: tab)).utf8)) is [Any])
+    }
 }

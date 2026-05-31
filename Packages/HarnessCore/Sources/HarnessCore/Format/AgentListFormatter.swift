@@ -1,9 +1,9 @@
 import Foundation
 
-/// Renders `[AgentSessionSummary]` into the two `harness-cli list-agents` output
-/// shapes: tab-separated text lines and machine-readable JSON. Lives in HarnessCore
-/// (not the CLI) so the formatting is unit-testable — the CLI stays a thin shell,
-/// mirroring `SnapshotQueryFormatter`.
+/// Renders `[AgentSessionSummary]` into the `harness-cli list-agents` text output —
+/// tab-separated lines. Lives in HarnessCore (not the CLI) so the formatting is
+/// unit-testable, mirroring `SnapshotQueryFormatter`. JSON output goes through the shared
+/// `JSONOutputFormatter` (encoding `AgentSessionSummary` directly), so there's one encoder.
 public enum AgentListFormatter {
     /// One tab-separated line per agent:
     /// `surfaceID \t workspace/session/tab \t agentName \t state \t age`.
@@ -17,23 +17,6 @@ public enum AgentListFormatter {
             let age = self.age(from: agent.lastActivityAt, to: now)
             return "\(agent.surfaceID)\t\(location)\t\(agent.agentName)\t\(state)\t\(age)"
         }
-    }
-
-    /// Pretty, stable JSON — the `--json` contract. Sorted keys + ISO-8601 dates so
-    /// output is deterministic and round-trips back to `[AgentSessionSummary]`.
-    public static func json(_ agents: [AgentSessionSummary]) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(agents)
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    /// A matching decoder for callers/tests that consume `json(_:)` output.
-    public static func decodeJSON(_ string: String) throws -> [AgentSessionSummary] {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([AgentSessionSummary].self, from: Data(string.utf8))
     }
 
     private static func displaySession(_ agent: AgentSessionSummary) -> String {

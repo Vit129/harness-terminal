@@ -68,14 +68,18 @@ final class AgentListFormatterTests: XCTestCase {
             summary(session: "alpha", waiting: true),
             summary(session: "beta", kind: .codex, activity: .idle),
         ]
-        let json = try AgentListFormatter.json(agents)
+        // list-agents --json now encodes the summaries directly through the shared formatter.
+        let json = try JSONOutputFormatter.encode(agents)
 
-        // Valid JSON array.
+        // Valid JSON array, compact (single line) by default.
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8))
         XCTAssertTrue(object is [Any])
+        XCTAssertFalse(json.contains("\n"), "compact JSON by default")
 
-        // Decodes back to the same value via the matching decoder.
-        let decoded = try AgentListFormatter.decodeJSON(json)
+        // Decodes back to the same value (matching the encoder's ISO-8601 date strategy).
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode([AgentSessionSummary].self, from: Data(json.utf8))
         XCTAssertEqual(decoded, agents)
     }
 }

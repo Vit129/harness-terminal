@@ -13,13 +13,17 @@ struct HarnessCLI {
         do {
             switch command {
             case "list-workspaces":
-                try printWorkspaces(client)
+                try printWorkspaces(args, client: client)
             case "list-surfaces":
-                try printSurfaces(client)
+                try printSurfaces(args, client: client)
             case "list-sessions":
-                try printSessions(client)
+                try printSessions(args, client: client)
             case "list-agents":
                 try printAgents(args, client: client)
+            case "doctor":
+                try runDoctor(args, client: client)   // exits with its own status
+            case "completions":
+                try printCompletions(args)
             case "list-windows":
                 try printWindows(args, client: client)
             case "list-panes":
@@ -140,9 +144,9 @@ struct HarnessCLI {
                 let code = try handleAttachWindow(args)
                 exit(code)
             case "daemon-stats":
-                try printDaemonStats(client)
+                try printDaemonStats(args, client: client)
             case "list-clients":
-                try printClients(client)
+                try printClients(args, client: client)
             case "detach-client":
                 try handleDetachClient(args, client: client)
             case "bind-key", "bind":
@@ -154,7 +158,7 @@ struct HarnessCLI {
             case "set-buffer":
                 try handleSetBuffer(args, client: client)
             case "list-buffers":
-                try handleListBuffers(client)
+                try handleListBuffers(args, client: client)
             case "show-buffer":
                 try handleShowBuffer(args, client: client)
             case "delete-buffer":
@@ -283,19 +287,23 @@ struct HarnessCLI {
         _ = try checkedRequest(client, .selectSession(workspaceID: workspaceID, sessionID: sessionID))
     }
 
-    static func printWorkspaces(_ client: DaemonClient) throws {
+    static func printWorkspaces(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .listWorkspaces)
         guard case let .workspaces(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            print("\(item.id)\t\(item.name)\t\(item.tabCount) sessions")
+        try emit(items, args) {
+            for item in items {
+                print("\(item.id)\t\(item.name)\t\(item.tabCount) sessions")
+            }
         }
     }
 
-    static func printSurfaces(_ client: DaemonClient) throws {
+    static func printSurfaces(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .listSurfaces)
         guard case let .surfaces(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            print("\(item.surfaceID)\t\(item.workspaceName)\t\(item.tabTitle)\t\(item.cwd)")
+        try emit(items, args) {
+            for item in items {
+                print("\(item.surfaceID)\t\(item.workspaceName)\t\(item.tabTitle)\t\(item.cwd)")
+            }
         }
     }
 
@@ -318,21 +326,21 @@ struct HarnessCLI {
         return snapshot
     }
 
-    static func printSessions(_ client: DaemonClient) throws {
-        try SnapshotQueryFormatter.sessions(snapshot(client)).forEach { print($0) }
+    static func printSessions(_ args: [String], client: DaemonClient) throws {
+        let snap = try snapshot(client)
+        try emit(SnapshotQueryFormatter.sessionRows(snap), args) {
+            SnapshotQueryFormatter.sessions(snap).forEach { print($0) }
+        }
     }
 
-    /// `list-agents [--waiting] [--json]` — every running agent with its
+    /// `list-agents [--waiting] [--json] [--pretty]` — every running agent with its
     /// workspace/session/tab/pane, surface id, name, state, and last-activity age.
-    /// `--waiting` filters to agents blocking on you; `--json` emits the
-    /// machine-readable shape.
+    /// `--waiting` filters to agents blocking on you; `--json` emits the machine-readable shape.
     static func printAgents(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .listAgents)
         guard case let .agents(items) = response else { throw DaemonClientError.unexpectedResponse }
         let filtered = args.contains("--waiting") ? items.filter(\.waiting) : items
-        if args.contains("--json") {
-            print(try AgentListFormatter.json(filtered))
-        } else {
+        try emit(filtered, args) {
             AgentListFormatter.text(filtered).forEach { print($0) }
         }
     }
@@ -342,9 +350,13 @@ struct HarnessCLI {
         let snap = try snapshot(client)
         if let target = flagValue(args, flag: "--session"),
            let session = resolveSession(snap, nameOrID: target) {
-            SnapshotQueryFormatter.windows(in: session).forEach { print($0) }
+            try emit(SnapshotQueryFormatter.windowRows(in: session), args) {
+                SnapshotQueryFormatter.windows(in: session).forEach { print($0) }
+            }
         } else {
-            SnapshotQueryFormatter.windows(snap).forEach { print($0) }
+            try emit(SnapshotQueryFormatter.windowRows(snap), args) {
+                SnapshotQueryFormatter.windows(snap).forEach { print($0) }
+            }
         }
     }
 
@@ -361,7 +373,9 @@ struct HarnessCLI {
             fputs("list-panes: no matching tab\n", stderr)
             exit(1)
         }
-        SnapshotQueryFormatter.panes(in: tab).forEach { print($0) }
+        try emit(SnapshotQueryFormatter.paneRows(in: tab), args) {
+            SnapshotQueryFormatter.panes(in: tab).forEach { print($0) }
+        }
     }
 
     /// `has-session --session <name|uuid>` — tmux scripting verb: exit 0 if it exists, 1 if not,
@@ -671,24 +685,28 @@ struct HarnessCLI {
         return bytes.isEmpty ? nil : bytes
     }
 
-    static func printDaemonStats(_ client: DaemonClient) throws {
+    static func printDaemonStats(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .daemonStats)
         guard case let .daemonStats(stats) = response else { throw DaemonClientError.unexpectedResponse }
-        print("pid: \(stats.pid)")
-        print(String(format: "uptime: %.0fs", stats.uptimeSeconds))
-        print("surfaces: \(stats.surfaceCount)")
-        print("scrollback: \(stats.totalScrollbackBytes) bytes")
-        print("clients: \(stats.clientCount)")
-        print("subscribers: \(stats.subscriberCount)")
-        print("snapshot-revision: \(stats.snapshotRevision)")
+        try emit(stats, args) {
+            print("pid: \(stats.pid)")
+            print(String(format: "uptime: %.0fs", stats.uptimeSeconds))
+            print("surfaces: \(stats.surfaceCount)")
+            print("scrollback: \(stats.totalScrollbackBytes) bytes")
+            print("clients: \(stats.clientCount)")
+            print("subscribers: \(stats.subscriberCount)")
+            print("snapshot-revision: \(stats.snapshotRevision)")
+        }
     }
 
-    static func printClients(_ client: DaemonClient) throws {
+    static func printClients(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .listClients)
         guard case let .clients(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            let attached = item.attachedSurfaceIDs.isEmpty ? "-" : item.attachedSurfaceIDs.joined(separator: ",")
-            print("\(item.id.uuidString)\t\(item.label)\t\(attached)\t\(item.connectedAt)")
+        try emit(items, args) {
+            for item in items {
+                let attached = item.attachedSurfaceIDs.isEmpty ? "-" : item.attachedSurfaceIDs.joined(separator: ",")
+                print("\(item.id.uuidString)\t\(item.label)\t\(attached)\t\(item.connectedAt)")
+            }
         }
     }
 
@@ -756,11 +774,13 @@ struct HarnessCLI {
         if case let .text(final) = response { print(final) }
     }
 
-    static func handleListBuffers(_ client: DaemonClient) throws {
+    static func handleListBuffers(_ args: [String], client: DaemonClient) throws {
         let response = try checkedRequest(client, .listBuffers)
         guard case let .buffers(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            print("\(item.name)\t\(item.byteCount)B\t\(item.preview)")
+        try emit(items, args) {
+            for item in items {
+                print("\(item.name)\t\(item.byteCount)B\t\(item.preview)")
+            }
         }
     }
 
@@ -961,9 +981,12 @@ struct HarnessCLI {
         if args.contains("-p") { scope = "pane" }
         let response = try checkedRequest(client, .showOptions(scope: scope))
         guard case let .options(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items.sorted(by: { $0.key < $1.key }) {
-            let prefix = item.target.map { "\(item.scope):\($0)" } ?? item.scope
-            print("\(prefix)\t\(item.key)\t\(item.value)")
+        let sorted = items.sorted(by: { $0.key < $1.key })
+        try emit(sorted, args) {
+            for item in sorted {
+                let prefix = item.target.map { "\(item.scope):\($0)" } ?? item.scope
+                print("\(prefix)\t\(item.key)\t\(item.value)")
+            }
         }
     }
 
@@ -989,8 +1012,10 @@ struct HarnessCLI {
         let sessionID = args.contains("-g") ? nil : flagValue(args, flag: "-s").flatMap(UUID.init(uuidString:))
         let response = try checkedRequest(client, .showEnvironment(sessionID: sessionID))
         guard case let .options(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            print("\(item.key)=\(item.value)")
+        try emit(items, args) {
+            for item in items {
+                print("\(item.key)=\(item.value)")
+            }
         }
     }
 
@@ -1026,9 +1051,11 @@ struct HarnessCLI {
         let event = flagValue(args, flag: "--event")
         let response = try checkedRequest(client, .listHooks(event: event))
         guard case let .hooks(items) = response else { throw DaemonClientError.unexpectedResponse }
-        for item in items {
-            let cond = item.condition.map { " if '\($0)'" } ?? ""
-            print("\(item.id.uuidString)\t\(item.event)\t\(item.commandSource)\(cond)")
+        try emit(items, args) {
+            for item in items {
+                let cond = item.condition.map { " if '\($0)'" } ?? ""
+                print("\(item.id.uuidString)\t\(item.event)\t\(item.commandSource)\(cond)")
+            }
         }
     }
 
@@ -1083,12 +1110,25 @@ struct HarnessCLI {
         } else {
             fputs("warning: HarnessDaemon binary not found; LaunchAgent not installed\n", stderr)
         }
-        // Shell completions (fish only for now — zsh/bash land in a follow-up).
+        // Shell completions. fish has a drop-in completions directory we can write directly
+        // (auto-loaded, no rc edit), so we always lay it down — it's inert unless fish is used.
+        // zsh/bash load completions from a sourced file, which is the user's shell config to own,
+        // so we print the exact one-liner for the detected login shell rather than editing their
+        // rc (matching gh/kubectl). `harness-cli completions <shell>` works for any shell, and the
+        // generated script is correct whether sourced/eval'd or placed on $fpath.
         do {
             let url = try ShellCompletionInstaller.installFishCompletion()
             print("fish-completion: \(url.path)")
         } catch {
             fputs("warning: fish completion install failed: \(error)\n", stderr)
+        }
+        switch ShellIntegration.Shell.detect(from: ProcessInfo.processInfo.environment["SHELL"] ?? "") {
+        case .zsh:
+            print("zsh-completion: add to ~/.zshrc (after compinit):  eval \"$(harness-cli completions zsh)\"")
+        case .bash:
+            print("bash-completion: add to ~/.bashrc:  eval \"$(harness-cli completions bash)\"")
+        case .fish, nil:
+            break   // fish is auto-installed above; an unknown shell can use `completions <shell>`.
         }
         print("Tip: run 'harness-cli install-shell-integration' to enable OSC 133 prompt marks, "
             + "the success/failure gutter, and prompt jumping.")
@@ -1120,17 +1160,64 @@ struct HarnessCLI {
         return response
     }
 
+    /// Shared output branch for list/show commands: emit `payload` as JSON when `--json` is
+    /// present (compact, or indented with `--pretty`), otherwise run the text closure. Keeps the
+    /// JSON-vs-text decision in one place so each handler stays a couple of lines.
+    static func emit<T: Encodable>(_ payload: T, _ args: [String], text: () -> Void) throws {
+        if args.contains("--json") {
+            print(try JSONOutputFormatter.encode(payload, pretty: args.contains("--pretty")))
+        } else {
+            text()
+        }
+    }
+
+    /// `doctor [--json] [--pretty]` — diagnose the daemon, control socket, paths, and integrations.
+    /// Exits nonzero only on a clear failure (a misconfiguration or security issue); warnings
+    /// (daemon not running, optional integrations absent) keep exit 0.
+    static func runDoctor(_ args: [String], client: DaemonClient) throws {
+        var daemonReachable = false
+        if let response = try? client.request(.ping, timeout: 0.3), case .pong = response {
+            daemonReachable = true
+        }
+        let report = DoctorRunner.run(daemonReachable: daemonReachable, cliPath: resolvedCLIPath())
+        if args.contains("--json") {
+            print(try JSONOutputFormatter.encode(report, pretty: args.contains("--pretty")))
+        } else {
+            report.text().forEach { print($0) }
+        }
+        exit(report.exitCode)
+    }
+
+    /// `completions <zsh|fish|bash>` — print the static completion script for `shell` to stdout.
+    static func printCompletions(_ args: [String]) throws {
+        let positional = Array(args.dropFirst()).first { !$0.hasPrefix("-") }
+        guard let raw = positional, let shell = ShellIntegration.Shell(rawValue: raw) else {
+            fputs("Usage: harness-cli completions <zsh|fish|bash>\n", stderr)
+            exit(1)
+        }
+        print(CompletionGenerator.script(for: shell))
+    }
+
+    /// The running executable's path for `doctor` to report (the real binary, not `$0`'s spelling).
+    static func resolvedCLIPath() -> String {
+        Bundle.main.executablePath ?? CommandLine.arguments.first ?? "harness-cli"
+    }
+
     static func printUsage() {
         print("""
         harness-cli — control Harness terminal sessions
 
+        List/show commands accept [--json] [--pretty] (compact JSON by default; --pretty indents).
+
         Commands:
-          list-workspaces
-          list-surfaces
-          list-sessions
-          list-windows [--session <name|uuid>]
-          list-panes [--tab <uuid>]
-          list-agents [--waiting] [--json]            (running agents: state, age, surface)
+          doctor [--json]                             (diagnose daemon, socket, paths, integrations)
+          completions <zsh|fish|bash>                 (print a shell completion script to stdout)
+          list-workspaces [--json] [--pretty]
+          list-surfaces [--json] [--pretty]
+          list-sessions [--json] [--pretty]
+          list-windows [--session <name|uuid>] [--json] [--pretty]
+          list-panes [--tab <uuid>] [--json] [--pretty]
+          list-agents [--waiting] [--json] [--pretty] (running agents: state, age, surface)
           has-session --session <name|uuid>           (exit 0 if it exists, else 1)
           list-commands
           get-snapshot
@@ -1166,14 +1253,14 @@ struct HarnessCLI {
           install-shell-integration [bash|zsh|fish|all]  (OSC 133 prompt marks + gutter)
           attach --surface <uuid> [--detach-keys "C-a d"]
           notify --surface <uuid> [--title t] [--body b] [--from-hook]
-          daemon-stats
-          list-clients
+          daemon-stats [--json] [--pretty]
+          list-clients [--json] [--pretty]
           detach-client --client <uuid>
           bind-key [-T <table>] <spec> <command...>
           unbind-key [-T <table>] <spec>
           list-keys [-T <table>]
           set-buffer (--data <text> | --stdin) [--name <name>]
-          list-buffers
+          list-buffers [--json] [--pretty]
           show-buffer [--name <name>]
           delete-buffer --name <name>
           paste-buffer --surface <uuid> [--name <name>]
@@ -1186,12 +1273,12 @@ struct HarnessCLI {
           respawn-pane --surface <id> [--clear-history]
           select-pane --pane <uuid> --dir L|R|U|D
           set-option [-g|-w|-s|-t|-p] [-T target] <key> <value>
-          show-options [-g|-w|-s|-t|-p]
+          show-options [-g|-w|-s|-t|-p] [--json] [--pretty]
           set-environment [-g] [-u] [-s <sessionID>] <key> [value]
-          show-environment [-g] [-s <sessionID>]
+          show-environment [-g] [-s <sessionID>] [--json] [--pretty]
           bind-hook <event> <command...> [--if <format>]
           unbind-hook --id <uuid>
-          list-hooks [--event <event>]
+          list-hooks [--event <event>] [--json] [--pretty]
           display-message <format>
           install
           ping
