@@ -100,11 +100,18 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     private var columns: Int = 80
     private var rows: Int = 24
-    private var renderScheduled = false
     /// The last frame built on the plain live path (no scrollback/selection/copy-mode/IME), kept
     /// so the next plain render can reuse unchanged rows via the engine's dirty-row damage. Set to
     /// nil whenever a non-plain frame is drawn or the appearance changes, forcing a full rebuild.
     private var lastPlainFrame: TerminalFrame?
+    /// Coalesces renders to display cadence: `scheduleRender` marks dirty and wakes the link, which
+    /// presents at most one frame per tick (resize/first paint/2026-timeout force immediately). Wired
+    /// to `renderNow` in `init`.
+    private lazy var scheduler = RenderScheduler(render: { [weak self] in self?.renderNow() })
+    /// Main-thread display-cadence source (macOS 14+ `NSView.displayLink(target:selector:)`). Created
+    /// when the view enters a window, paused while idle, invalidated on detach. nil when not in a
+    /// window. Named `renderLink` so it doesn't shadow the `NSView.displayLink(...)` factory.
+    private var renderLink: CADisplayLink?
     /// True once the grid has been sized from a real layout — the first sizing commits
     /// immediately (so the terminal opens at the right size); later changes coalesce.
     private var hasSizedGrid = false
@@ -175,10 +182,13 @@ public final class HarnessTerminalSurfaceView: NSView {
         // is exactly when this chunk leaves `synchronizedOutput` false. A timeout guards a
         // program that never closes the update.
         if emulator.modes.synchronizedOutput {
+            scheduler.setSynchronized(true) // hold the display tick mid-batch (no tearing)
             armSyncTimeout()
         } else {
             syncTimeout?.cancel(); syncTimeout = nil
-            scheduleRender()
+            // Releasing 2026 marks dirty; the batched frame presents atomically at the next tick.
+            scheduler.setSynchronized(false)
+            wakeDisplayLink()
         }
     }
 
@@ -186,7 +196,9 @@ public final class HarnessTerminalSurfaceView: NSView {
         guard syncTimeout == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             self?.syncTimeout = nil
-            self?.scheduleRender() // force-present even if the program left 2026 set
+            // Safety valve: a program that set 2026 but never cleared it must not freeze the
+            // display, so force-present past the hold.
+            self?.scheduler.forceRender()
         }
         syncTimeout = work
         DispatchQueue.main.asyncAfter(deadline: .now() + syncTimeoutInterval, execute: work)
@@ -386,10 +398,17 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     // MARK: - Layout & rendering
 
+    // No deinit teardown for the display link: a CADisplayLink strongly retains its target, so the
+    // link keeps this view alive until `stopDisplayLink()` calls `invalidate()` (which also nils
+    // `renderLink`). deinit therefore only runs once the link is already gone — accessing the
+    // main-actor-isolated `renderLink` from a nonisolated deinit would also be a Swift 6 error.
+    // `viewDidMoveToWindow(nil)` is the teardown hook (AppKit always calls it before dealloc).
+
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
             buildRenderer() // pick up the real backing scale
+            startDisplayLink()
             updateGridSize()
             restartBlinkTimer()
             scheduleRender()
@@ -400,7 +419,26 @@ public final class HarnessTerminalSurfaceView: NSView {
             // `[weak self]`, so this is the teardown hook (no retain cycle either way).
             blinkTimer?.invalidate()
             blinkTimer = nil
+            stopDisplayLink()
         }
+    }
+
+    /// Drive renders at the display's refresh rate while in a window. The link starts paused;
+    /// `scheduleRender` wakes it, and `displayTick` re-pauses it once the screen is up to date, so an
+    /// idle terminal costs nothing. macOS 14+ `NSView.displayLink` is the main-thread display source.
+    private func startDisplayLink() {
+        guard renderLink == nil else { return }
+        let link = displayLink(target: self, selector: #selector(displayTick))
+        link.isPaused = true
+        link.add(to: .current, forMode: .common)
+        renderLink = link
+        scheduler.start()
+    }
+
+    private func stopDisplayLink() {
+        renderLink?.invalidate()
+        renderLink = nil
+        scheduler.stop()
     }
 
     public override func viewDidChangeBackingProperties() {
@@ -419,7 +457,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         updateGridSize()
-        renderNow()
+        scheduler.forceRender() // synchronous, in-transaction repaint: flicker-free resize
         CATransaction.commit()
     }
 
@@ -475,16 +513,30 @@ public final class HarnessTerminalSurfaceView: NSView {
         rows = newRows
         emulator.resize(cols: cols, rows: newRows)
         onResize?(cols, newRows)
-        renderNow()
+        scheduler.forceRender() // settle the new size on screen at once (prompt first paint / resize)
     }
 
+    /// Mark the surface dirty and ensure the display link is running to present it. Every code path
+    /// that changes what's on screen (PTY output, blink, focus, selection, copy mode, IME, …) funnels
+    /// here, so a burst coalesces to one present at the next display tick instead of one async render
+    /// per call. Before the view is in a window (no link yet) this is just the dirty mark; the first
+    /// `viewDidMoveToWindow`/`commitGridSize` paints via the synchronous force path.
     private func scheduleRender() {
-        guard !renderScheduled else { return }
-        renderScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            self?.renderScheduled = false
-            self?.renderNow()
-        }
+        scheduler.markDirty()
+        wakeDisplayLink()
+    }
+
+    /// Resume the display link so a pending paint reaches the screen. No-op until the link exists
+    /// (created on window attach).
+    private func wakeDisplayLink() {
+        renderLink?.isPaused = false
+    }
+
+    /// Display-cadence tick: present at most one coalesced frame, then pause the link when there's
+    /// nothing left to draw so a quiet terminal doesn't wake the CPU every refresh.
+    @objc private func displayTick() {
+        scheduler.tick()
+        if !scheduler.hasPendingWork { renderLink?.isPaused = true }
     }
 
     private func renderNow() {
