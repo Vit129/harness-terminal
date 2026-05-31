@@ -36,7 +36,7 @@ Trigger: the prefix key (default `ctrl-a`, configurable via `settings.prefixKey`
 | `[` | `copy-mode` |
 | `d` | `detach-client` |
 | `?` | `show-cheatsheet` |
-| `r` | `source-config` (re-import Ghostty) |
+| `r` | `source-config` (re-import terminal config) |
 | `:` | open the command prompt |
 
 ## Copy-mode key table

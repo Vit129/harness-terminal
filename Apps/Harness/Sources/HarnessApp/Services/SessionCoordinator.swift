@@ -164,8 +164,12 @@ final class SessionCoordinator: NSObject {
                     else { continue }
                     let key = "\(surfaceID.uuidString)|\(text)"
                     guard !pushedNotificationKeys.contains(key) else { continue }
-                    pushedNotificationKeys.insert(key)
+                    // Always surface the waiting ring; but don't fire a banner for the pane you're
+                    // actively watching — its output + the ring already show it. Defer (don't mark
+                    // pushed) so it still fires once you look away, matching the activity path.
                     terminalHosts.host(for: surfaceID)?.showsWaitingRing = true
+                    if NSApp.isActive, surfaceID == activeSurfaceID { continue }
+                    pushedNotificationKeys.insert(key)
                     let agentLabel = tab.agent?.kind.displayName ?? "Harness"
                     let title = "\(agentLabel) · \(tab.title.isEmpty ? "Terminal" : tab.title)"
                     deliverAgentAlert(title: title, body: text)
@@ -1098,12 +1102,21 @@ final class SessionCoordinator: NSObject {
     }
 
     func handleNotification(for surfaceID: SurfaceID, title: String, body: String) {
+        let key = "\(surfaceID.uuidString)|\(body)"
+        // Already pinged for this exact surface+message and it's still pending: just re-assert the
+        // ring and return. A program spamming the bell (body is the constant "Bell") would
+        // otherwise drive a full daemon notify + snapshot round-trip per `\a` on the main thread.
+        // The key is cleared once the tab stops being `.waiting` (see `pushNewRemoteNotifications`),
+        // so a genuinely new alert after dismissal still fires.
+        guard !pushedNotificationKeys.contains(key) else {
+            terminalHosts.host(for: surfaceID)?.showsWaitingRing = true
+            return
+        }
         requestDaemon(.notify(
             surfaceID: surfaceID.uuidString,
             title: title,
             body: body
         ))
-        let key = "\(surfaceID.uuidString)|\(body)"
         pushedNotificationKeys.insert(key)
         terminalHosts.host(for: surfaceID)?.showsWaitingRing = true
         if NSApp.isActive == false {

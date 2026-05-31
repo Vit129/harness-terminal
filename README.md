@@ -6,7 +6,7 @@ The native macOS terminal that keeps your sessions running and tells you the mom
 
 Every pane renders on Harness's own GPU engine. Your splits and sessions live in a background daemon, so they survive quitting the app and you can drive or attach to them from the command line — even over SSH. And Harness watches the agents you run inside it (Claude Code, Codex, Cursor, and more), so an approval prompt never sits unseen behind another tab.
 
-One app, no external dependencies. `swift build` resolves zero packages.
+One self-contained app. The terminal engine, daemon, and CLI are all first-party Swift; the only external dependency is Sparkle (the macOS auto-update framework, GUI-only).
 
 ## Download
 
@@ -146,7 +146,7 @@ make dmg                       # Harness.dmg, drag-to-Applications install
 
 - [Architecture](docs/ARCHITECTURE.md) — daemon, terminal engine, IPC, compositor
 - [Experience modes](docs/MODES.md) — Plain / Persistent / Full / Agent
-- [Sessions & panes guide](docs/TMUX_GUIDE.md) — prefix, panes, sessions, copy mode, attach from anywhere
+- [Sessions & panes guide](docs/MULTIPLEXER_GUIDE.md) — prefix, panes, sessions, copy mode, attach from anywhere
 - [Migration](docs/MIGRATION.md) — bringing your config and habits across
 - [Keybindings](docs/KEYBINDINGS.md) · [Commands](docs/COMMANDS.md) · [Shell integration](docs/shell-integration/README.md) · [Agent hooks](docs/agent-hooks/README.md)
 - [Reliability & security](docs/RELIABILITY.md)

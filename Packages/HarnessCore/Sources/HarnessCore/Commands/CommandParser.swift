@@ -179,7 +179,7 @@ public enum CommandParser {
             // Accept `select-window 3`, `-t :3`, or `-t session:3` / `-t session:!`.
             let targetRaw = stringValue(for: "-t", in: tokens)
                 ?? tokens.first(where: { ($0.first?.isNumber ?? false) || $0.contains(":") })
-                ?? tokens.last
+                ?? tokens.first(where: { !$0.hasPrefix("-") }) // never feed a flag into TargetSpec.parse
             let spec = targetRaw.map(TargetSpec.parse) ?? TargetSpec()
             if case let .byIndex(n)? = spec.window {
                 return spec.session != nil ? .targeted(spec, .selectWindow(index: n)) : .selectWindow(index: n)

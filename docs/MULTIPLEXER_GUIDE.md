@@ -1,36 +1,34 @@
-# Harness as a terminal multiplexer — the tmux guide
+# Harness as a terminal multiplexer
 
-Harness is a native terminal multiplexer. If you've used **tmux**, you already know how to drive
-it: same muscle memory (a prefix key, splits, windows, copy mode, detach/attach, a `:` command
-line), the same verb vocabulary (`split-window`, `new-window`, `kill-pane`, `copy-mode`…). The
-difference is that it's **Harness-owned and self-contained** — there is no tmux, libtmux, or
-any other dependency under the hood. The daemon, the session model, the compositor, and the VT
-engine are all first-party Swift.
+Harness is a native terminal multiplexer: a prefix key, splits, tabs, sessions, copy mode,
+detach/attach, and a `:` command line — all driven by one shared verb vocabulary
+(`split-window`, `new-window`, `kill-pane`, `copy-mode`…). It is **self-contained**: the daemon,
+the session model, the compositor, and the VT engine are all first-party Swift, with no external
+runtime under the hood.
 
 This guide is the narrative "how it works + shortcuts" tour. For exhaustive references see:
 
 - [KEYBINDINGS.md](KEYBINDINGS.md) — every default binding + the key-spec syntax.
 - [COMMANDS.md](COMMANDS.md) — the full command grammar.
-- [MIGRATION.md](MIGRATION.md) — a tested path for moving a tmux setup over.
-- [MODES.md](MODES.md) — Plain / Persistent / Multiplexer / Agent experience modes.
+- [MIGRATION.md](MIGRATION.md) — moving an existing terminal/multiplexer setup over.
+- [MODES.md](MODES.md) — Plain / Persistent / Full / Agent experience modes.
 
 ---
 
 ## 1. The mental model
 
-Harness nests sessions a little differently from tmux. The hierarchy, top to bottom:
+The hierarchy, top to bottom:
 
-| Harness term | tmux analog | What it is |
-|---|---|---|
-| **Workspace** | *(server)* | A named group of sessions (one active workspace at a time). |
-| **Session** | `session` | A sidebar entry with its own tab bar. Survives quit if pinned/kept. |
-| **Tab** | `window` | One tab in a session: title, cwd, git branch, agent, and a split tree. |
-| **Pane** | `pane` | A single terminal (a leaf in the tab's split tree). |
-| **Surface** | *(pane's pty)* | The daemon-owned PTY behind a pane (`$HARNESS_SURFACE`). |
+| Term | What it is |
+|---|---|
+| **Workspace** | A named group of sessions (one active workspace at a time). |
+| **Session** | A sidebar entry with its own tab bar. Survives quit if pinned/kept. |
+| **Tab** | One tab in a session: title, cwd, git branch, agent, and a split tree. |
+| **Pane** | A single terminal (a leaf in the tab's split tree). |
+| **Surface** | The daemon-owned PTY behind a pane (`$HARNESS_SURFACE`). |
 
-So a Harness **tab is a tmux window**, and a Harness **session** groups tabs the way the sidebar
-shows them. The terms "tab" and "window" are used interchangeably in the verbs (`new-window`
-makes a tab; the `next-window`/`previous-window` verbs move between tabs).
+The terms "tab" and "window" are used interchangeably in the verbs (`new-window` makes a tab; the
+`next-window`/`previous-window` verbs move between tabs).
 
 **Who owns what:** a background **daemon** (`HarnessDaemon`, kept alive by launchd) owns all
 session truth and every PTY. The app and `harness-cli` are just clients — so your shells keep
@@ -40,15 +38,15 @@ running when the app quits, across crashes, and you can reattach from another wi
 
 ## 2. The prefix key
 
-Like tmux, most multiplexer commands start with a **prefix** keystroke, then a second key.
+Most multiplexer commands start with a **prefix** keystroke, then a second key.
 
-- **Default prefix: `Ctrl-A`** (tmux ships `Ctrl-B`; Harness picks the screen/`C-a` convention).
+- **Default prefix: `Ctrl-A`** (the screen/`C-a` convention).
 - Change it in **Settings ▸ Keys** (or `settings.prefixKey`); set it empty to disable the prefix
   entirely (then drive everything from the `:` prompt, the `Cmd-K` palette, and macOS shortcuts).
 - Press **`prefix ?`** any time for a live cheatsheet generated from your current bindings.
 
-> The prefix layer only appears in modes that show tmux chrome (Tmux/Agent modes, or when you
-> turn `tmuxControlsEnabled` on). In Plain mode you lean on the macOS `Cmd` shortcuts instead.
+> The prefix layer only appears in modes that show multiplexer chrome (Full/Agent modes, or when
+> you turn `tmuxControlsEnabled` on). In Plain mode you lean on the macOS `Cmd` shortcuts instead.
 
 Everything below that says "`prefix X`" means: tap the prefix, release, then tap `X`.
 
@@ -102,8 +100,8 @@ readable without manual renaming.
 
 ## 5. Sessions and workspaces
 
-Sessions are the sidebar rows; each has its own tab strip. Unlike tmux, **sessions are always
-visible** in the sidebar rather than something you "attach" to one at a time.
+Sessions are the sidebar rows; each has its own tab strip. **Sessions are always visible** in the
+sidebar rather than something you "attach" to one at a time.
 
 - New session / workspace from the sidebar `+`, the palette, or `harness-cli new-session` /
   `new-workspace`.
@@ -116,7 +114,7 @@ visible** in the sidebar rather than something you "attach" to one at a time.
 
 ## 6. Copy mode (scrollback, selection, search)
 
-Enter with **`prefix [`** (tmux-style). Copy mode is modal and vim-flavored (`mode-keys vi`):
+Enter with **`prefix [`**. Copy mode is modal and vim-flavored (`mode-keys vi`):
 
 | Keys | Action |
 |---|---|
@@ -144,7 +142,7 @@ Yanks land in named **paste buffers** (`harness-cli set-buffer` / `list-buffers`
 Your shells live in the daemon, so a pane can be "released" and re-grabbed without killing
 anything.
 
-- **`prefix d`** detaches the calling client (tmux's detach).
+- **`prefix d`** detaches the calling client.
 - In the app: **View ▸ Detach Pane** releases the active pane — it dims with a
   *"Pane released — click to re-grab"* overlay and stops updating while the PTY keeps running.
   **View ▸ Reattach Pane** (or a click on the overlay) re-grabs it and replays scrollback.
@@ -175,8 +173,8 @@ Anything you can bind, you can type.
 ## 9. Attach over ssh — the compositor
 
 `harness-cli attach-window` renders a tab's **entire split layout** — every pane, borders,
-the status line, the active cursor — into any plain terminal, including over ssh. This is the
-tmux "attach to my session from anywhere" experience, Harness-native and client-side:
+the status line, the active cursor — into any plain terminal, including over ssh. It's
+Harness-native and fully client-side:
 
 ```bash
 harness-cli attach-window                       # the active tab
@@ -187,8 +185,7 @@ harness-cli attach --surface <uuid>               # a single pane only
 Inside the compositor the prefix (`Ctrl-A`) drives: `%` / `"` split, `x` kill, `z` zoom,
 **`hjkl`** select pane (note: `hjkl`, not arrows), `o` / `;` cycle, `c` new tab, `n` / `p` tab,
 `d` detach. Copy-mode and SGR mouse work too. Detach keys default to `Ctrl-A d`; override with
-`--detach-keys`. There's also tmux **control mode** (`harness-cli control-mode` / `-CC`) for
-programmatic clients.
+`--detach-keys`. There's also a programmatic **control mode** (`harness-cli control-mode` / `-CC`).
 
 ---
 
@@ -211,7 +208,7 @@ harness-cli install-shell-integration all          # bash + zsh + fish
 ```
 
 Restart your shell (or open a new pane). The snippet is a no-op outside a Harness pane — it gates
-on `$HARNESS` (the `$TMUX` analog the daemon exports into every pane). Details:
+on `$HARNESS` (exported by the daemon into every pane). Details:
 [shell-integration/README.md](shell-integration/README.md).
 
 ---
@@ -243,32 +240,12 @@ automatically and notify via Harness's activity path, so there's nothing to inst
 | `Cmd-Shift-N` | New workspace | | `Cmd-+` / `-` / `0` | Font bigger / smaller / reset |
 | `Cmd-Shift-U` | Jump to next notification | | `prefix ?` | Cheatsheet |
 
----
-
-## 13. Coming from tmux — quick translation
-
-| You'd type in tmux | In Harness |
-|---|---|
-| `tmux` (start) | Just open Harness, or `harness-cli new-session` |
-| `prefix c` / `,` / `&` | Same (new / rename / kill tab) |
-| `prefix %` / `"` | Same (splits) |
-| `prefix o` / `q` / `z` / `x` | Same (cycle / numbers / zoom / kill) |
-| `prefix [` then vi keys | Same (copy mode) |
-| `prefix d` | Same (detach) — or View ▸ Detach Pane |
-| `prefix :` command-prompt | Same `:` prompt |
-| `tmux a` (attach) | `harness-cli attach-window` (full layout, incl. ssh) |
-| `tmux send-keys` | `harness-cli send-keys --surface <id> --keys "…"` |
-| `tmux capture-pane` | `harness-cli capture-pane --surface <id>` (`-S/-E/-e/-J`) |
-| `$TMUX` set inside a pane | `$HARNESS` (and `$HARNESS_SURFACE` for the pane id) |
-
-Default prefix differs (`Ctrl-A` vs tmux's `Ctrl-B`) — change it in Settings if you want `Ctrl-B`.
-A few tmux concepts (grouped sessions, some session-lifecycle options) are deliberately left out
-where they clash with Harness's model. A tested migration walkthrough is in
-[MIGRATION.md](MIGRATION.md).
+> Coming from another multiplexer? [MIGRATION.md](MIGRATION.md) has a key-by-key translation table
+> and a tested path for bringing your config and bindings over.
 
 ---
 
-## 14. One-screen cheat sheet
+## 13. One-screen cheat sheet
 
 ```
 PREFIX = Ctrl-A   (Settings ▸ Keys to change;  prefix ? = live cheatsheet)

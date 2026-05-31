@@ -17,9 +17,14 @@ final class SurfaceShellTracker {
     static let shared = SurfaceShellTracker()
 
     private var timer: DispatchSourceTimer?
-    private var surfaceToPID: [String: pid_t] = [:]
     private var lastReportedCwd: [String: String] = [:]
-    private var didLogShellMissingForSurface: Set<String> = []
+    /// Set while a background scan is in flight so ticks don't pile up — a proc-tree walk on a
+    /// loaded machine can exceed the 500ms interval, and stacking scans just wastes CPU.
+    private var scanning = false
+    /// Serial queue for the blocking `proc_listpids` / `sysctl(KERN_PROCARGS2)` / `proc_pidinfo`
+    /// syscalls. Kept off the main thread: scanning every process on a busy machine can take
+    /// many milliseconds, and doing it on `.main` every 500ms drops frames.
+    private static let scanQueue = DispatchQueue(label: "com.robert.harness.shell-tracker")
 
     private init() {}
 
@@ -46,58 +51,69 @@ final class SurfaceShellTracker {
     }
 
     private func tick() {
-        rebuildMappingIfStale()
+        guard !scanning else { return }
+        scanning = true
+        Self.scanQueue.async { [weak self] in
+            let cwds = Self.computeSurfaceCwds() // all blocking syscalls happen here, off-main
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.scanning = false
+                    self.applyCwds(cwds)
+                }
+            }
+        }
+    }
+
+    /// Apply a fresh surface→cwd scan on the main actor: forget dead surfaces and push every
+    /// changed cwd to the coordinator. Pure dictionary work — no syscalls, so it's cheap.
+    private func applyCwds(_ cwds: [String: String]) {
+        let live = Set(cwds.keys)
+        for surface in lastReportedCwd.keys where !live.contains(surface) {
+            lastReportedCwd.removeValue(forKey: surface)
+        }
         let coordinator = SessionCoordinator.shared
-        for (surfaceID, pid) in surfaceToPID {
-            guard let cwd = Self.cwd(for: pid) else { continue }
-            if lastReportedCwd[surfaceID] == cwd { continue }
+        for (surfaceID, cwd) in cwds where lastReportedCwd[surfaceID] != cwd {
             lastReportedCwd[surfaceID] = cwd
             guard let uuid = UUID(uuidString: surfaceID) else { continue }
             coordinator.surfaceShellTrackerDidUpdateCwd(uuid, cwd: cwd)
         }
     }
 
-    /// Refreshes `surfaceToPID` based on the current process tree.
+    // MARK: - Process introspection (pure syscalls; run off the main actor)
+
+    /// Walk the app's process subtree, map each `HARNESS_SURFACE` to the deepest readable shell
+    /// PID, and read that PID's cwd. Returns surface-id → cwd for every live surface.
     ///
-    /// `HARNESS_SURFACE` propagates through `/usr/bin/login` → `/usr/bin/env`
-    /// → the user's shell — so multiple PIDs in the chain carry the same
-    /// surface ID. We want the *deepest* (most-descendant) one because the
-    /// outermost wrappers are typically setuid `login` processes whose cwds
-    /// macOS won't expose to a user-owned reader.
-    private func rebuildMappingIfStale() {
-        let tree = Self.processTree(rootedAt: getpid())
-        // Map surface ID → all candidate PIDs for that surface.
+    /// `HARNESS_SURFACE` propagates through `/usr/bin/login` → `/usr/bin/env` → the user's shell,
+    /// so multiple PIDs in the chain carry the same surface ID. We want the *deepest* one: the
+    /// outer wrappers are typically setuid `login` processes whose cwds macOS won't expose to a
+    /// user-owned reader.
+    private nonisolated static func computeSurfaceCwds() -> [String: String] {
+        let tree = processTree(rootedAt: getpid())
         var candidates: [String: [(pid: pid_t, depth: Int)]] = [:]
         for entry in tree {
-            guard let env = Self.environment(of: entry.pid),
+            guard let env = environment(of: entry.pid),
                   let surface = env["HARNESS_SURFACE"], !surface.isEmpty
             else { continue }
             candidates[surface, default: []].append((entry.pid, entry.depth))
         }
-        // Drop dead entries.
-        let liveSurfaces = Set(candidates.keys)
-        for surface in surfaceToPID.keys where !liveSurfaces.contains(surface) {
-            surfaceToPID.removeValue(forKey: surface)
-            lastReportedCwd.removeValue(forKey: surface)
-        }
-        // Pick the deepest PID per surface, preferring user-owned processes
-        // we can actually introspect.
+        var result: [String: String] = [:]
         for (surface, list) in candidates {
             let sorted = list.sorted { $0.depth > $1.depth }
-            // First try the deepest readable cwd; if no candidate yields one
-            // (e.g. the shell already exited), fall back to the deepest pid.
-            let chosen = sorted.first(where: { Self.cwd(for: $0.pid) != nil })?.pid
-                ?? sorted.first?.pid
-            if let chosen { surfaceToPID[surface] = chosen }
+            // Deepest PID that yields a readable cwd (skip wrappers we can't introspect).
+            if let cwd = sorted.lazy.compactMap({ cwd(for: $0.pid) }).first {
+                result[surface] = cwd
+            }
         }
+        return result
     }
 
-    // MARK: - Process introspection
 
     /// Returns every descendant of `root` along with its depth in the tree
     /// (root would be depth 0, immediate children depth 1, …). Used so we can
     /// prefer deeper PIDs when picking which process represents a surface.
-    private static func processTree(rootedAt root: pid_t) -> [(pid: pid_t, depth: Int)] {
+    private nonisolated static func processTree(rootedAt root: pid_t) -> [(pid: pid_t, depth: Int)] {
         let count = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
         guard count > 0 else { return [] }
         let bufferCount = Int(count) / MemoryLayout<pid_t>.size
@@ -130,7 +146,7 @@ final class SurfaceShellTracker {
         return result
     }
 
-    private static func parentPID(_ pid: pid_t) -> pid_t {
+    private nonisolated static func parentPID(_ pid: pid_t) -> pid_t {
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         let bytes = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
@@ -139,7 +155,7 @@ final class SurfaceShellTracker {
     }
 
     /// Read another process's working directory via `proc_pidinfo`.
-    static func cwd(for pid: pid_t) -> String? {
+    nonisolated static func cwd(for pid: pid_t) -> String? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         let bytes = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size)
@@ -153,7 +169,7 @@ final class SurfaceShellTracker {
 
     /// Read another process's argv + envp via `sysctl(KERN_PROCARGS2)`.
     /// Returns the env dictionary (or `nil` on failure / permission denial).
-    static func environment(of pid: pid_t) -> [String: String]? {
+    nonisolated static func environment(of pid: pid_t) -> [String: String]? {
         var size = 0
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }

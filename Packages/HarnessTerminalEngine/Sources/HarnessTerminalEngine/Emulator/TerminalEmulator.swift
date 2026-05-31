@@ -62,6 +62,10 @@ public final class TerminalEmulator: VTParserHandler {
     /// control keys (format/dims); later chunks append payload until `m=0`.
     private var kittyPending: [Int: (command: KittyGraphicsCommand, payload: [UInt8])] = [:]
     private let maxKittyPendingBytes = 32 << 20
+    /// The per-image byte cap bounds one in-flight transfer, but image ids are free integers —
+    /// a hostile stream can open many distinct ids that each send `m=1` and never finish. Cap the
+    /// count of concurrently-reassembling images so the dictionary can't grow without bound.
+    private let maxKittyPendingImages = 64
 
     public init(cols: Int, rows: Int) {
         let c = max(1, cols)
@@ -252,6 +256,9 @@ public final class TerminalEmulator: VTParserHandler {
                 pending.payload.append(contentsOf: cmd.payload)
                 kittyPending[key] = pending
             } else {
+                // New in-flight image: drop all pending reassembly if we're at the id cap, so a
+                // flood of never-finished `m=1` chunks under distinct ids can't grow the map.
+                if kittyPending.count >= maxKittyPendingImages { kittyPending.removeAll() }
                 kittyPending[key] = (cmd, cmd.payload) // first chunk holds the control keys
             }
             return
@@ -421,13 +428,16 @@ public final class TerminalEmulator: VTParserHandler {
         return params[index]
     }
 
+    // CNL/CPL are cursor moves, not scrolls: ECMA-48 / xterm clamp them to the page exactly
+    // like CUD/CUU (which `moveCursorRelative` already does), so they never scroll the region.
+    // The old loop-of-lineFeed form both diverged from that and let `\e[65535E` spin 65k scrolls.
     private func cursorNextLine(_ n: Int) {
-        for _ in 0 ..< n { current.lineFeed() }
+        current.moveCursorRelative(dRow: max(1, n), dCol: 0)
         current.carriageReturn()
     }
 
     private func cursorPrevLine(_ n: Int) {
-        for _ in 0 ..< n { current.reverseLineFeed() }
+        current.moveCursorRelative(dRow: -max(1, n), dCol: 0)
         current.carriageReturn()
     }
 

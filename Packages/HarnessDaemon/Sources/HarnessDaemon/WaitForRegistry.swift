@@ -12,7 +12,7 @@ import Foundation
 /// like the rest of `DaemonServer`, so no internal lock is needed.
 final class WaitForRegistry {
     private struct Channel {
-        var locked = false
+        var lockHolder: Int32?         // fd currently holding the lock (nil = free)
         var waiters: [Int32] = []      // fds blocked on `wait`
         var lockWaiters: [Int32] = []  // fds blocked on `lock` while held
     }
@@ -34,31 +34,46 @@ final class WaitForRegistry {
     /// `wait-for -L <channel>`: acquire the lock. Returns true if acquired now (reply
     /// immediately), false if the channel is held (fd registered; reply deferred to `unlock`).
     func lock(channel: String, fd: Int32) -> Bool {
-        if channels[channel]?.locked == true {
+        if channels[channel]?.lockHolder != nil {
             channels[channel, default: Channel()].lockWaiters.append(fd)
             return false
         }
-        channels[channel, default: Channel()].locked = true
+        channels[channel, default: Channel()].lockHolder = fd
         return true
     }
 
     /// `wait-for -U <channel>`: release the lock. If a `lock`er is queued, the channel stays
     /// locked and is granted to it — its fd is returned so the caller sends its deferred reply.
     func unlock(channel: String) -> Int32? {
-        guard channels[channel]?.locked == true else { return nil }
+        guard channels[channel]?.lockHolder != nil else { return nil }
         if let next = channels[channel]?.lockWaiters.first {
             channels[channel]?.lockWaiters.removeFirst()
+            channels[channel]?.lockHolder = next
             return next // stays locked, handed to `next`
         }
-        channels[channel]?.locked = false
+        channels[channel]?.lockHolder = nil
         return nil
     }
 
-    /// Drop a disconnected client's fd from every channel (called on socket teardown).
-    func remove(fd: Int32) {
+    /// Drop a disconnected client's fd from every channel (called on socket teardown). If the
+    /// client held a lock, release it and hand it to the next queued `lock`er — otherwise a
+    /// holder that crashes/detaches would wedge the channel forever, parking every later locker.
+    /// Returns the fds newly granted the lock so the caller sends each its deferred reply.
+    func remove(fd: Int32) -> [Int32] {
+        var granted: [Int32] = []
         for key in channels.keys {
             channels[key]?.waiters.removeAll { $0 == fd }
             channels[key]?.lockWaiters.removeAll { $0 == fd }
+            if channels[key]?.lockHolder == fd {
+                if let next = channels[key]?.lockWaiters.first {
+                    channels[key]?.lockWaiters.removeFirst()
+                    channels[key]?.lockHolder = next
+                    granted.append(next)
+                } else {
+                    channels[key]?.lockHolder = nil
+                }
+            }
         }
+        return granted
     }
 }

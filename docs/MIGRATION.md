@@ -28,13 +28,13 @@ Import happens automatically on first run and is re-applied when the source conf
 fingerprint changes. Re-import manually any time:
 
 - **Settings → Appearance → Reset to defaults** (re-seeds from the imported config), or
-- the `source-config` command (prefix `r` in Multiplexer mode).
+- the `source-config` command (prefix `r` in Full Terminal mode).
 
 Comment lines start with `#`; `#` is **not** stripped from values (so hex colors survive).
 
 ## From tmux
 
-Switch to **Multiplexer** mode (Settings → Appearance → Experience). Your muscle
+Switch to **Full Terminal** mode (Settings → Terminal → Experience). Your muscle
 memory works immediately:
 
 - **Prefix key** `Ctrl-A` (change in Settings → Keys, or blank it to disable).
@@ -45,7 +45,25 @@ memory works immediately:
 - **Detach / reattach** — `harness-cli attach` (one pane) or `harness-cli attach-window` (the
   full split layout, even over ssh); control mode via `harness-cli -CC`.
 
-See the [multiplexer guide](TMUX_GUIDE.md) for the full command and shortcut tour.
+See the [multiplexer guide](MULTIPLEXER_GUIDE.md) for the full command and shortcut tour.
+
+### Key-by-key translation
+
+| You'd type in tmux | In Harness |
+|---|---|
+| `tmux` (start) | Just open Harness, or `harness-cli new-session` |
+| `prefix c` / `,` / `&` | Same (new / rename / kill tab) |
+| `prefix %` / `"` | Same (splits) |
+| `prefix o` / `q` / `z` / `x` | Same (cycle / numbers / zoom / kill) |
+| `prefix [` then vi keys | Same (copy mode) |
+| `prefix d` | Same (detach) — or View ▸ Detach Pane |
+| `prefix :` command-prompt | Same `:` prompt |
+| `tmux a` (attach) | `harness-cli attach-window` (full layout, incl. ssh) |
+| `tmux send-keys` | `harness-cli send-keys --surface <id> --keys "…"` |
+| `tmux capture-pane` | `harness-cli capture-pane --surface <id>` (`-S/-E/-e/-J`) |
+| `$TMUX` set inside a pane | `$HARNESS` (and `$HARNESS_SURFACE` for the pane id) |
+
+The default prefix differs (`Ctrl-A` vs `Ctrl-B`) — change it in Settings if you prefer `Ctrl-B`.
 
 ### Bringing your `.tmux.conf` over
 

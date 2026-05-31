@@ -91,11 +91,21 @@ public final class SurfaceRegistry: @unchecked Sendable {
         let wantActivity = optionStore.get("monitor-activity")?.boolValue ?? false
         let wantBell = optionStore.get("monitor-bell")?.boolValue ?? true
         let silenceSeconds = optionStore.get("monitor-silence")?.intValue ?? 0
-        guard wantActivity || wantBell || silenceSeconds > 0 else { return }
+        // The orphan sweep runs even when every monitor option is off, so dead-surface keys never
+        // accumulate; only the alert processing below is gated on the options being enabled.
+        let monitoring = wantActivity || wantBell || silenceSeconds > 0
         var changed = false
         var fired: [(HookEvent, String)] = []
+        var orphans: [String] = []
         for (key, st) in drained {
-            guard let match = editor.tab(forSurfaceKey: key),
+            guard let match = editor.tab(forSurfaceKey: key) else {
+                // Output for a surface with no tab — an in-flight PTY read raced `closeSurfaces`
+                // and re-created the monitor entry after teardown. Evict it so `monitors` can't
+                // grow unbounded with dead-surface keys that nothing will ever clean.
+                orphans.append(key)
+                continue
+            }
+            guard monitoring,
                   !editor.tabIsCurrent(workspaceID: match.workspaceID, tabID: match.tabID) else { continue }
             if wantActivity, st.sawOutput,
                editor.setTabAlerts(workspaceID: match.workspaceID, tabID: match.tabID, activity: true) {
@@ -112,6 +122,11 @@ public final class SurfaceRegistry: @unchecked Sendable {
         }
         if changed { commit() }
         for (event, key) in fired { fireHookLocked(event, surfaceKey: key) }
+        if !orphans.isEmpty {
+            monitorLock.lock()
+            for key in orphans { monitors.removeValue(forKey: key) }
+            monitorLock.unlock()
+        }
     }
 
     public var snapshot: SessionSnapshot {

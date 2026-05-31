@@ -160,7 +160,7 @@ private final class WindowSession: @unchecked Sendable {
     /// access is funneled here.
     private let renderQueue = DispatchQueue(label: "harness.window.render")
     private var terminals: [String: HarnessGridTerminal] = [:]
-    private var subscriptions: [DaemonSubscription] = []
+    private var subscriptions: [String: DaemonSubscription] = [:] // keyed by surface-id string
     private var rects: [PaneRect] = []
     private var compositor: GridCompositor
     private var activeSurface: String?
@@ -248,11 +248,13 @@ private final class WindowSession: @unchecked Sendable {
 
         let wanted = Set(rects.map { $0.surfaceID.uuidString })
 
-        // Drop terminals/subscriptions for panes that no longer exist.
+        // Drop terminals + their output subscriptions for panes that no longer exist. Cancelling
+        // the subscription tells the daemon to stop streaming that surface to us — otherwise a
+        // killed/collapsed pane keeps a live stream open for the rest of the attach session.
         for (sid, _) in terminals where !wanted.contains(sid) {
             terminals[sid] = nil
+            subscriptions.removeValue(forKey: sid)?.cancel()
         }
-        subscriptions = subscriptions.filter { _ in true } // (kept; cancel on teardown)
 
         // Create terminals + subscriptions for new panes; resize existing ones.
         for rect in rects {
@@ -277,7 +279,7 @@ private final class WindowSession: @unchecked Sendable {
                 }, onEnd: { [weak self] in
                     self?.scheduleStructureCheck()
                 }) {
-                    subscriptions.append(sub)
+                    subscriptions[sid] = sub
                 }
             }
         }
@@ -1310,7 +1312,7 @@ private final class WindowSession: @unchecked Sendable {
         snapshotSubscription?.cancel()
         sigwinch?.cancel()
         sigterm?.cancel()
-        for sub in subscriptions { sub.cancel() }
+        for sub in subscriptions.values { sub.cancel() }
         for sid in terminals.keys {
             _ = try? client.request(.detachSurface(surfaceID: sid), timeout: 1)
         }

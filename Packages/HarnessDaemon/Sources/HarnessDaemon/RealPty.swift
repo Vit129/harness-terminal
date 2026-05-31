@@ -78,6 +78,10 @@ public final class RealPty: @unchecked Sendable {
         let data: Data
     }
     private var scrollback: [ScrollbackEntry] = []
+    // Index of the first live entry. Eviction advances this (O(1)) instead of `removeFirst()`
+    // (O(n) on the PTY read hot path); the dead prefix is physically compacted in one batched
+    // shift once it grows large, so steady-state eviction is ≈O(1) amortized.
+    private var scrollbackHead = 0
     private var scrollbackBytes: Int = 0
     private var maxScrollbackBytes: Int
     private var nextSequence: UInt64 = 1
@@ -92,6 +96,10 @@ public final class RealPty: @unchecked Sendable {
     /// (Harness-owned `$HARNESS`/`$HARNESS_SURFACE` plus user `set-environment`).
     private let extraEnvironment: [String: String]
 
+    /// The shell this surface was spawned with — reused verbatim on `respawn` so a respawned
+    /// pane keeps the exact shell it started with (not whatever `$SHELL` happens to be now).
+    private let shell: String
+
     public init(
         id: DaemonSurfaceID,
         cwd: String,
@@ -104,6 +112,7 @@ public final class RealPty: @unchecked Sendable {
         self.id = id
         self.maxScrollbackBytes = scrollbackBytes
         self.extraEnvironment = extraEnvironment
+        self.shell = shell
 
         // Prepare everything the child needs BEFORE forking. Between fork and exec a
         // child may only call async-signal-safe functions, so it must not malloc —
@@ -228,15 +237,15 @@ public final class RealPty: @unchecked Sendable {
         if clearHistory {
             scrollbackLock.lock()
             scrollback.removeAll()
+            scrollbackHead = 0
             scrollbackBytes = 0
             nextSequence = 1
             scrollbackLock.unlock()
         }
         // Spawn a new shell, reusing the cwd of the previous process if we can
         // still read it from the dead PID's last-known location, otherwise the
-        // home directory.
+        // home directory. The shell is the one this surface was created with.
         let cwd = Self.cwd(for: oldPID) ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         do {
             try restartChild(cwd: cwd, shell: shell, rows: oldRows, cols: oldCols)
         } catch {
@@ -349,12 +358,14 @@ public final class RealPty: @unchecked Sendable {
     private func scrollbackData(includeHistory: Bool) -> Data {
         scrollbackLock.lock()
         defer { scrollbackLock.unlock() }
+        // Only the live entries (from `scrollbackHead`): the dead prefix is evicted scrollback.
+        let live = scrollback[scrollbackHead...]
         if includeHistory {
-            return scrollback.reduce(into: Data()) { $0.append($1.data) }
+            return live.reduce(into: Data()) { $0.append($1.data) }
         }
         // Tail roughly the last 16 KiB.
         var tail = Data()
-        for entry in scrollback.reversed() {
+        for entry in live.reversed() {
             tail.insert(contentsOf: entry.data, at: 0)
             if tail.count >= 16 * 1024 { break }
         }
@@ -467,11 +478,12 @@ public final class RealPty: @unchecked Sendable {
 
     public func replay(fromSequence: UInt64?) -> String {
         scrollbackLock.lock()
+        let live = scrollback[scrollbackHead...] // skip the evicted dead prefix
         let entries: [ScrollbackEntry]
         if let from = fromSequence {
-            entries = scrollback.filter { $0.sequence >= from }
+            entries = live.filter { $0.sequence >= from }
         } else {
-            entries = scrollback
+            entries = Array(live)
         }
         scrollbackLock.unlock()
         let combined = entries.reduce(into: Data()) { $0.append($1.data) }
@@ -535,9 +547,15 @@ public final class RealPty: @unchecked Sendable {
         nextSequence &+= UInt64(data.count)
         scrollback.append(ScrollbackEntry(sequence: sequence, data: data))
         scrollbackBytes += data.count
-        while scrollbackBytes > maxScrollbackBytes, let first = scrollback.first {
-            scrollbackBytes -= first.data.count
-            scrollback.removeFirst()
+        while scrollbackBytes > maxScrollbackBytes, scrollbackHead < scrollback.count {
+            scrollbackBytes -= scrollback[scrollbackHead].data.count
+            scrollbackHead += 1
+        }
+        // Physically drop the dead prefix in one batched O(n) shift once it's large — bounding
+        // the backing array's growth while keeping per-eviction cost ≈O(1) amortized.
+        if scrollbackHead > 2048 {
+            scrollback.removeFirst(scrollbackHead)
+            scrollbackHead = 0
         }
         scrollbackLock.unlock()
 

@@ -617,7 +617,10 @@ final class TerminalScreen {
         // A glyph that cannot fit in the remaining columns wraps first.
         if pendingWrap {
             wrapLine()
-        } else if w == 2, cursorCol >= cols - 1 {
+        } else if w == 2, cursorCol >= cols - 1, autowrap {
+            // A wide glyph that can't fit the last column wraps — but only with DECAWM on.
+            // With autowrap off (`\e[?7l`) the VT220 behavior is to write the left half at the
+            // margin and pin the cursor there (truncate), never scroll; `advance(by: 2)` clamps.
             wrapLine()
         }
 
@@ -812,7 +815,11 @@ final class TerminalScreen {
     }
 
     func scrollUp(_ n: Int) {
-        let count = max(1, n)
+        // Clamp to the region height: once every line in the region has scrolled off the
+        // region is blank, so a giant SU (`\e[65535S`) past that point is pure wasted work
+        // (and a hostile-output DoS — the inner shift is O(cols × region)). The clamped count
+        // also keeps `shiftPlacements` correct (images are gone after region-height scrolls).
+        let count = min(max(1, n), scrollBottom - scrollTop + 1)
         let blank = erasedCell()
         // A full-screen scroll (top of the screen, history on) accrues scrollback: image anchors
         // are invariant because `history.count` grows in step, so they ride into scrollback rather
@@ -856,7 +863,9 @@ final class TerminalScreen {
     }
 
     func scrollDown(_ n: Int) {
-        let count = max(1, n)
+        // Clamp to region height for the same reason as `scrollUp` — beyond it the region is
+        // already blank, so a giant SD is wasted O(cols × region) work per extra iteration.
+        let count = min(max(1, n), scrollBottom - scrollTop + 1)
         let blank = erasedCell()
         for _ in 0 ..< count {
             var r = scrollBottom

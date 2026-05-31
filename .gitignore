@@ -27,3 +27,6 @@ HANDOFF.md
 docs/RELEASE_CHECKLIST.md
 docs/GHOSTTY_COMPARISON.md
 docs/TMUX_PARITY.md
+
+# Release archives (DMG + appcast) — hosted on the site, not committed
+dist/

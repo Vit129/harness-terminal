@@ -6,23 +6,22 @@ scrollback, resize, attach/detach, and persistence. A mode only changes *what's 
 which chrome is visible, the default session-persistence policy, and how prominent agent
 workflows are.
 
-Switch modes any time in **Settings → Appearance → Experience**. New installs start in
-**Plain**; an install that predates modes migrates to **Multiplexer** so nothing you already had
-(prefix key, status line) disappears.
+Switch modes any time in **Settings → Terminal → Experience**. New installs start in
+**Plain**; an install that predates modes migrates to **Full Terminal** so nothing you already
+had (prefix key, status line) disappears.
 
 | Mode | Prefix key | Status line | Sessions survive a clean quit | Agent workflows |
 |------|:---------:|:-----------:|:-----------------------------:|:---------------:|
 | **Plain Terminal** | — | — | No (ephemeral) | available |
 | **Persistent Terminal** | — | — | Yes | available |
-| **Multiplexer** | ✓ | ✓ | Yes | available |
+| **Full Terminal** | ✓ | ✓ | Yes | available |
 | **Agent Workspace** | optional | optional | Yes | foregrounded |
 
 ## 1. Plain Terminal
 
 A fast native terminal. No prefix key, no status bar, no multiplexer terminology — it feels
-like a normal terminal (the spirit of Ghostty). Sessions are **ephemeral**: closing the app
-cleanly closes its shells. Splits and tabs are still available via the menu shortcuts
-(`⌘D`, `⌘⇧D`, `⌘T`).
+like an ordinary terminal. Sessions are **ephemeral**: closing the app cleanly closes its
+shells. Splits and tabs are still available via the menu shortcuts (`⌘D`, `⌘⇧D`, `⌘T`).
 
 ## 2. Persistent Terminal
 
@@ -30,17 +29,18 @@ Visually identical to Plain, but sessions **survive** a clean quit and can be at
 driven from the CLI (`harness-cli attach`, `attach-window`). Promote/demote individual
 sessions (see *Persistence*, below).
 
-## 3. Multiplexer
+## 3. Full Terminal
 
 The full multiplexer surface: the prefix key (default `Ctrl-A`), the status line, copy mode,
-paste buffers, `-t session:window.pane` targets, the command prompt, and attach/detach. Coming
-from tmux? See the [multiplexer guide](TMUX_GUIDE.md) and [MIGRATION.md](MIGRATION.md).
+paste buffers, `-t session:window.pane` targets, the command prompt, and attach/detach. See the
+[multiplexer guide](MULTIPLEXER_GUIDE.md) for the tour; [MIGRATION.md](MIGRATION.md) covers
+bringing an existing setup over.
 
 ## 4. Agent Workspace
 
 Persistent project workspaces with AI-agent detection, waiting/done/error notifications, and
-jump-to-agent (`⌘⇧U`) foregrounded. tmux controls are **available but off by default** —
-enable them without leaving the mode (see *Opting into tmux controls*).
+jump-to-agent (`⌘⇧U`) foregrounded. The prefix + status line are **available but off by default**
+— enable them without leaving the mode (see *Opting into the prefix + status line*).
 
 ## Persistence (ephemeral vs. persistent)
 
@@ -55,7 +55,7 @@ keepSessionsOnQuit (global)  ||  session.persistent (per-session pin)
 ```
 
 - **Global** `keepSessionsOnQuit` keeps its classic "keep everything" meaning and is set by the
-  mode (Plain → off; Persistent/Multiplexer/Agent → on). It's the *Settings → Terminal → "Keep
+  mode (Plain → off; Persistent/Full/Agent → on). It's the *Settings → Terminal → "Keep
   sessions running after the window closes"* toggle.
 - **Per-session** `persistent` pins one session so it survives even when the global switch is
   off (Plain mode). Promote/demote:
@@ -63,13 +63,13 @@ keepSessionsOnQuit (global)  ||  session.persistent (per-session pin)
     global switch is off, so the checkmark can't lie).
   - CLI: `harness-cli promote-session --session <uuid>` / `demote-session --session <uuid>`.
 
-## Opting into tmux controls without switching modes
+## Opting into the prefix + status line without switching modes
 
 `tmuxControlsEnabled` (in `settings.json`) overrides the mode's chrome default:
 
-- `null` (default) — derive from the mode (only Multiplexer shows the prefix + status line).
+- `null` (default) — derive from the mode (only Full Terminal shows the prefix + status line).
 - `true` — show the prefix + status line in any mode (e.g. an Agent user who wants the prefix).
-- `false` — hide them even in Multiplexer mode.
+- `false` — hide them even in Full Terminal mode.
 
 The single gate `HarnessSettings.showsTmuxChrome` (mode default, overridden by
 `tmuxControlsEnabled`) is what `PrefixKeymap`, `StatusLineView`, and onboarding all consult, so

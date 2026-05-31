@@ -154,7 +154,7 @@ Events: `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pan
 | `display-message <format>` | Render a `FormatString` and surface as a non-blocking status toast. |
 | `run-shell [-b] <command>` | Spawn a subprocess. `-b` captures stdout into a paste buffer. |
 | `if-shell <condition> <then> [<else>]` | Run `<condition>` in the shell; on exit 0 run `<then>`, else `<else>`. |
-| `source-config` (alias `source`, `reload-config`) | Re-import Ghostty config and refresh chrome. |
+| `source-config` (alias `source`, `reload-config`) | Re-import the imported terminal config and refresh chrome. |
 | `reload-keybindings` | Re-read `keybindings.json` so an external edit takes effect. |
 
 ## Composition

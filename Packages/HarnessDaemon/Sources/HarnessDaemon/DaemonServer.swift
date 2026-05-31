@@ -145,7 +145,7 @@ public final class DaemonServer: @unchecked Sendable {
             self.writeBuffers.removeValue(forKey: clientFD)
             if let wsrc = self.writeSources.removeValue(forKey: clientFD) { wsrc.cancel() }
             self.cancelSubscriptions(for: clientFD)
-            self.waitForRegistry.remove(fd: clientFD)
+            for granted in self.waitForRegistry.remove(fd: clientFD) { self.send(.ok, to: granted) }
             close(clientFD)
         }
         clientSources[clientFD] = source
@@ -170,6 +170,13 @@ public final class DaemonServer: @unchecked Sendable {
             let envelope: IPCEnvelope?
             do {
                 envelope = try IPCCodec.decodeRequest(from: &data)
+            } catch IPCCodec.FrameError.undecodable {
+                // A well-framed request this build doesn't understand (version skew). The stream
+                // is still in sync, so reply with an error and keep going rather than hanging the
+                // client; the frame was already consumed, so persist the advanced buffer.
+                clientBuffers[fd] = data
+                send(.error("unrecognized request"), to: fd)
+                continue
             } catch {
                 // Oversized/garbage frame — the stream can't be re-synced. Drop the client.
                 clientBuffers[fd] = Data()

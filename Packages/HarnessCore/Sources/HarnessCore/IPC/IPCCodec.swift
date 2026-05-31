@@ -7,9 +7,12 @@ public enum IPCCodec {
     /// drops the connection rather than buffering toward it (a memory-DoS vector).
     public static let maxPayloadLength = 16 * 1024 * 1024
 
-    /// Thrown when a frame's declared length exceeds `maxPayloadLength`. The caller closes
-    /// the connection (the byte stream can't be re-synced).
-    public enum FrameError: Error { case tooLarge(Int) }
+    /// Frame-level decode failures. `tooLarge`: the declared length exceeds `maxPayloadLength`
+    /// — the byte stream can't be re-synced, so the caller closes the connection. `undecodable`:
+    /// the frame was correctly sized and de-framed but its payload isn't a request this build
+    /// understands (a newer client, a schema skew) — the stream stays in sync, so the caller
+    /// replies with an error and keeps the connection rather than dropping it.
+    public enum FrameError: Error { case tooLarge(Int), undecodable }
 
     public static func encode<T: Encodable>(_ value: T) throws -> Data {
         let encoder = JSONEncoder()
@@ -26,7 +29,14 @@ public enum IPCCodec {
 
     public static func decodeRequest(from buffer: inout Data) throws -> IPCEnvelope? {
         guard let payload = try extractPayload(from: &buffer) else { return nil }
-        return try? JSONDecoder().decode(IPCEnvelope.self, from: payload)
+        // A frame that de-frames cleanly but won't decode is `undecodable`, not "need more bytes":
+        // the buffer already advanced past it, so swallowing it to nil would silently drop the
+        // request and hang the client. Throw so the server can reply with an error and move on.
+        do {
+            return try JSONDecoder().decode(IPCEnvelope.self, from: payload)
+        } catch {
+            throw FrameError.undecodable
+        }
     }
 
     public static func decodeReply(from buffer: inout Data) throws -> IPCReply? {

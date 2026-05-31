@@ -42,7 +42,11 @@ public enum SixelDecoder {
                 i = next
                 if i < n, data[i] >= 0x3F, data[i] <= 0x7E {
                     let bits = Int(data[i]) - 0x3F
-                    for _ in 0 ..< max(1, count) { plot(bits); x += 1 }
+                    // `plot` clips past `width`, so a repeat beyond the right edge is wasted work
+                    // (a compact `!1000000?` would otherwise spin a million no-op plots). Clamp
+                    // the loop to the remaining columns — lossless, since those plots never paint.
+                    let clamped = min(max(1, count), max(0, width - x))
+                    for _ in 0 ..< clamped { plot(bits); x += 1 }
                     i += 1
                 }
             case 0x23: // '#' color: #Pc  or  #Pc;Pu;Px;Py;Pz
