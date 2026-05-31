@@ -1,4 +1,4 @@
-.PHONY: build preview preview-stop preview-clean release package dmg sign appcast icon clean
+.PHONY: build preview preview-stop preview-clean release package dmg sign appcast finalize icon clean
 
 build:
 	swift build
@@ -30,6 +30,12 @@ sign: release
 # Generate/refresh the Sparkle appcast from signed archives in ./dist (see the script header).
 appcast:
 	./Scripts/generate-appcast.sh
+
+# Finalize a release: notarize + staple the DMG, re-upload to the GitHub release, build the
+# appcast, optionally deploy it to the site. Needs ASC_ISSUER_ID (or APPLE_ID/APPLE_TEAM_ID/
+# APPLE_APP_PASSWORD) and one keychain Allow for the Sparkle key. See Scripts/finalize-release.sh.
+finalize:
+	./Scripts/finalize-release.sh
 
 clean:
 	swift package clean
