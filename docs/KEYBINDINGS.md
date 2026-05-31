@@ -1,6 +1,6 @@
 # Harness keybindings
 
-Every binding is data. The defaults live in `KeyTableSet.defaults` in `HarnessCore/Keybindings/KeyTable.swift`; user overrides go in `~/Library/Application Support/Harness/keybindings.json`. On load Harness merges defaults under user changes, so removing an entry from your file falls back to the default rather than disabling the action.
+Harness keybindings are data. User overrides live in `~/Library/Application Support/Harness/keybindings.json`; removing an override restores the default binding.
 
 ## Key spec syntax
 
@@ -41,7 +41,7 @@ Trigger: the prefix key (default `ctrl-a`, configurable via `settings.prefixKey`
 
 ## Copy-mode key table
 
-The copy-mode view resolves each keystroke against the `copy-mode` `KeyTable` (merged with your `keybindings.json` overrides) and runs the resulting `copy-mode -X` command, so copy mode is fully rebindable via `bind-key -T copy-mode <spec> <command>`. Defaults follow `mode-keys vi`.
+Copy mode is fully rebindable via `bind-key -T copy-mode <spec> <command>`. Defaults follow `mode-keys vi`.
 
 | Key | Action |
 |---|---|
@@ -97,4 +97,4 @@ In the app, the `:` prompt accepts the same syntax:
 - File: `~/Library/Application Support/Harness/keybindings.json`
 - Format: JSON; `tables` is an array of `{id, bindings: [{spec, command, note}]}` entries
 - Merge: on load, defaults fill in any missing slots; deleting a stored binding restores the default
-- Atomic writes on every change via `KeybindingsStore.save`
+- Harness writes the file atomically whenever a binding changes.

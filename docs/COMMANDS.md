@@ -1,6 +1,6 @@
 # Harness command reference
 
-Every action — keystroke binding, palette entry, `:` prompt, hook firing, `harness-cli` subcommand — resolves to a `Command` value in `HarnessCore/Commands/Command.swift`. The textual form below is what the parser accepts (in `keybindings.json`, the `:` prompt, `bind-key`, etc.); the right column is the IPC + UI effect.
+These are the commands Harness accepts from the `:` prompt, key bindings, hooks, and `harness-cli`.
 
 ## Pane operations
 
@@ -10,7 +10,7 @@ Every action — keystroke binding, palette entry, `:` prompt, hook firing, `har
 | `split-window -v` | Split active pane top/bottom (horizontal divider). |
 | `kill-pane` | Close the active pane. Collapses the parent branch. |
 | `zoom-pane` (alias `resize-pane -Z`) | Toggle full-tab zoom on the active pane. |
-| `select-pane -L` / `-R` / `-U` / `-D` | Directional navigation. Resolved by daemon tree walk. |
+| `select-pane -L` / `-R` / `-U` / `-D` | Move focus to the neighboring pane in that direction. |
 | `select-pane` (no flag) | Cycle forward by flat pane order. |
 | `select-pane -l` | Jump to the last (most-recently-active) pane in the tab. |
 | `select-pane -m` / `-M` | Mark / unmark the active pane (the implicit `join-pane` source). |
@@ -69,8 +69,7 @@ form; `select-window -t session:N` is supported.
 
 ### Inspection (CLI / control mode)
 
-These are query verbs (read the daemon snapshot); they don't mutate layout, so they live in
-`harness-cli` and control mode rather than as bindable `Command`s.
+These query the current Harness state and do not change your layout.
 
 | Command | Effect |
 |---|---|
@@ -78,7 +77,7 @@ These are query verbs (read the daemon snapshot); they don't mutate layout, so t
 | `list-windows [--session <name\|uuid>]` | Tabs across all sessions, or one session's. |
 | `list-panes [--tab <uuid>]` | Panes of the targeted (or active) tab, index-prefixed, active flagged. |
 | `has-session --session <name\|uuid>` | Scripting verb: exit `0` if it exists, `1` if not; prints nothing. |
-| `list-commands` | Print the bindable command vocabulary (`CommandParser.knownVerbs`). |
+| `list-commands` | Print the bindable command vocabulary. |
 
 ## Modes
 
@@ -114,7 +113,7 @@ in the GUI re-composites automatically.
 
 | Command | Effect |
 |---|---|
-| `bind-key [-r] [-T <table>] <spec> <command...>` | Bind a key in a named table. Recursive — `<command>` parses to a `Command`. `-r` makes it repeatable (the prefix stays armed briefly so the key repeats). |
+| `bind-key [-r] [-T <table>] <spec> <command...>` | Bind a key in a named table. `-r` makes it repeatable, so the prefix stays armed briefly while the key repeats. |
 | `unbind-key [-T <table>] <spec>` | Remove a binding. |
 | `list-keys [-T <table>]` | Print bindings; one table per `[table]` header. |
 

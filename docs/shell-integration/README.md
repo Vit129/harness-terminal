@@ -35,8 +35,7 @@ yourself instead:
 | zsh | `~/.zshrc` | `source "<…>/shell-integration/harness.zsh"` |
 | fish | `~/.config/fish/config.fish` | `source "<…>/shell-integration/harness.fish"` |
 
-The copies in `docs/shell-integration/` mirror the runtime scripts (`HarnessCore.ShellIntegration`
-is the source of truth).
+The copies in `docs/shell-integration/` match the scripts installed by Harness.
 
 ## What gets emitted
 

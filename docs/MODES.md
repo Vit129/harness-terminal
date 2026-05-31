@@ -1,10 +1,7 @@
 # Experience modes
 
-Harness presents four **experience modes** on top of **one** daemon-backed session core.
-A mode never forks the session/PTY path — the daemon always owns PTYs, child processes,
-scrollback, resize, attach/detach, and persistence. A mode only changes *what's exposed*:
-which chrome is visible, the default session-persistence policy, and how prominent agent
-workflows are.
+Harness presents four **experience modes**. A mode changes which controls are visible, the
+default session-persistence policy, and how prominent agent workflows are.
 
 Switch modes any time in **Settings → Terminal → Experience**. New installs start in
 **Plain**; an install that predates modes migrates to **Full Terminal** so nothing you already
@@ -44,9 +41,8 @@ jump-to-agent (`⌘⇧U`) foregrounded. The prefix + status line are **available
 
 ## Persistence (ephemeral vs. persistent)
 
-Persistence is daemon-owned and evaluated on a **clean quit only** — a daemon or GUI crash
-never tears sessions down (surviving a crash is always a feature; a crash's orphans are reaped
-on the next clean quit).
+Persistence is evaluated on a **clean quit only**. A crash never tears sessions down; any
+orphaned ephemeral sessions are cleaned up on the next clean quit.
 
 A session survives a clean quit iff:
 
@@ -65,25 +61,10 @@ keepSessionsOnQuit (global)  ||  session.persistent (per-session pin)
 
 ## Opting into the prefix + status line without switching modes
 
-`tmuxControlsEnabled` (in `settings.json`) overrides the mode's chrome default:
+The prefix and status line can be overridden independently of the selected mode:
 
-- `null` (default) — derive from the mode (only Full Terminal shows the prefix + status line).
-- `true` — show the prefix + status line in any mode (e.g. an Agent user who wants the prefix).
-- `false` — hide them even in Full Terminal mode.
+- Default — derive from the mode.
+- On — show the prefix and status line in any mode.
+- Off — hide them even in Full Terminal mode.
 
-The single gate `HarnessSettings.showsTmuxChrome` (mode default, overridden by
-`tmuxControlsEnabled`) is what `PrefixKeymap`, `StatusLineView`, and onboarding all consult, so
-they never drift. Blanking the prefix key in Settings → Keys disables it outright (it no longer
-silently falls back to `Ctrl-A`).
-
-## How it maps to the code
-
-| Concern | Where |
-|---------|-------|
-| Mode enum + derived policy | `HarnessCore/Settings/ExperienceMode.swift` |
-| Stored mode + `showsTmuxChrome` / `effectivePrefixKey` | `HarnessCore/Settings/HarnessSettings.swift` |
-| Prefix gating (install/remove the monitor) | `HarnessApp/UI/PrefixKeymap.swift` |
-| Status-line gating | `HarnessApp/UI/StatusLineView.swift` |
-| Mode picker + side-effects | `HarnessApp/Settings/SettingsViewController.swift` |
-| Per-session pin | `SessionGroup.persistent`, `SessionEditor.setSessionPersistent` |
-| Ephemeral reap | `SessionEditor.ephemeralSessionIDs`, IPC `closeEphemeralSessions`, `AppDelegate.applicationWillTerminate` |
+Blanking the prefix key in Settings → Keys disables it outright.

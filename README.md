@@ -124,19 +124,6 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug \
   -destination 'platform=macOS,arch=arm64' build test
 ```
 
-### Sign and notarize a release
-
-```bash
-export SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
-export APPLE_ID="you@example.com"
-export APPLE_TEAM_ID="TEAMID"
-export APPLE_APP_PASSWORD="app-specific-password"
-
-make release                  # Harness.app with embedded harness-cli + HarnessDaemon
-./Scripts/sign-and-notarize.sh
-make dmg                       # Harness.dmg, drag-to-Applications install
-```
-
 ## Requirements
 
 - macOS 15.0 or later
@@ -144,12 +131,11 @@ make dmg                       # Harness.dmg, drag-to-Applications install
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — daemon, terminal engine, IPC, compositor
 - [Experience modes](docs/MODES.md) — Plain / Persistent / Full / Agent
 - [Sessions & panes guide](docs/MULTIPLEXER_GUIDE.md) — prefix, panes, sessions, copy mode, attach from anywhere
 - [Migration](docs/MIGRATION.md) — bringing your config and habits across
 - [Keybindings](docs/KEYBINDINGS.md) · [Commands](docs/COMMANDS.md) · [Shell integration](docs/shell-integration/README.md) · [Agent hooks](docs/agent-hooks/README.md)
-- [Reliability & security](docs/RELIABILITY.md)
+- [Third-party notices](docs/THIRD-PARTY-NOTICES.md)
 
 ## License
 
