@@ -83,13 +83,12 @@ struct HarnessCLI {
                 // its `message` for the body. Gated behind the flag (like `set-buffer --stdin`)
                 // so an interactive `notify` never blocks on `readDataToEndOfFile`. Claude Code's
                 // `Notification` hook delivers the message this way — not via an env var.
-                let body: String
-                if args.contains("--from-hook") {
-                    let parsed = HookNotificationParser.parse(FileHandle.standardInput.readDataToEndOfFile())
-                    body = HookNotificationParser.resolveBody(parsed: parsed, fallbackBody: fallbackBody)
-                } else {
-                    body = fallbackBody ?? "Needs attention"
-                }
+                // Both paths resolve through HookNotificationParser so the default body lives in
+                // one place; only `--from-hook` reads stdin, otherwise we resolve with no payload.
+                let parsed = args.contains("--from-hook")
+                    ? HookNotificationParser.parse(FileHandle.standardInput.readDataToEndOfFile())
+                    : nil
+                let body = HookNotificationParser.resolveBody(parsed: parsed, fallbackBody: fallbackBody)
                 _ = try checkedRequest(client, .notify(surfaceID: surface, title: title, body: body))
             case "install":
                 try installCLI()
