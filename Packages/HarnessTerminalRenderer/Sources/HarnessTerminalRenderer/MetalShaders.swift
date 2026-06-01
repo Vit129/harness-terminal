@@ -22,6 +22,7 @@ enum MetalShaders {
         float2 size;
         float2 uvOrigin;
         float2 uvSize;
+        uint pageIndex;
         float4 color;
     };
 
@@ -39,6 +40,7 @@ enum MetalShaders {
         float4 position [[position]];
         float4 color;
         float2 uv;
+        uint pageIndex [[flat]];
     };
 
     struct DecoOut {
@@ -68,6 +70,7 @@ enum MetalShaders {
         out.position = float4(pixelToNDC(px, viewport), 0.0, 1.0);
         out.color = inst.color;
         out.uv = float2(0.0, 0.0);
+        out.pageIndex = 0u;
         return out;
     }
 
@@ -86,14 +89,15 @@ enum MetalShaders {
         out.position = float4(pixelToNDC(px, viewport), 0.0, 1.0);
         out.color = inst.color;
         out.uv = inst.uvOrigin + corner * inst.uvSize;
+        out.pageIndex = inst.pageIndex;
         return out;
     }
 
     fragment float4 glyph_fragment(VOut in [[stage_in]],
-                                   texture2d<float> atlas [[texture(0)]],
+                                   texture2d_array<float> atlas [[texture(0)]],
                                    sampler samp [[sampler(0)]],
                                    constant float &gamma [[buffer(0)]]) {
-        float coverage = atlas.sample(samp, in.uv).r;
+        float coverage = atlas.sample(samp, in.uv, in.pageIndex).r;
         // Gamma-correct ("linear-corrected") coverage thickens light-on-dark antialiasing.
         // gamma == 1 is native (no change).
         coverage = pow(coverage, gamma);
@@ -112,6 +116,7 @@ enum MetalShaders {
         out.position = float4(pixelToNDC(px, viewport), 0.0, 1.0);
         out.color = float4(1.0, 1.0, 1.0, 1.0);
         out.uv = corner; // (0,0) top-left → texture row 0 (top); y-flip is in pixelToNDC
+        out.pageIndex = 0u;
         return out;
     }
 

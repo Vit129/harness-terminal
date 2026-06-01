@@ -75,15 +75,37 @@ public struct ThemeDocument: Codable, Equatable, Sendable {
         }
     }
 
-    /// Whole-window appearance the theme can carry. All optional so a minimal theme can
-    /// omit them and inherit the user's current settings.
+    /// Whole-window appearance the theme can carry. A minimal theme can omit these keys
+    /// and inherit user settings; color metadata decodes to conservative sRGB defaults.
     public struct Appearance: Codable, Equatable, Sendable {
+        public enum SourceColorSpace: String, Codable, Equatable, Sendable {
+            case sRGB = "sRGB"
+            case displayP3 = "displayP3"
+        }
+
+        public enum AppearanceKind: String, Codable, Equatable, Sendable {
+            case dark
+            case light
+        }
+
+        public enum ContrastGrade: String, Codable, Equatable, Sendable {
+            case high
+            case medium
+            case low
+        }
+
         public var backgroundOpacity: Double?
         public var backgroundBlur: Int?
         public var fontFamily: String?
         public var fontSize: Double?
         public var windowPaddingX: Double?
         public var windowPaddingY: Double?
+        /// Source gamut of the authored theme colors. Missing values from v1 documents default
+        /// to sRGB so existing community themes and shared files keep loading.
+        public var sourceColorSpace: SourceColorSpace
+        public var appearance: AppearanceKind?
+        public var supportsWideGamut: Bool
+        public var contrastGrade: ContrastGrade?
         /// When true, importing applies the full ANSI palette to terminal output (the
         /// "sync" mode); when false/nil the terminal keeps its standalone palette.
         public var applyToTerminalOutput: Bool?
@@ -95,6 +117,10 @@ public struct ThemeDocument: Codable, Equatable, Sendable {
             fontSize: Double? = nil,
             windowPaddingX: Double? = nil,
             windowPaddingY: Double? = nil,
+            sourceColorSpace: SourceColorSpace = .sRGB,
+            appearance: AppearanceKind? = nil,
+            supportsWideGamut: Bool = false,
+            contrastGrade: ContrastGrade? = nil,
             applyToTerminalOutput: Bool? = nil
         ) {
             self.backgroundOpacity = backgroundOpacity
@@ -103,7 +129,40 @@ public struct ThemeDocument: Codable, Equatable, Sendable {
             self.fontSize = fontSize
             self.windowPaddingX = windowPaddingX
             self.windowPaddingY = windowPaddingY
+            self.sourceColorSpace = sourceColorSpace
+            self.appearance = appearance
+            self.supportsWideGamut = supportsWideGamut
+            self.contrastGrade = contrastGrade
             self.applyToTerminalOutput = applyToTerminalOutput
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case backgroundOpacity
+            case backgroundBlur
+            case fontFamily
+            case fontSize
+            case windowPaddingX
+            case windowPaddingY
+            case sourceColorSpace
+            case appearance
+            case supportsWideGamut
+            case contrastGrade
+            case applyToTerminalOutput
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)
+            backgroundBlur = try container.decodeIfPresent(Int.self, forKey: .backgroundBlur)
+            fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+            fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
+            windowPaddingX = try container.decodeIfPresent(Double.self, forKey: .windowPaddingX)
+            windowPaddingY = try container.decodeIfPresent(Double.self, forKey: .windowPaddingY)
+            sourceColorSpace = try container.decodeIfPresent(SourceColorSpace.self, forKey: .sourceColorSpace) ?? .sRGB
+            appearance = try container.decodeIfPresent(AppearanceKind.self, forKey: .appearance)
+            supportsWideGamut = try container.decodeIfPresent(Bool.self, forKey: .supportsWideGamut) ?? false
+            contrastGrade = try container.decodeIfPresent(ContrastGrade.self, forKey: .contrastGrade)
+            applyToTerminalOutput = try container.decodeIfPresent(Bool.self, forKey: .applyToTerminalOutput)
         }
     }
 

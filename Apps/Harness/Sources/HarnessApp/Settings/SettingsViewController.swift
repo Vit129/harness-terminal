@@ -34,8 +34,8 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     private let cursorBlinkToggle = HarnessToggle(title: "Blinking cursor")
     private let copyOnSelectToggle = HarnessToggle(title: "Copy text to clipboard on selection")
     private let keepSessionsToggle = HarnessToggle(title: "Keep sessions running after the window closes")
-    private let vividColorsToggle = HarnessToggle(title: "Vivid colors (Display P3) — off = accurate sRGB")
-    private let linearBlendingToggle = HarnessToggle(title: "Gamma-correct text blending")
+    private let vividColorsToggle = HarnessToggle(title: "Vivid color rendering (Display P3 opt-in)")
+    private let linearBlendingToggle = HarnessToggle(title: "Crisp text rendering")
     private let themeTerminalOutputToggle = HarnessToggle(title: "Apply theme colors to terminal output — off = canvas matches theme, output untouched")
     private let ligaturesToggle = HarnessToggle(title: "Programming ligatures (=>, !=, ->) for fonts that have them")
     private let promptGutterToggle = HarnessToggle(title: "Prompt gutter — green/red stripe marking command success (needs shell integration)")
@@ -269,10 +269,10 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         keepSessionsToggle.state = SessionCoordinator.shared.snapshot.keepSessionsOnQuit ? .on : .off
         keepSessionsToggle.target = self
         keepSessionsToggle.action = #selector(toggleKeepSessions)
-        vividColorsToggle.state = settings.vividColors ? .on : .off
+        vividColorsToggle.state = settings.colorRendering == .vivid ? .on : .off
         vividColorsToggle.target = self
         vividColorsToggle.action = #selector(appearanceTextDidCommit)
-        linearBlendingToggle.state = settings.linearBlending ? .on : .off
+        linearBlendingToggle.state = settings.textRendering == .crisp ? .on : .off
         linearBlendingToggle.target = self
         linearBlendingToggle.action = #selector(appearanceTextDidCommit)
         themeTerminalOutputToggle.state = settings.applyThemeToTerminalOutput ? .on : .off
@@ -1626,8 +1626,8 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         cursorBlinkToggle.state = settings.cursorBlink ? .on : .off
         copyOnSelectToggle.state = settings.copyOnSelect ? .on : .off
         keepSessionsToggle.state = SessionCoordinator.shared.snapshot.keepSessionsOnQuit ? .on : .off
-        vividColorsToggle.state = settings.vividColors ? .on : .off
-        linearBlendingToggle.state = settings.linearBlending ? .on : .off
+        vividColorsToggle.state = settings.colorRendering == .vivid ? .on : .off
+        linearBlendingToggle.state = settings.textRendering == .crisp ? .on : .off
         themeTerminalOutputToggle.state = settings.applyThemeToTerminalOutput ? .on : .off
         ligaturesToggle.state = settings.ligatures ? .on : .off
         showStatusLineToggle.state = settings.showStatusLine ? .on : .off
@@ -1704,8 +1704,12 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         coordinator.settings.copyOnSelect = copyOnSelectToggle.state == .on
         coordinator.settings.systemNotificationsEnabled = systemNotificationsToggle.state == .on
         coordinator.settings.notificationSoundEnabled = notificationSoundToggle.state == .on
-        coordinator.settings.vividColors = vividColorsToggle.state == .on
-        coordinator.settings.linearBlending = linearBlendingToggle.state == .on
+        coordinator.settings.colorRendering = vividColorsToggle.state == .on ? .vivid : .accurate
+        if linearBlendingToggle.state == .on {
+            coordinator.settings.textRendering = .crisp
+        } else if coordinator.settings.textRendering == .crisp {
+            coordinator.settings.textRendering = .native
+        }
         coordinator.settings.applyThemeToTerminalOutput = themeTerminalOutputToggle.state == .on
         coordinator.settings.ligatures = ligaturesToggle.state == .on
         coordinator.settings.showPromptGutter = promptGutterToggle.state == .on

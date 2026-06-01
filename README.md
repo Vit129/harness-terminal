@@ -20,7 +20,7 @@ Prefer to build it yourself? Jump to [Build from source](#build-from-source).
 
 ## Why Harness
 
-- **It's a real terminal first.** GPU rendering, true 24-bit color, ligatures, inline images (Sixel / Kitty / iTerm2), and 485 built-in themes. Block and box-drawing glyphs are drawn procedurally, so borders tile without seams at any font.
+- **It's a real terminal first.** GPU rendering, accurate sRGB color by default, opt-in converted Display-P3 vivid color, ligatures, inline images (Sixel / Kitty / iTerm2), and 485 built-in themes. Block and box-drawing glyphs are drawn procedurally, so borders tile without seams at any font.
 - **Your work outlives the window.** Sessions, tabs, and splits are owned by a daemon. Quit and reopen and everything is exactly where you left it. Attach the same session from a second window or another machine.
 - **It's scriptable.** `harness-cli` drives the whole thing — open tabs, send keys, capture a pane, resize, swap, zoom — so your tooling can build the layout it needs.
 - **It watches your agents.** Harness detects Claude Code, Codex, Cursor, and others by their process tree, shows which session is running what, and pings you when an agent stops or asks for approval. `Cmd+Shift+U` jumps you to the one that's waiting and skips the ones still thinking.
@@ -38,10 +38,11 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 
 ## Features
 
-- GPU-accelerated rendering by Harness's own terminal engine — Display-P3 / sRGB color, a themed translucent canvas, and program output left untouched unless you opt into theme recoloring
+- GPU-accelerated rendering by Harness's own terminal engine — accurate sRGB output by default, opt-in converted Display-P3 vivid color, a themed translucent canvas, and program output left untouched unless you opt into theme recoloring
 - Sidebar sessions, per-session tabs, and horizontal / vertical splits
 - Session layout persists across quits (daemon-owned, attach from the CLI or over SSH)
 - `harness-cli` for automation and agent hooks
+- Color/theme diagnostics from the CLI: `harness-cli color-check` and `harness-cli theme-preview --theme <name>` print deterministic SGR pages for eyeballing fidelity in Harness itself
 - Command set: `send-keys`, `capture-pane`, `kill-pane`, `resize-pane`, `zoom-pane`, `swap-pane`, `rename-tab`, `attach`, and more
 - Command prefix keymap (default `Ctrl-A`) with a live cheatsheet (prefix `?`)
 - Agent detection for Claude Code, Codex, Cursor, Pi, Hermes, OpenClaw, OpenCode, Aider, Gemini, and Goose — each with a brand color and a sidebar chip
@@ -63,6 +64,8 @@ harness-cli new-session --workspace Default --cwd ~/Code/myproject
 harness-cli new-tab --workspace Default --cwd ~/Code/myproject
 harness-cli send-keys --surface "$HARNESS_SURFACE" --keys "ls -la Enter"
 harness-cli notify --surface "$HARNESS_SURFACE" --title Agent --body "Needs approval"
+harness-cli color-check
+harness-cli theme-preview --theme "Catppuccin Mocha"
 ```
 
 Install it onto your `PATH`:
@@ -114,6 +117,18 @@ cd harness
 make release
 open Harness.app
 ```
+
+Validate a source checkout before shipping changes:
+
+```bash
+swift build
+swift test
+make bench
+```
+
+`make bench` runs opt-in release benchmarks and prints machine-readable JSON timing lines. CI should use the structure of those tests, not absolute GPU or timing thresholds.
+
+Renderer tests use structural offscreen readbacks by default. Set `HARNESS_WRITE_RENDER_SNAPSHOTS=1` when running `swift test --filter MetalRendererTests` to write PNGs under `/tmp/HarnessRenderSnapshots` for human debugging only.
 
 ### Develop in Xcode
 

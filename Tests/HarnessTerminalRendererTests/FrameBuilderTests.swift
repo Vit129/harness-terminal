@@ -1,4 +1,5 @@
 import XCTest
+import HarnessCore
 @testable import HarnessTerminalRenderer
 import HarnessTerminalEngine
 import HarnessTheme
@@ -76,6 +77,79 @@ final class FrameBuilderTests: XCTestCase {
                        RenderColor(red: 1, green: 0, blue: 0, alpha: 1))
         let half = RenderColor(RGBColor(red: 255, green: 255, blue: 255, alpha: 0))
         XCTAssertEqual(half.alpha, 0)
+    }
+
+    func testRenderColorConvertsSRGBRedToDisplayP3Reference() {
+        let p3 = RenderColor(RGBColor(red: 255, green: 0, blue: 0), gamut: .displayP3)
+
+        XCTAssertEqual(p3.red, 0.92, accuracy: 0.01)
+        XCTAssertEqual(p3.green, 0.20, accuracy: 0.01)
+        XCTAssertEqual(p3.blue, 0.14, accuracy: 0.01)
+        XCTAssertEqual(p3.alpha, 1)
+    }
+
+    func testVividRenderingConvertsThenAppliesCappedLift() {
+        let red = RGBColor(red: 255, green: 0, blue: 0)
+        let converted = RenderColor(red, gamut: .displayP3)
+        let vivid = RenderColor(red, renderingMode: .vivid, gamut: .auto)
+
+        XCTAssertGreaterThan(vivid.red, converted.red)
+        XCTAssertLessThanOrEqual(vivid.red, 1)
+        XCTAssertLessThan(vivid.green, converted.green)
+        XCTAssertLessThan(vivid.blue, converted.blue)
+    }
+
+    func testClearColorMatchesDefaultCellBackgroundInAccurateAndVividModes() {
+        let bg = RGBColor(red: 32, green: 64, blue: 128)
+        let fg = RGBColor(red: 230, green: 231, blue: 232)
+        let resolver = CellColorResolver(
+            palette: ANSIPalette(base16: theme.palette),
+            defaultForeground: fg,
+            defaultBackground: bg
+        )
+        let term = HarnessGridTerminal(cols: 1, rows: 1)!
+        let snapshot = term.readGrid()!
+
+        for mode in [TerminalColorRenderingMode.accurate, .vivid] {
+            let builder = FrameBuilder(
+                resolver: resolver,
+                cursorColor: fg,
+                canvasOpacity: 0.42,
+                colorRendering: mode,
+                colorGamut: .auto
+            )
+            let frame = builder.build(snapshot)
+            let clear = builder.renderColor(bg, alpha: 0.42)
+
+            XCTAssertEqual(frame.cell(row: 0, column: 0)?.background, clear, "\(mode) cell bg matches clear")
+            XCTAssertFalse(frame.cell(row: 0, column: 0)?.drawBackground ?? true)
+        }
+    }
+
+    func testTextAndColorRenderingAreOrthogonal() {
+        var settings = HarnessSettings()
+        let source = RGBColor(red: 255, green: 0, blue: 0)
+        let initialColor = RenderColor(
+            source,
+            renderingMode: settings.colorRendering,
+            gamut: settings.colorGamut
+        )
+        let initialGamma = settings.textRendering.glyphGamma
+
+        settings.textRendering = .crisp
+        XCTAssertNotEqual(settings.textRendering.glyphGamma, initialGamma)
+        XCTAssertEqual(
+            RenderColor(source, renderingMode: settings.colorRendering, gamut: settings.colorGamut),
+            initialColor
+        )
+
+        let crispGamma = settings.textRendering.glyphGamma
+        settings.colorRendering = .vivid
+        XCTAssertNotEqual(
+            RenderColor(source, renderingMode: settings.colorRendering, gamut: settings.colorGamut),
+            initialColor
+        )
+        XCTAssertEqual(settings.textRendering.glyphGamma, crispGamma)
     }
 
     func testSelectionSpanContainsLinearRange() {

@@ -12,19 +12,46 @@ final class VTConformanceCorpusTests: XCTestCase {
     private func render(_ bytes: String, cols: Int, rows: Int) -> String {
         let term = HarnessGridTerminal(cols: cols, rows: rows)!
         term.feed(bytes)
-        let grid = term.readGrid()!
-        var lines: [String] = []
-        for r in 0 ..< rows {
-            var line = ""
-            for c in 0 ..< cols {
-                let cp = grid.cell(row: r, col: c)?.codepoint ?? 0
-                line.append((cp == 0 || cp == 0x20) ? " " : String(UnicodeScalar(cp) ?? " "))
-            }
-            while line.hasSuffix(" ") { line.removeLast() }
-            lines.append(line)
-        }
-        while let last = lines.last, last.isEmpty { lines.removeLast() }
-        return lines.joined(separator: "\n")
+        return renderSnapshot(term.readGrid()!)
+    }
+
+    // MARK: - Harness-owned golden fixtures
+
+    /// Harness's own inline conformance cases. These are intentionally small golden grids:
+    /// stable enough for CI, but not imported from any external terminal suite.
+
+    func testInsertDeleteCharactersGolden() {
+        let out = render("abcdef\u{1b}[1;3H\u{1b}[2@\u{1b}[1;1H\u{1b}[1P", cols: 8, rows: 1)
+        XCTAssertEqual(out, "b  cdef")
+    }
+
+    func testEraseInDisplayFromCursorGolden() {
+        let out = render("AAAA\r\nBBBB\r\nCCCC\u{1b}[2;3H\u{1b}[J", cols: 4, rows: 3)
+        XCTAssertEqual(out, "AAAA\nBB")
+    }
+
+    func testAlternateScreenGolden() {
+        let term = HarnessGridTerminal(cols: 8, rows: 2)!
+        term.feed("primary")
+        term.feed("\u{1b}[?1049halt")
+        XCTAssertEqual(renderSnapshot(term.readGrid()!), "alt")
+        term.feed("\u{1b}[?1049l")
+        XCTAssertEqual(renderSnapshot(term.readGrid()!), "primary")
+    }
+
+    func testAutowrapDisabledThenEnabledGolden() {
+        let out = render("\u{1b}[?7lABCX\u{1b}[?7hY", cols: 3, rows: 2)
+        XCTAssertEqual(out, "ABY")
+    }
+
+    func testDECSpecialGraphicsGolden() {
+        let out = render("\u{1b}(0lqk\u{1b}(Bq", cols: 5, rows: 1)
+        XCTAssertEqual(out, "┌─┐q")
+    }
+
+    func testWideAndCombiningGolden() {
+        let out = render("A界Be\u{0301}", cols: 8, rows: 1)
+        XCTAssertEqual(out, "A界 Be")
     }
 
     func testCursorAddressingGolden() {
@@ -63,5 +90,20 @@ final class VTConformanceCorpusTests: XCTestCase {
         // Here: write 1..4, set region 2;3, go to (3,1), and LF once → row2⇐row3, row3 blank.
         let out = render("11\r\n22\r\n33\r\n44\u{1b}[2;3r\u{1b}[3;1H\n", cols: 2, rows: 4)
         XCTAssertEqual(out, "11\n33\n\n44")
+    }
+
+    private func renderSnapshot(_ grid: TerminalGridSnapshot) -> String {
+        var lines: [String] = []
+        for r in 0 ..< grid.rows {
+            var line = ""
+            for c in 0 ..< grid.cols {
+                let cp = grid.cell(row: r, col: c)?.codepoint ?? 0
+                line.append((cp == 0 || cp == 0x20) ? " " : String(UnicodeScalar(cp) ?? " "))
+            }
+            while line.hasSuffix(" ") { line.removeLast() }
+            lines.append(line)
+        }
+        while let last = lines.last, last.isEmpty { lines.removeLast() }
+        return lines.joined(separator: "\n")
     }
 }

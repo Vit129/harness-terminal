@@ -37,6 +37,24 @@ public struct RasterizedGlyph: Equatable, Sendable {
     public let coverage: [UInt8]
 }
 
+struct ShapedRunCacheStats: Equatable {
+    var entries: Int
+    var hits: Int
+    var misses: Int
+    var evictions: Int
+}
+
+/// Identifies a CoreText-shaped text run. The cache is intentionally scoped to one
+/// `GlyphRasterizer`, which is owned by one surface renderer and used synchronously by encode.
+struct ShapedRunKey: Hashable {
+    var text: String
+    var bold: Bool
+    var italic: Bool
+    var fontPSName: String
+    var fontSize: Float
+    var scale: Float
+}
+
 /// Rasterizes glyphs with CoreText/CoreGraphics into alpha-coverage bitmaps and reports
 /// monospace cell metrics. CPU-only (no Metal), so it is unit-testable headlessly; the
 /// Metal renderer uploads the coverage into a texture atlas.
@@ -51,11 +69,34 @@ public final class GlyphRasterizer {
     private let bold: CTFont
     private let italic: CTFont
     private let boldItalic: CTFont
+    private let regularPSName: String
+    private let boldPSName: String
+    private let italicPSName: String
+    private let boldItalicPSName: String
     private let grayColorSpace = CGColorSpaceCreateDeviceGray()
+    private let shapedRunCacheLimit: Int
+    // Stores non-Sendable CTFont-bearing shaped glyphs; this rasterizer is single-surface,
+    // single-threaded renderer state, so the cache deliberately remains internal and unlocked.
+    private var shapedRunCache: [ShapedRunKey: [ShapedGlyph]] = [:]
+    private var shapedRunCacheOrder: [ShapedRunKey] = []
+    private var shapedRunCacheOrderStart = 0
+    private var shapedRunCacheHits = 0
+    private var shapedRunCacheMisses = 0
+    private var shapedRunCacheEvictions = 0
 
-    public init(fontFamily: String, size: CGFloat, scale: CGFloat = 2.0) {
+    var shapedRunStats: ShapedRunCacheStats {
+        ShapedRunCacheStats(
+            entries: shapedRunCache.count,
+            hits: shapedRunCacheHits,
+            misses: shapedRunCacheMisses,
+            evictions: shapedRunCacheEvictions
+        )
+    }
+
+    public init(fontFamily: String, size: CGFloat, scale: CGFloat = 2.0, shapedRunCacheLimit: Int = 3_000) {
         self.scale = scale
         self.pointSize = size
+        self.shapedRunCacheLimit = max(1, shapedRunCacheLimit)
         // Init only creates the four CTFont objects (regular/bold/italic/bold-italic) — it
         // does NOT rasterize any glyphs. Rasterization is on demand per codepoint via
         // `rasterize(...)`, so startup never pays to pre-rasterize ASCII or any warm-up set.
@@ -67,6 +108,10 @@ public final class GlyphRasterizer {
         bold = Self.applyTraits(base, size: size, add: .traitBold)
         italic = Self.applyTraits(base, size: size, add: .traitItalic)
         boldItalic = Self.applyTraits(base, size: size, add: [.traitBold, .traitItalic])
+        regularPSName = CTFontCopyPostScriptName(regular) as String
+        boldPSName = CTFontCopyPostScriptName(bold) as String
+        italicPSName = CTFontCopyPostScriptName(italic) as String
+        boldItalicPSName = CTFontCopyPostScriptName(boldItalic) as String
     }
 
     private static func applyTraits(_ font: CTFont, size: CGFloat, add traits: CTFontSymbolicTraits) -> CTFont {
@@ -79,6 +124,15 @@ public final class GlyphRasterizer {
         case (true, false): return bold
         case (false, true): return italic
         case (true, true): return boldItalic
+        }
+    }
+
+    private func fontAndPostScriptName(bold isBold: Bool, italic isItalic: Bool) -> (CTFont, String) {
+        switch (isBold, isItalic) {
+        case (false, false): return (regular, regularPSName)
+        case (true, false): return (bold, boldPSName)
+        case (false, true): return (italic, italicPSName)
+        case (true, true): return (boldItalic, boldItalicPSName)
         }
     }
 
@@ -145,7 +199,48 @@ public final class GlyphRasterizer {
     /// placed on its first cell and grid alignment is preserved.
     public func shape(_ text: String, bold isBold: Bool, italic isItalic: Bool) -> [ShapedGlyph] {
         guard !text.isEmpty else { return [] }
-        let base = font(bold: isBold, italic: isItalic)
+        let (base, fontPSName) = fontAndPostScriptName(bold: isBold, italic: isItalic)
+        let key = ShapedRunKey(
+            text: text,
+            bold: isBold,
+            italic: isItalic,
+            fontPSName: fontPSName,
+            fontSize: Float(pointSize),
+            scale: Float(scale)
+        )
+        if let cached = shapedRunCache[key] {
+            shapedRunCacheHits += 1
+            return cached
+        }
+
+        shapedRunCacheMisses += 1
+        let shaped = shapeUncached(text, font: base)
+        insertShapedRun(shaped, for: key)
+        return shaped
+    }
+
+    private func insertShapedRun(_ shaped: [ShapedGlyph], for key: ShapedRunKey) {
+        if shapedRunCache.count >= shapedRunCacheLimit,
+           shapedRunCacheOrderStart < shapedRunCacheOrder.count {
+            let evicted = shapedRunCacheOrder[shapedRunCacheOrderStart]
+            shapedRunCache.removeValue(forKey: evicted)
+            shapedRunCacheOrderStart += 1
+            shapedRunCacheEvictions += 1
+            compactShapedRunCacheOrderIfNeeded()
+        }
+        shapedRunCache[key] = shaped
+        shapedRunCacheOrder.append(key)
+    }
+
+    private func compactShapedRunCacheOrderIfNeeded() {
+        guard shapedRunCacheOrderStart > 64,
+              shapedRunCacheOrderStart * 2 >= shapedRunCacheOrder.count
+        else { return }
+        shapedRunCacheOrder.removeFirst(shapedRunCacheOrderStart)
+        shapedRunCacheOrderStart = 0
+    }
+
+    private func shapeUncached(_ text: String, font base: CTFont) -> [ShapedGlyph] {
         let fontKey = NSAttributedString.Key(kCTFontAttributeName as String)
         let attributed = NSAttributedString(string: text, attributes: [fontKey: base])
         let line = CTLineCreateWithAttributedString(attributed)

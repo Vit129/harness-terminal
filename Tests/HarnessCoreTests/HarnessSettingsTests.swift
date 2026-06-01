@@ -2,6 +2,8 @@ import XCTest
 @testable import HarnessCore
 
 final class HarnessSettingsTests: XCTestCase {
+    private let colorMigrationKey = "HarnessColorFidelityMigrationV1"
+
     func testOldSettingsWithCustomHexDoNotSilentlyOverrideThemes() throws {
         let data = Data("""
         {
@@ -21,6 +23,89 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertEqual(settings.customForegroundHex, "#ffffff")
     }
 
+    func testVividColorsDefaultsToAccurateSRGBWhenMissing() throws {
+        XCTAssertFalse(HarnessSettings().vividColors)
+        XCTAssertEqual(HarnessSettings().colorRendering, .accurate)
+        XCTAssertFalse(HarnessSettings.makeDefaults(imported: nil).vividColors)
+        XCTAssertEqual(HarnessSettings.makeDefaults(imported: nil).colorRendering, .accurate)
+
+        let legacy = Data("""
+        { "fontSize": 14, "customBackgroundHex": "#000000" }
+        """.utf8)
+        let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
+        XCTAssertFalse(migrated.vividColors)
+        XCTAssertEqual(migrated.colorRendering, .accurate)
+    }
+
+    func testVividColorsLoadMigrationPreservesExplicitChoice() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "vividColors": true }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            try withResetColorMigration {
+                let settings = HarnessSettings.load()
+                XCTAssertTrue(settings.vividColors)
+                XCTAssertEqual(settings.colorRendering, .vivid)
+            }
+        }
+    }
+
+    func testVividColorsLoadMigrationDefaultsMissingKeyToSRGB() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14 }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            try withResetColorMigration {
+                let settings = HarnessSettings.load()
+                XCTAssertFalse(settings.vividColors)
+                XCTAssertEqual(settings.colorRendering, .accurate)
+            }
+        }
+    }
+
+    func testColorRenderingLoadMigrationPreservesExplicitNewChoice() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "colorRendering": "vivid" }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            try withResetColorMigration {
+                let settings = HarnessSettings.load()
+                XCTAssertEqual(settings.colorRendering, .vivid)
+                XCTAssertTrue(settings.vividColors)
+            }
+        }
+    }
+
+    func testLegacyVividColorsMapsToVividRenderingMode() throws {
+        let legacy = Data("""
+        { "fontSize": 14, "vividColors": true }
+        """.utf8)
+        let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
+
+        XCTAssertTrue(migrated.vividColors)
+        XCTAssertEqual(migrated.colorRendering, .vivid)
+    }
+
+    func testExplicitRenderingModesRoundTripWithLegacyAliases() throws {
+        var settings = HarnessSettings(colorRendering: .vivid, textRendering: .soft)
+        settings.colorGamut = .displayP3
+
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: encoded)
+
+        XCTAssertEqual(decoded.colorRendering, .vivid)
+        XCTAssertEqual(decoded.colorGamut, .displayP3)
+        XCTAssertEqual(decoded.textRendering, .soft)
+        XCTAssertTrue(decoded.vividColors)
+        XCTAssertFalse(decoded.linearBlending)
+    }
+
     func testNotificationSoundRoundTripsAndDefaultsTrueWhenMissing() throws {
         // Older settings files predate the chime toggle: decoding must default it on
         // (so existing users keep an audible ping), not crash or default off.
@@ -36,6 +121,22 @@ final class HarnessSettingsTests: XCTestCase {
         let encoded = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(HarnessSettings.self, from: encoded)
         XCTAssertFalse(decoded.notificationSoundEnabled)
+    }
+
+    func testOffMainParserFramePipelineDefaultsOffAndRoundTrips() throws {
+        XCTAssertFalse(HarnessSettings().offMainParserFramePipeline)
+
+        let legacy = Data("""
+        { "fontSize": 14, "customBackgroundHex": "#000000" }
+        """.utf8)
+        let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
+        XCTAssertFalse(migrated.offMainParserFramePipeline)
+
+        var settings = HarnessSettings()
+        settings.offMainParserFramePipeline = true
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: encoded)
+        XCTAssertTrue(decoded.offMainParserFramePipeline)
     }
 
     func testImportedDefaultsKeepFullColorSet() {
@@ -148,5 +249,33 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertEqual(settings.fontFamily, "JetBrainsMono Nerd Font") // face imported
         XCTAssertEqual(settings.fontSize, HarnessSettings().fontSize)  // size is the Harness default
         XCTAssertEqual(settings.backgroundOpacity, 0.85)              // other fields still import
+    }
+
+    private func withTemporaryHarnessHome(_ body: (URL) throws -> Void) throws {
+        let previousHome = getenv("HARNESS_HOME").map { String(cString: $0) }
+        let root = URL(fileURLWithPath: "/tmp/harness-settings-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        setenv("HARNESS_HOME", root.path, 1)
+        defer {
+            if let previousHome {
+                setenv("HARNESS_HOME", previousHome, 1)
+            } else {
+                unsetenv("HARNESS_HOME")
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+        try body(root)
+    }
+
+    private func withResetColorMigration(_ body: () throws -> Void) throws {
+        let previousValue = UserDefaults.standard.object(forKey: colorMigrationKey)
+        UserDefaults.standard.removeObject(forKey: colorMigrationKey)
+        defer {
+            if let previousValue {
+                UserDefaults.standard.set(previousValue, forKey: colorMigrationKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: colorMigrationKey)
+            }
+        }
+        try body()
     }
 }

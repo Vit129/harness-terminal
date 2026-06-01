@@ -1,5 +1,44 @@
 import Foundation
 
+public enum TerminalColorRenderingMode: String, Codable, Sendable {
+    case accurate
+    case vivid
+}
+
+public enum TerminalColorGamut: String, Codable, Sendable {
+    case sRGB = "srgb"
+    case displayP3 = "display-p3"
+    case auto
+
+    public static func resolved(
+        renderingMode: TerminalColorRenderingMode,
+        requested: TerminalColorGamut
+    ) -> TerminalColorGamut {
+        switch renderingMode {
+        case .accurate:
+            // Accurate mode is the authored sRGB identity path regardless of the stored gamut.
+            return .sRGB
+        case .vivid:
+            // This task's wide-gamut path is explicit Display-P3 output.
+            return .displayP3
+        }
+    }
+}
+
+public enum TerminalTextRenderingMode: String, Codable, Sendable {
+    case native
+    case crisp
+    case soft
+
+    public var glyphGamma: Float {
+        switch self {
+        case .native: return 1.0
+        case .crisp: return 0.8
+        case .soft: return 1.15
+        }
+    }
+}
+
 public struct HarnessSettings: Codable, Sendable, Equatable {
     public var fontSize: Float
     public var fontFamily: String
@@ -56,12 +95,40 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// is on, the banner carries the sound; when banners are off but this is on, Harness
     /// plays an in-app chime so an agent stopping / needing input is still audible.
     public var notificationSoundEnabled: Bool
-    /// Extra-saturated full Display-P3 gamut when true; accurate sRGB (the source terminal
-    /// parity, the default) when false. Maps to `window-colorspace`.
-    public var vividColors: Bool
-    /// Gamma-correct ("linear-corrected") alpha blending for text antialiasing when
-    /// true, or macOS-native blending when false. Maps to `alpha-blending`.
-    public var linearBlending: Bool
+    /// Terminal color interpretation. `.accurate` is the authored sRGB identity path.
+    /// `.vivid` opts into Display-P3 conversion plus a capped saturation lift.
+    public var colorRendering: TerminalColorRenderingMode {
+        didSet {
+            let legacyValue = colorRendering == .vivid
+            if vividColors != legacyValue { vividColors = legacyValue }
+        }
+    }
+    /// Stored for future gamut policy. Accurate mode currently resolves to sRGB; vivid mode
+    /// resolves to Display-P3.
+    public var colorGamut: TerminalColorGamut
+    /// Text antialiasing coverage mode. This only maps to glyph coverage gamma; it never
+    /// participates in RGB conversion.
+    public var textRendering: TerminalTextRenderingMode {
+        didSet {
+            let legacyValue = textRendering == .crisp
+            if linearBlending != legacyValue { linearBlending = legacyValue }
+        }
+    }
+    /// Legacy compatibility field. Kept in sync with `colorRendering` so old configs and
+    /// existing callers preserve behavior while new code uses the explicit mode.
+    public var vividColors: Bool {
+        didSet {
+            let mode: TerminalColorRenderingMode = vividColors ? .vivid : .accurate
+            if colorRendering != mode { colorRendering = mode }
+        }
+    }
+    /// Legacy compatibility field. `true` maps to `.crisp`; `false` maps to `.native`.
+    public var linearBlending: Bool {
+        didSet {
+            let mode: TerminalTextRenderingMode = linearBlending ? .crisp : .native
+            if textRendering != mode { textRendering = mode }
+        }
+    }
     /// When true, the active theme's 16 ANSI colors recolor terminal *output* too. Default
     /// false: the canvas (default bg/fg/cursor) always follows the
     /// theme so it matches the chrome, but program output keeps untouched/default ANSI
@@ -71,6 +138,9 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// Programming-font ligatures (e.g. `=>`, `!=`, `->`) via CoreText run shaping. On by
     /// default; turn off for the fastest one-glyph-per-cell path.
     public var ligatures: Bool
+    /// Experimental Task 8 pipeline: moves terminal byte ingestion and frame building to a
+    /// per-surface serial worker while keeping AppKit/Metal presentation on main. Default off.
+    public var offMainParserFramePipeline: Bool
     /// Draw the OSC 133 prompt gutter — a per-row stripe in the left margin marking shell
     /// prompts (green = success, red = failure). Off by default; the marks still power
     /// jump-to-prompt either way, so this only controls the stripe's visibility.
@@ -141,10 +211,14 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         statusLineHex: String? = nil,
         systemNotificationsEnabled: Bool = true,
         notificationSoundEnabled: Bool = true,
-        vividColors: Bool = true,
+        colorRendering: TerminalColorRenderingMode? = nil,
+        colorGamut: TerminalColorGamut = .auto,
+        textRendering: TerminalTextRenderingMode? = nil,
+        vividColors: Bool = false,
         linearBlending: Bool = false,
         applyThemeToTerminalOutput: Bool = false,
         ligatures: Bool = true,
+        offMainParserFramePipeline: Bool = false,
         showPromptGutter: Bool = false,
         showStatusLine: Bool = true,
         // Fresh installs default to the simplest experience — a fast native terminal that
@@ -182,10 +256,16 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.statusLineHex = statusLineHex
         self.systemNotificationsEnabled = systemNotificationsEnabled
         self.notificationSoundEnabled = notificationSoundEnabled
-        self.vividColors = vividColors
-        self.linearBlending = linearBlending
+        let resolvedColorRendering = colorRendering ?? (vividColors ? .vivid : .accurate)
+        let resolvedTextRendering = textRendering ?? (linearBlending ? .crisp : .native)
+        self.colorRendering = resolvedColorRendering
+        self.colorGamut = colorGamut
+        self.textRendering = resolvedTextRendering
+        self.vividColors = resolvedColorRendering == .vivid
+        self.linearBlending = resolvedTextRendering == .crisp
         self.applyThemeToTerminalOutput = applyThemeToTerminalOutput
         self.ligatures = ligatures
+        self.offMainParserFramePipeline = offMainParserFramePipeline
         self.showPromptGutter = showPromptGutter
         self.showStatusLine = showStatusLine
         self.experienceMode = experienceMode
@@ -286,10 +366,23 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         statusLineHex = try container.decodeIfPresent(String.self, forKey: .statusLineHex)
         systemNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .systemNotificationsEnabled) ?? true
         notificationSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationSoundEnabled) ?? true
-        vividColors = try container.decodeIfPresent(Bool.self, forKey: .vividColors) ?? fallback.vividColors
-        linearBlending = try container.decodeIfPresent(Bool.self, forKey: .linearBlending) ?? fallback.linearBlending
+        let legacyVivid = try container.decodeIfPresent(Bool.self, forKey: .vividColors)
+        let decodedColorRendering = try container.decodeIfPresent(TerminalColorRenderingMode.self, forKey: .colorRendering)
+        let resolvedColorRendering = decodedColorRendering
+            ?? ((legacyVivid ?? fallback.vividColors) ? .vivid : fallback.colorRendering)
+        colorRendering = resolvedColorRendering
+        colorGamut = try container.decodeIfPresent(TerminalColorGamut.self, forKey: .colorGamut) ?? fallback.colorGamut
+
+        let legacyLinear = try container.decodeIfPresent(Bool.self, forKey: .linearBlending)
+        let decodedTextRendering = try container.decodeIfPresent(TerminalTextRenderingMode.self, forKey: .textRendering)
+        let resolvedTextRendering = decodedTextRendering
+            ?? ((legacyLinear ?? fallback.linearBlending) ? .crisp : fallback.textRendering)
+        textRendering = resolvedTextRendering
+        vividColors = resolvedColorRendering == .vivid
+        linearBlending = resolvedTextRendering == .crisp
         applyThemeToTerminalOutput = try container.decodeIfPresent(Bool.self, forKey: .applyThemeToTerminalOutput) ?? fallback.applyThemeToTerminalOutput
         ligatures = try container.decodeIfPresent(Bool.self, forKey: .ligatures) ?? fallback.ligatures
+        offMainParserFramePipeline = try container.decodeIfPresent(Bool.self, forKey: .offMainParserFramePipeline) ?? false
         showPromptGutter = try container.decodeIfPresent(Bool.self, forKey: .showPromptGutter) ?? fallback.showPromptGutter
         showStatusLine = try container.decodeIfPresent(Bool.self, forKey: .showStatusLine) ?? fallback.showStatusLine
         // Behavior-preserving migration: a settings file that predates modes was written by a
@@ -306,6 +399,7 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
            let data = try? Data(contentsOf: HarnessPaths.settingsURL),
            var settings = try? JSONDecoder().decode(HarnessSettings.self, from: data)
         {
+            let hasStoredColorChoice = settingsDataContainsColorChoice(data)
             // Schema migration: when the saved file predates a feature (e.g. it
             // was written before customBackgroundHex existed, or before the
             // user installed a source terminal), backfill from the live terminal config so
@@ -318,15 +412,15 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
             // Anything below 30% makes the window effectively invisible.
             settings.backgroundOpacity = HarnessSettings.clampedOpacity(settings.backgroundOpacity)
             settings.backgroundBlur = HarnessSettings.clampedBlur(settings.backgroundBlur)
-            // One-shot color-fidelity migration: the previous default rendered in
-            // sRGB, which clamped the renderer's wide gamut and washed out chromatic
-            // colors. Flip existing installs to vivid Display-P3 once (users can
-            // toggle back in Settings ▸ Appearance). Keyed in UserDefaults so it
-            // runs exactly once and never overrides a later explicit choice.
+            // One-shot color-fidelity migration: explicit vividColors/colorRendering keys
+            // are the user's gamut choice. Older files that lack both never made one, so
+            // land them on accurate sRGB.
             let migrationKey = "HarnessColorFidelityMigrationV1"
             if !UserDefaults.standard.bool(forKey: migrationKey) {
                 UserDefaults.standard.set(true, forKey: migrationKey)
-                settings.vividColors = true
+                if !hasStoredColorChoice {
+                    settings.colorRendering = .accurate
+                }
             }
             // Persist the migration so on next save we don't lose it.
             try? settings.save()
@@ -337,6 +431,14 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         let seeded = HarnessSettings.makeDefaults(imported: imported)
         try? seeded.save()
         return seeded
+    }
+
+    private static func settingsDataContainsColorChoice(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object[CodingKeys.vividColors.stringValue] != nil
+            || object[CodingKeys.colorRendering.stringValue] != nil
     }
 
     /// Opacity bounds. The user can pick any value from fully transparent to

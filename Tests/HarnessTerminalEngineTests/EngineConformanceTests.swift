@@ -13,6 +13,192 @@ final class EngineConformanceTests: XCTestCase {
         return term.readGrid()!
     }
 
+    private func codepoint(_ literal: String) -> UInt32 {
+        literal.unicodeScalars.first!.value
+    }
+
+    // MARK: - Harness-owned conformance fixtures
+
+    /// These fixtures are Harness's own conformance suite: small, inline examples that lock
+    /// protocol behavior without importing any external terminal test corpus.
+
+    func testHarnessFixtureSGRBasicColors() {
+        let grid = read("\u{1b}[31;44mA", cols: 4, rows: 1)
+        let cell = grid.cell(row: 0, col: 0)
+        XCTAssertEqual(cell?.foreground, .palette(1))
+        XCTAssertEqual(cell?.background, .palette(4))
+    }
+
+    func testHarnessFixtureSGRTruecolorForegroundAndBackground() {
+        let grid = read("\u{1b}[38;2;1;2;3;48;2;4;5;6mT", cols: 4, rows: 1)
+        let cell = grid.cell(row: 0, col: 0)
+        XCTAssertEqual(cell?.foreground, .rgb(r: 1, g: 2, b: 3))
+        XCTAssertEqual(cell?.background, .rgb(r: 4, g: 5, b: 6))
+    }
+
+    func testHarnessFixtureTextStyleSGRAttributes() {
+        let grid = read("\u{1b}[1;2;3;4mA", cols: 4, rows: 1)
+        let cell = grid.cell(row: 0, col: 0)
+        XCTAssertEqual(cell?.bold, true)
+        XCTAssertEqual(cell?.faint, true)
+        XCTAssertEqual(cell?.italic, true)
+        XCTAssertEqual(cell?.underline, .single)
+    }
+
+    func testHarnessFixtureStrikeOverlineAndResets() {
+        let grid = read("\u{1b}[9;53mA\u{1b}[29;55mB", cols: 4, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.strikethrough, true)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.overline, true)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.strikethrough, false)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.overline, false)
+    }
+
+    func testHarnessFixtureCursorMovementCUPAndCHA() {
+        let grid = read("A\u{1b}[2;4HB\u{1b}[1GC", cols: 6, rows: 3)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("A"))
+        XCTAssertEqual(grid.cell(row: 1, col: 0)?.codepoint, codepoint("C"))
+        XCTAssertEqual(grid.cell(row: 1, col: 3)?.codepoint, codepoint("B"))
+        XCTAssertEqual(grid.cursor.row, 1)
+        XCTAssertEqual(grid.cursor.col, 1)
+    }
+
+    func testHarnessFixtureEraseInLineModeOneClearsLeftOfCursor() {
+        let grid = read("ABCDE\u{1b}[1;3H\u{1b}[1K", cols: 5, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 0, col: 3)?.codepoint, codepoint("D"))
+        XCTAssertEqual(grid.cell(row: 0, col: 4)?.codepoint, codepoint("E"))
+    }
+
+    func testHarnessFixtureEraseInDisplayModeZeroClearsFromCursorForward() {
+        let grid = read("AAAA\r\nBBBB\u{1b}[1;3H\u{1b}[J", cols: 4, rows: 2)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("A"))
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, codepoint("A"))
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 1, col: 0)?.codepoint, 0)
+    }
+
+    func testHarnessFixtureInsertAndDeleteCharactersPreserveAttributes() {
+        let grid = read("\u{1b}[31mABCD\u{1b}[1;2H\u{1b}[2@\u{1b}[32mZ\u{1b}[1;1H\u{1b}[1P", cols: 6, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("Z"))
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.foreground, .palette(2))
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.codepoint, codepoint("B"))
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.foreground, .palette(1))
+    }
+
+    func testHarnessFixtureInsertAndDeleteLinesStayInsideScrollRegion() {
+        let insert = read("111\r\n222\r\n333\r\n444\u{1b}[2;4r\u{1b}[3;1H\u{1b}[L", cols: 3, rows: 4)
+        XCTAssertEqual(insert.cell(row: 0, col: 0)?.codepoint, codepoint("1"))
+        XCTAssertEqual(insert.cell(row: 1, col: 0)?.codepoint, codepoint("2"))
+        XCTAssertEqual(insert.cell(row: 2, col: 0)?.codepoint, 0)
+        XCTAssertEqual(insert.cell(row: 3, col: 0)?.codepoint, codepoint("3"))
+
+        let delete = read("111\r\n222\r\n333\r\n444\u{1b}[2;4r\u{1b}[2;1H\u{1b}[M", cols: 3, rows: 4)
+        XCTAssertEqual(delete.cell(row: 0, col: 0)?.codepoint, codepoint("1"))
+        XCTAssertEqual(delete.cell(row: 1, col: 0)?.codepoint, codepoint("3"))
+        XCTAssertEqual(delete.cell(row: 2, col: 0)?.codepoint, codepoint("4"))
+        XCTAssertEqual(delete.cell(row: 3, col: 0)?.codepoint, 0)
+    }
+
+    func testHarnessFixtureScrollRegionKeepsOutsideRowsPinned() {
+        let grid = read("top\r\n111\r\n222\r\nbot\u{1b}[2;3r\u{1b}[3;1H\n", cols: 4, rows: 4)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("t"))
+        XCTAssertEqual(grid.cell(row: 1, col: 0)?.codepoint, codepoint("2"))
+        XCTAssertEqual(grid.cell(row: 2, col: 0)?.codepoint, 0)
+        XCTAssertEqual(grid.cell(row: 3, col: 0)?.codepoint, codepoint("b"))
+    }
+
+    func testHarnessFixtureAlternateScreenRestoresPrimaryTextAndAttributes() {
+        let term = HarnessGridTerminal(cols: 8, rows: 2)!
+        term.feed("\u{1b}[31mP")
+        term.feed("\u{1b}[?1049h\u{1b}[32mA")
+        XCTAssertEqual(term.readGrid()!.cell(row: 0, col: 0)?.foreground, .palette(2))
+        term.feed("\u{1b}[?1049l")
+        let grid = term.readGrid()!
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("P"))
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.foreground, .palette(1))
+    }
+
+    func testHarnessFixtureAutowrapCanBeDisabledAndReenabled() {
+        let grid = read("\u{1b}[?7lABCX\u{1b}[?7hYZ", cols: 3, rows: 2)
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.codepoint, codepoint("Y"))
+        XCTAssertEqual(grid.cursor.row, 1)
+        XCTAssertEqual(grid.cursor.col, 1)
+        XCTAssertEqual(grid.cell(row: 1, col: 0)?.codepoint, codepoint("Z"))
+    }
+
+    func testHarnessFixtureBracketedPasteModeDrivesInputEncoder() {
+        let term = HarnessGridTerminal(cols: 8, rows: 1)!
+        term.feed("\u{1b}[?2004h")
+        XCTAssertTrue(term.modes.bracketedPaste)
+        XCTAssertEqual(
+            String(decoding: InputEncoder().encodePaste("hi", modes: term.modes), as: UTF8.self),
+            "\u{1b}[200~hi\u{1b}[201~"
+        )
+        term.feed("\u{1b}[?2004l")
+        XCTAssertFalse(term.modes.bracketedPaste)
+    }
+
+    func testHarnessFixtureOSC8HyperlinksUseStableCellIDs() {
+        let term = HarnessGridTerminal(cols: 8, rows: 1)!
+        term.feed("\u{1b}]8;;https://one.example\u{1b}\\AB\u{1b}]8;;https://two.example\u{1b}\\C")
+        let grid = term.readGrid()!
+        let first = grid.cell(row: 0, col: 0)!.hyperlinkID
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.hyperlinkID, first)
+        XCTAssertNotEqual(grid.cell(row: 0, col: 2)?.hyperlinkID, first)
+        XCTAssertEqual(term.hyperlinkURL(id: first), "https://one.example")
+        XCTAssertEqual(term.hyperlinkURL(id: grid.cell(row: 0, col: 2)!.hyperlinkID), "https://two.example")
+    }
+
+    func testHarnessFixtureOSC52DecodesUnicodeClipboardPayload() {
+        let term = HarnessGridTerminal(cols: 8, rows: 1)!
+        var captured: String?
+        term.onSetClipboard = { captured = $0 }
+        let payload = Data("copy ✓".utf8).base64EncodedString()
+        term.feed("\u{1b}]52;c;\(payload)\u{07}")
+        XCTAssertEqual(captured, "copy ✓")
+    }
+
+    func testHarnessFixtureOSC133MarksCarryExitStatusInSnapshot() {
+        let term = HarnessGridTerminal(cols: 12, rows: 2)!
+        term.feed("\u{1b}]133;A\u{07}$ false\r\n\u{1b}]133;D;7\u{07}")
+        let grid = term.readGrid()!
+        XCTAssertEqual(grid.marks[0]?.exit, 7)
+        XCTAssertEqual(term.promptRows, [0])
+    }
+
+    func testHarnessFixtureDECSpecialGraphicsMapsLineDrawing() {
+        let grid = read("\u{1b}(0lqk\u{1b}(Bq", cols: 5, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0x250C)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, 0x2500)
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.codepoint, 0x2510)
+        XCTAssertEqual(grid.cell(row: 0, col: 3)?.codepoint, codepoint("q"))
+    }
+
+    func testHarnessFixtureWideCharacterMarksTailCell() {
+        let grid = read("A界B", cols: 6, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.width, .normal)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, "界".unicodeScalars.first!.value)
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.width, .wide)
+        XCTAssertEqual(grid.cell(row: 0, col: 2)?.width, .spacerTail)
+        XCTAssertEqual(grid.cell(row: 0, col: 3)?.codepoint, codepoint("B"))
+    }
+
+    func testHarnessFixtureCombiningMarkStaysOnBaseCell() {
+        let grid = read("e\u{0301}x", cols: 4, rows: 1)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("e"))
+        XCTAssertEqual(grid.cell(row: 0, col: 1)?.codepoint, codepoint("x"))
+        XCTAssertEqual(grid.cursor.col, 2)
+    }
+
+    func testHarnessFixtureDECSCUSRUnderlineCursorShape() {
+        let grid = read("\u{1b}[4 q", cols: 4, rows: 1)
+        XCTAssertEqual(grid.cursor.shape, .underline)
+        XCTAssertEqual(grid.cursor.blinking, false)
+    }
+
     func testAutowrapToNextLine() {
         let line = String(repeating: "a", count: 80) + "b"
         let grid = read(line, cols: 80, rows: 24)

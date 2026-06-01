@@ -4,6 +4,43 @@ import Metal
 import QuartzCore
 import simd
 
+public struct TerminalRenderStats: Equatable, Sendable {
+    public var cells: Int
+    public var bgInstances: Int
+    public var bgSpans: Int
+    public var bgCells: Int
+    public var glyphInstances: Int
+    public var decoInstances: Int
+    public var imageInstances: Int
+    public var atlasPages: Int
+    public var frameBuildNanos: UInt64
+    public var encodeNanos: UInt64
+
+    public init(
+        cells: Int = 0,
+        bgInstances: Int = 0,
+        bgSpans: Int = 0,
+        bgCells: Int = 0,
+        glyphInstances: Int = 0,
+        decoInstances: Int = 0,
+        imageInstances: Int = 0,
+        atlasPages: Int = 1,
+        frameBuildNanos: UInt64 = 0,
+        encodeNanos: UInt64 = 0
+    ) {
+        self.cells = cells
+        self.bgInstances = bgInstances
+        self.bgSpans = bgSpans
+        self.bgCells = bgCells
+        self.glyphInstances = glyphInstances
+        self.decoInstances = decoInstances
+        self.imageInstances = imageInstances
+        self.atlasPages = atlasPages
+        self.frameBuildNanos = frameBuildNanos
+        self.encodeNanos = encodeNanos
+    }
+}
+
 /// GPU instance layouts — must match the structs in `MetalShaders.source`.
 private struct BgInstance {
     var origin: SIMD2<Float>
@@ -11,11 +48,20 @@ private struct BgInstance {
     var color: SIMD4<Float>
 }
 
+private struct PendingBgSpan {
+    var row: Int
+    var endColumn: Int
+    var color: RenderColor
+    var instance: BgInstance
+}
+
 private struct GlyphInstance {
     var origin: SIMD2<Float>
     var size: SIMD2<Float>
     var uvOrigin: SIMD2<Float>
     var uvSize: SIMD2<Float>
+    /// Must mirror Metal `GlyphInstance.pageIndex` (uint@32, padding to color@48).
+    var pageIndex: UInt32
     var color: SIMD4<Float>
 }
 
@@ -55,6 +101,8 @@ public final class TerminalMetalRenderer {
     public let device: MTLDevice
     public let cellPixelWidth: Int
     public let cellPixelHeight: Int
+    public private(set) var stats = TerminalRenderStats()
+    public var glyphAtlasStats: GlyphAtlasStats { atlas.stats }
 
     private let commandQueue: MTLCommandQueue
     private let bgPipeline: MTLRenderPipelineState
@@ -80,10 +128,22 @@ public final class TerminalMetalRenderer {
     /// Index of the ring slot the current frame writes into; advanced once per `encode`.
     private var frameSlot = 0
 
-    public init?(device: MTLDevice, fontFamily: String, fontSize: CGFloat, scale: CGFloat) {
+    public init?(
+        device: MTLDevice,
+        fontFamily: String,
+        fontSize: CGFloat,
+        scale: CGFloat,
+        atlasSize: Int = 1024,
+        atlasMaxPages: Int = 4
+    ) {
         guard let queue = device.makeCommandQueue() else { return nil }
         let rasterizer = GlyphRasterizer(fontFamily: fontFamily, size: fontSize, scale: scale)
-        guard let atlas = GlyphAtlas(device: device, rasterizer: rasterizer) else { return nil }
+        guard let atlas = GlyphAtlas(
+            device: device,
+            rasterizer: rasterizer,
+            size: atlasSize,
+            maxPages: atlasMaxPages
+        ) else { return nil }
 
         let metrics = rasterizer.metrics()
         self.cellPixelWidth = max(1, Int((metrics.width * scale).rounded()))
@@ -165,10 +225,23 @@ public final class TerminalMetalRenderer {
     /// the same alpha). The builder marks those cells `drawBackground == false` and the renderer
     /// skips their quads, so they show through to `clearColor`; a mismatch would mis-color every
     /// default cell. `HarnessTerminalSurfaceView` satisfies this by sourcing both from one value.
-    public func render(_ frame: TerminalFrame, to target: MTLTexture, clearColor: RenderColor, origin: (x: Int, y: Int) = (0, 0), gamma: Float = 1, ligatures: Bool = false) {
-        guard let commandBuffer = encode(frame, target: target, clearColor: clearColor, origin: origin, gamma: gamma, ligatures: ligatures) else { return }
+    @discardableResult
+    public func render(
+        _ frame: TerminalFrame,
+        to target: MTLTexture,
+        clearColor: RenderColor,
+        origin: (x: Int, y: Int) = (0, 0),
+        gamma: Float = 1,
+        ligatures: Bool = false,
+        frameBuildNanos: UInt64 = 0
+    ) -> Bool {
+        guard let commandBuffer = encode(
+            frame, target: target, clearColor: clearColor, origin: origin,
+            gamma: gamma, ligatures: ligatures, frameBuildNanos: frameBuildNanos
+        ) else { return false }
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        return true
     }
 
     /// Render `frame` into a layer drawable and present it. Used by the live view.
@@ -176,15 +249,42 @@ public final class TerminalMetalRenderer {
     /// `gamma` > 1 applies gamma-correct (linear) text coverage; 1 = native blending.
     /// `ligatures` enables CoreText run shaping (programming-font ligatures).
     /// `clearColor` carries the same default-background contract as `render(_:to:clearColor:…)`.
-    public func present(_ frame: TerminalFrame, to drawable: CAMetalDrawable, clearColor: RenderColor, origin: (x: Int, y: Int) = (0, 0), gamma: Float = 1, ligatures: Bool = false) {
-        guard let commandBuffer = encode(frame, target: drawable.texture, clearColor: clearColor, origin: origin, gamma: gamma, ligatures: ligatures) else { return }
+    @discardableResult
+    public func present(
+        _ frame: TerminalFrame,
+        to drawable: CAMetalDrawable,
+        clearColor: RenderColor,
+        origin: (x: Int, y: Int) = (0, 0),
+        gamma: Float = 1,
+        ligatures: Bool = false,
+        frameBuildNanos: UInt64 = 0
+    ) -> Bool {
+        guard let commandBuffer = encode(
+            frame, target: drawable.texture, clearColor: clearColor, origin: origin,
+            gamma: gamma, ligatures: ligatures, frameBuildNanos: frameBuildNanos
+        ) else { return false }
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        return true
     }
 
     /// Build the instance buffers and encode the background, glyph, and decoration passes
     /// into a fresh command buffer. Caller decides whether to wait (offscreen) or present.
-    private func encode(_ frame: TerminalFrame, target: MTLTexture, clearColor: RenderColor, origin: (x: Int, y: Int), gamma: Float, ligatures: Bool) -> MTLCommandBuffer? {
+    func encode(
+        _ frame: TerminalFrame,
+        target: MTLTexture,
+        clearColor: RenderColor,
+        origin: (x: Int, y: Int),
+        gamma: Float,
+        ligatures: Bool,
+        frameBuildNanos: UInt64 = 0
+    ) -> MTLCommandBuffer? {
+        let encodeStart = DispatchTime.now().uptimeNanoseconds
+        var frameStats = TerminalRenderStats(
+            cells: frame.cells.count,
+            atlasPages: atlas.stats.pages,
+            frameBuildNanos: frameBuildNanos
+        )
         let viewport = SIMD2<Float>(Float(target.width), Float(target.height))
         let ox = Float(origin.x)
         let oy = Float(origin.y)
@@ -207,26 +307,62 @@ public final class TerminalMetalRenderer {
         backgrounds.reserveCapacity(frame.cells.count + 1)
         var glyphs: [GlyphInstance] = []
         var decorations: [DecoInstance] = []
+        var pendingBgSpan: PendingBgSpan?
+        var bgSpanCount = 0
+        var bgCellCount = 0
+
+        func flushPendingBgSpan() {
+            guard let span = pendingBgSpan else { return }
+            backgrounds.append(span.instance)
+            bgSpanCount += 1
+            pendingBgSpan = nil
+        }
+
+        func appendCellBackground(_ cell: RenderCell, originX: Float, originY: Float) {
+            bgCellCount += 1
+            if var span = pendingBgSpan,
+               span.row == cell.row,
+               span.endColumn + 1 == cell.column,
+               span.color == cell.background {
+                span.endColumn = cell.column
+                span.instance.size.x += cellW
+                pendingBgSpan = span
+                return
+            }
+
+            flushPendingBgSpan()
+            pendingBgSpan = PendingBgSpan(
+                row: cell.row,
+                endColumn: cell.column,
+                color: cell.background,
+                instance: BgInstance(
+                    origin: SIMD2(originX, originY),
+                    size: SIMD2(cellW, cellH),
+                    color: vector(cell.background)
+                )
+            )
+        }
 
         for cell in frame.cells {
             let originX = ox + Float(cell.column * cellPixelWidth)
             let originY = oy + Float(cell.row * cellPixelHeight)
-            // Default canvas cells already match the cleared target, so the FrameBuilder marks
-            // them `drawBackground == false` and we skip the redundant quad. Block-element fills
-            // and decorations below still emit unconditionally.
-            if cell.drawBackground {
-                backgrounds.append(BgInstance(
-                    origin: SIMD2(originX, originY),
-                    size: SIMD2(cellW, cellH),
-                    color: vector(cell.background)
-                ))
-            }
-
+            let blockRects = Self.blockElementRects(cell.codepoint)
             // Block-element characters (█ ▀ ▄ ▌ quadrants …) are drawn as exact-fill rects in
             // the foreground color rather than as font glyphs — font glyphs leave sub-pixel
             // gaps that show as grid seams in block art (the Codex/Claude mascots). The fills
             // share the background pass (opaque, painter-ordered after the cell bg).
-            if let rects = Self.blockElementRects(cell.codepoint) {
+            if let rects = blockRects {
+                flushPendingBgSpan()
+                if cell.drawBackground {
+                    bgCellCount += 1
+                    backgrounds.append(BgInstance(
+                        origin: SIMD2(originX, originY),
+                        size: SIMD2(cellW, cellH),
+                        color: vector(cell.background)
+                    ))
+                    bgSpanCount += 1
+                }
+
                 let fill = vector(cell.foreground)
                 for r in rects {
                     let x0 = originX + (r.0 * cellW).rounded()
@@ -237,6 +373,11 @@ public final class TerminalMetalRenderer {
                         origin: SIMD2(x0, y0), size: SIMD2(x1 - x0, y1 - y0), color: fill
                     ))
                 }
+            } else if cell.drawBackground {
+                // Default canvas cells already match the cleared target, so the FrameBuilder
+                // marks them `drawBackground == false` and we skip the redundant quad. Adjacent
+                // same-color explicit backgrounds are merged into one row span here.
+                appendCellBackground(cell, originX: originX, originY: originY)
             }
 
             // Line decorations sit on top of the glyph; emit for the full cell.
@@ -245,6 +386,7 @@ public final class TerminalMetalRenderer {
                               thickness: thickness, underlineY: underlineY,
                               strikeY: strikeY, overlineY: overlineY, into: &decorations)
         }
+        flushPendingBgSpan()
 
         // OSC 133 prompt gutter: a thin vertical stripe in the left margin marking shell-prompt
         // rows (green/red/neutral, resolved in the FrameBuilder). Appended after the cell
@@ -302,6 +444,11 @@ public final class TerminalMetalRenderer {
                 color: vector(frame.cursor.color)
             ))
         }
+        frameStats.bgInstances = backgrounds.count
+        frameStats.bgSpans = bgSpanCount
+        frameStats.bgCells = bgCellCount
+        frameStats.glyphInstances = glyphs.count
+        frameStats.decoInstances = decorations.count
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
@@ -340,7 +487,13 @@ public final class TerminalMetalRenderer {
         }
 
         // Images with z < 0 draw below text (Kitty negative z-index).
-        drawImages(frame.images.filter { $0.z < 0 }, encoder: renderEncoder, viewport: &vp, ox: ox, oy: oy)
+        frameStats.imageInstances += drawImages(
+            frame.images.filter { $0.z < 0 },
+            encoder: renderEncoder,
+            viewport: &vp,
+            ox: ox,
+            oy: oy
+        )
 
         // Glyph pass (with the gamma-correct coverage uniform).
         if let buffer = glyphInstanceBuffer.upload(glyphs, slot: frameSlot) {
@@ -363,17 +516,27 @@ public final class TerminalMetalRenderer {
         }
 
         // Images with z >= 0 (the default) draw above text.
-        drawImages(frame.images.filter { $0.z >= 0 }, encoder: renderEncoder, viewport: &vp, ox: ox, oy: oy)
+        frameStats.imageInstances += drawImages(
+            frame.images.filter { $0.z >= 0 },
+            encoder: renderEncoder,
+            viewport: &vp,
+            ox: ox,
+            oy: oy
+        )
 
         renderEncoder.endEncoding()
+        frameStats.atlasPages = atlas.stats.pages
+        frameStats.encodeNanos = DispatchTime.now().uptimeNanoseconds &- encodeStart
+        stats = frameStats
         return commandBuffer
     }
 
     /// Draw each inline image as a textured quad at its cell rect. One draw per image (each has
     /// its own texture); the GPU clips quads that extend past the viewport (images scrolling off).
-    private func drawImages(_ images: [FrameImage], encoder: MTLRenderCommandEncoder, viewport: inout SIMD2<Float>, ox: Float, oy: Float) {
-        guard !images.isEmpty else { return }
+    private func drawImages(_ images: [FrameImage], encoder: MTLRenderCommandEncoder, viewport: inout SIMD2<Float>, ox: Float, oy: Float) -> Int {
+        guard !images.isEmpty else { return 0 }
         let cellW = Float(cellPixelWidth), cellH = Float(cellPixelHeight)
+        var drawn = 0
         encoder.setRenderPipelineState(imagePipeline)
         encoder.setFragmentSamplerState(sampler, index: 0)
         for img in images {
@@ -387,7 +550,9 @@ public final class TerminalMetalRenderer {
             encoder.setVertexBytes(&viewport, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
             encoder.setFragmentTexture(texture, index: 0)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: 1)
+            drawn += 1
         }
+        return drawn
     }
 
     /// Emit underline (any style) + strikethrough + overline decoration instances for a cell.
@@ -542,6 +707,7 @@ public final class TerminalMetalRenderer {
             size: SIMD2(Float(entry.pixelWidth), Float(entry.pixelHeight)),
             uvOrigin: entry.uvOrigin,
             uvSize: entry.uvSize,
+            pageIndex: UInt32(entry.pageIndex),
             color: color
         )
     }
@@ -596,4 +762,3 @@ public final class TerminalMetalRenderer {
         }
     }
 }
-

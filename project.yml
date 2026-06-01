@@ -113,6 +113,8 @@ targets:
         product: HarnessTerminalEngine
       - package: Harness
         product: HarnessTerminalKit
+      - package: Harness
+        product: HarnessTheme
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.robert.harness.cli
       PRODUCT_NAME: harness-cli

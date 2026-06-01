@@ -134,7 +134,10 @@ public final class TerminalHostView: NSView {
             themeName: themeName,
             fontFamily: settings?.fontFamily ?? "Menlo",
             fontSize: CGFloat(settings?.fontSize ?? 14),
-            vivid: settings?.vividColors ?? true
+            vivid: settings?.vividColors ?? false,
+            colorRendering: settings?.colorRendering,
+            colorGamut: settings?.colorGamut ?? .auto,
+            offMainParserFramePipeline: settings?.offMainParserFramePipeline ?? false
         )
         self.nativeView = nativeView
         super.init(frame: .zero)
@@ -231,6 +234,8 @@ public final class TerminalHostView: NSView {
             fontFamily: settings.fontFamily,
             fontSize: CGFloat(settings.fontSize),
             vivid: settings.vividColors,
+            colorRendering: settings.colorRendering,
+            colorGamut: settings.colorGamut,
             canvasBackgroundHex: canvasBg,
             canvasForegroundHex: canvasFg,
             cursorHex: canvas.cursorHex,
@@ -247,8 +252,10 @@ public final class TerminalHostView: NSView {
             copyOnSelect: settings.copyOnSelect,
             scrollbackLines: settings.scrollbackLines,
             linearBlending: settings.linearBlending,
+            textRendering: settings.textRendering,
             ligatures: settings.ligatures,
-            promptGutter: settings.showPromptGutter
+            promptGutter: settings.showPromptGutter,
+            offMainParserFramePipeline: settings.offMainParserFramePipeline
         )
     }
 

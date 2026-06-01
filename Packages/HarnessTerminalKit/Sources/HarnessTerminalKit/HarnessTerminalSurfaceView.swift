@@ -11,14 +11,112 @@ import QuartzCore
 // `HarnessTheme.RGBColor` in this file. Pin the name to ours.
 private typealias RGBColor = HarnessTheme.RGBColor
 
+private struct SurfaceFrameBuildConfiguration: Sendable {
+    var resolver: CellColorResolver
+    var cursorColor: RGBColor
+    var canvasOpacity: Float
+    var colorRendering: TerminalColorRenderingMode
+    var colorGamut: TerminalColorGamut
+    var cursorStyle: CursorStyle
+    var selectionBackground: RGBColor?
+    var selectionForeground: RGBColor?
+    var promptGutterEnabled: Bool
+
+    func makeBuilder() -> FrameBuilder {
+        FrameBuilder(
+            resolver: resolver,
+            cursorColor: cursorColor,
+            canvasOpacity: canvasOpacity,
+            colorRendering: colorRendering,
+            colorGamut: colorGamut,
+            cursorStyle: cursorStyle,
+            selectionBackground: selectionBackground,
+            selectionForeground: selectionForeground,
+            promptGutterEnabled: promptGutterEnabled
+        )
+    }
+}
+
+private struct SurfaceFrameBuildResult: Sendable {
+    var generation: UInt64
+    var frame: TerminalFrame
+    var frameBuildNanos: UInt64
+    var clearColor: RenderColor
+}
+
+private final class SurfaceColorProviderState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var foreground = RGBColor(red: 255, green: 255, blue: 255)
+    private var background = RGBColor(red: 0, green: 0, blue: 0)
+    private var cursor = RGBColor(red: 255, green: 255, blue: 255)
+    private var palette: [RGBColor] = []
+
+    func update(foreground: RGBColor, background: RGBColor, cursor: RGBColor, palette: [RGBColor]) {
+        lock.lock()
+        self.foreground = foreground
+        self.background = background
+        self.cursor = cursor
+        self.palette = palette
+        lock.unlock()
+    }
+
+    func resolve(_ role: TerminalColorRole) -> (r: UInt8, g: UInt8, b: UInt8)? {
+        lock.lock()
+        defer { lock.unlock() }
+        let c: RGBColor
+        switch role {
+        case .foreground: c = foreground
+        case .background: c = background
+        case .cursor: c = cursor
+        case let .palette(i):
+            guard i >= 0, i < palette.count else { return nil }
+            c = palette[i]
+        }
+        return (c.red, c.green, c.blue)
+    }
+}
+
+private final class SurfaceEmulatorState: @unchecked Sendable {
+    private let specific = DispatchSpecificKey<Void>()
+
+    let emulator: TerminalEmulator
+    let queue: DispatchQueue
+    var lastPlainFrame: TerminalFrame?
+
+    init(columns: Int, rows: Int) {
+        self.emulator = TerminalEmulator(cols: columns, rows: rows)
+        self.queue = DispatchQueue(label: "com.robert.harness.terminal-surface.emulator", qos: .userInteractive)
+        queue.setSpecific(key: specific, value: ())
+    }
+
+    func sync<T>(_ body: (TerminalEmulator) -> T) -> T {
+        if DispatchQueue.getSpecific(key: specific) != nil {
+            return body(emulator)
+        }
+        return queue.sync {
+            body(emulator)
+        }
+    }
+
+    func async(_ body: @escaping @Sendable (TerminalEmulator) -> Void) {
+        queue.async { [self] in
+            body(emulator)
+        }
+    }
+
+    func resetPlainFrame() {
+        sync { _ in lastPlainFrame = nil }
+    }
+}
+
 /// The native, self-contained terminal surface: a `CAMetalLayer`-backed `NSView` that
 /// drives a `TerminalEmulator` and draws it with `TerminalMetalRenderer`. This is the
 /// replacement for the previous renderer's view — bytes in via `receive(_:)`, input out
 /// via `onInput`, grid-size changes via `onResize`.
 ///
-/// Scope (first on-screen cut): GPU rendering with the crisp-color pipeline (Display-P3 /
-/// sRGB colorspace tagging), keyboard input, live resize, and PTY responses (DSR/DA).
-/// Mouse reporting, selection, and scrollback are follow-ups.
+/// Scope: GPU rendering with accurate sRGB output by default, opt-in converted Display-P3
+/// vivid color, keyboard input, live resize, PTY responses (DSR/DA), mouse reporting,
+/// selection, scrollback, copy mode, IME, inline images, and shell-integration marks.
 @MainActor
 public final class HarnessTerminalSurfaceView: NSView {
     /// Bytes the terminal produces for the PTY (typed input, key sequences, DSR/DA).
@@ -37,17 +135,24 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Copied selection text — the host mirrors it into the daemon paste buffer (the
     /// system pasteboard is written here directly).
     public var onCopy: ((String) -> Void)?
+    /// Optional per-frame renderer stats sink for diagnostics/benchmarks.
+    public var onRenderStats: ((TerminalRenderStats) -> Void)?
     /// Whether a program may set the system clipboard via OSC 52 (tmux
     /// `set-clipboard`). The host sets this from the option; default on.
     public var allowProgramClipboardAccess = true
 
-    private let emulator: TerminalEmulator
+    private let emulatorState: SurfaceEmulatorState
+    private let colorProviderState = SurfaceColorProviderState()
     private let inputEncoder = InputEncoder()
     private let metalLayer = CAMetalLayer()
     private var renderer: TerminalMetalRenderer?
 
     private var frameBuilder: FrameBuilder
-    private var vivid: Bool
+    private var frameBuildConfiguration: SurfaceFrameBuildConfiguration
+    private var colorRendering: TerminalColorRenderingMode
+    private var colorGamut: TerminalColorGamut
+    private var offMainParserFramePipelineEnabled = false
+    private var renderGeneration: UInt64 = 0
     private var fontFamily: String
     private var fontSize: CGFloat
     /// The canvas (default) background — used as the Metal clear color and (at
@@ -143,19 +248,52 @@ public final class HarnessTerminalSurfaceView: NSView {
         themeName: String = ThemeManager.defaultThemeName,
         fontFamily: String = "Menlo",
         fontSize: CGFloat = 14,
-        vivid: Bool = false
+        vivid: Bool = false,
+        colorRendering: TerminalColorRenderingMode? = nil,
+        colorGamut: TerminalColorGamut = .auto,
+        offMainParserFramePipeline: Bool = false
     ) {
         let theme = HarnessThemeCatalog.theme(named: themeName)
             ?? HarnessThemeCatalog.theme(named: ThemeManager.defaultThemeName)!
+        let resolvedColorRendering = colorRendering ?? (vivid ? .vivid : .accurate)
+        let resolvedGamut = TerminalColorGamut.resolved(
+            renderingMode: resolvedColorRendering,
+            requested: colorGamut
+        )
+        let resolver = CellColorResolver(theme: theme)
         // Baseline appearance; the host immediately overrides via configureAppearance.
-        self.frameBuilder = FrameBuilder(theme: theme)
+        self.frameBuilder = FrameBuilder(
+            resolver: resolver,
+            cursorColor: theme.cursor ?? theme.foreground,
+            colorRendering: resolvedColorRendering,
+            colorGamut: resolvedGamut
+        )
+        self.frameBuildConfiguration = SurfaceFrameBuildConfiguration(
+            resolver: resolver,
+            cursorColor: theme.cursor ?? theme.foreground,
+            canvasOpacity: 1,
+            colorRendering: resolvedColorRendering,
+            colorGamut: resolvedGamut,
+            cursorStyle: .block,
+            selectionBackground: nil,
+            selectionForeground: nil,
+            promptGutterEnabled: true
+        )
         self.canvasBackground = theme.background
         self.canvasOpacity = 1
         self.fontFamily = fontFamily
         self.fontSize = fontSize
-        self.vivid = vivid
-        self.emulator = TerminalEmulator(cols: columns, rows: rows)
+        self.colorRendering = resolvedColorRendering
+        self.colorGamut = resolvedGamut
+        self.offMainParserFramePipelineEnabled = offMainParserFramePipeline
+        self.emulatorState = SurfaceEmulatorState(columns: columns, rows: rows)
         super.init(frame: .zero)
+        colorProviderState.update(
+            foreground: theme.foreground,
+            background: theme.background,
+            cursor: theme.cursor ?? theme.foreground,
+            palette: theme.palette
+        )
         configureLayer()
         configureEmulatorCallbacks()
         // Defer the renderer build: at init the view has no window, so
@@ -174,20 +312,24 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     /// Feed PTY output bytes into the emulator and schedule a redraw.
     public func receive(_ data: Data) {
-        let beforeHistory = emulator.historyCount
-        emulator.feed(data)
+        if offMainParserFramePipelineEnabled {
+            receiveOffMain(data)
+            return
+        }
+        let beforeHistory = emulatorState.emulator.historyCount
+        emulatorState.emulator.feed(data)
         // If the user is scrolled up, stay anchored on the same content as new lines push
         // into history; at the bottom (offset 0) we naturally follow new output.
         if scrollOffset > 0 {
-            let added = emulator.historyCount - beforeHistory
-            if added > 0 { scrollOffset = min(emulator.historyCount, scrollOffset + added) }
+            let added = emulatorState.emulator.historyCount - beforeHistory
+            if added > 0 { scrollOffset = min(emulatorState.emulator.historyCount, scrollOffset + added) }
         }
         wakeCursor()
         // DEC 2026 synchronized output: hold the last presented frame while the program is
         // mid-update (no tearing), and present atomically the moment it ends the batch — which
         // is exactly when this chunk leaves `synchronizedOutput` false. A timeout guards a
         // program that never closes the update.
-        if emulator.modes.synchronizedOutput {
+        if emulatorState.emulator.modes.synchronizedOutput {
             scheduler.setSynchronized(true) // hold the display tick mid-batch (no tearing)
             armSyncTimeout()
         } else {
@@ -195,6 +337,31 @@ public final class HarnessTerminalSurfaceView: NSView {
             // Releasing 2026 marks dirty; the batched frame presents atomically at the next tick.
             scheduler.setSynchronized(false)
             wakeDisplayLink()
+        }
+    }
+
+    private func receiveOffMain(_ data: Data) {
+        emulatorState.async { [weak self] emulator in
+            let beforeHistory = emulator.historyCount
+            emulator.feed(data)
+            let afterHistory = emulator.historyCount
+            let synchronized = emulator.modes.synchronizedOutput
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.scrollOffset > 0 {
+                    let added = afterHistory - beforeHistory
+                    if added > 0 { self.scrollOffset = min(afterHistory, self.scrollOffset + added) }
+                }
+                self.wakeCursor()
+                if synchronized {
+                    self.scheduler.setSynchronized(true)
+                    self.armSyncTimeout()
+                } else {
+                    self.syncTimeout?.cancel(); self.syncTimeout = nil
+                    self.scheduler.setSynchronized(false)
+                    self.wakeDisplayLink()
+                }
+            }
         }
     }
 
@@ -212,6 +379,21 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     public func receive(_ text: String) { receive(Data(text.utf8)) }
 
+    func testingReadGridSnapshot() -> TerminalGridSnapshot {
+        emulatorSync { $0.readGrid() }
+    }
+
+    func testingWaitForEmulatorIdle() {
+        emulatorState.sync { _ in }
+    }
+
+    func testingResizeGrid(cols: Int, rows: Int) {
+        commitGridSize(cols: cols, rows: rows)
+    }
+
+    var testingRenderSynchronized: Bool { scheduler.synchronized }
+    var testingRenderPending: Bool { scheduler.needsRender }
+
     /// The full appearance the host computes from settings + theme:
     /// - `canvasBackground/Foreground/cursor` come from `ThemeManager.resolvedCanvas`, so
     ///   the terminal canvas matches the chrome (no seam) regardless of theme-output mode.
@@ -223,6 +405,8 @@ public final class HarnessTerminalSurfaceView: NSView {
         fontFamily: String,
         fontSize: CGFloat,
         vivid: Bool,
+        colorRendering: TerminalColorRenderingMode? = nil,
+        colorGamut: TerminalColorGamut = .auto,
         canvasBackgroundHex: String,
         canvasForegroundHex: String,
         cursorHex: String,
@@ -237,12 +421,27 @@ public final class HarnessTerminalSurfaceView: NSView {
         copyOnSelect: Bool,
         scrollbackLines: Int,
         linearBlending: Bool,
+        textRendering: TerminalTextRenderingMode? = nil,
         ligatures: Bool,
-        promptGutter: Bool = false
+        promptGutter: Bool = false,
+        offMainParserFramePipeline: Bool = false
     ) {
-        emulator.maxScrollbackLines = scrollbackLines
-        // Gamma-correct ("linear") blending thickens light-on-dark antialiasing slightly.
-        glyphGamma = linearBlending ? 0.8 : 1.0
+        emulatorSync { $0.maxScrollbackLines = scrollbackLines }
+        if offMainParserFramePipelineEnabled && !offMainParserFramePipeline {
+            // Drain any queued parser/frame work before direct main-thread emulator access resumes.
+            emulatorState.sync { _ in }
+        }
+        if offMainParserFramePipelineEnabled != offMainParserFramePipeline {
+            offMainParserFramePipelineEnabled = offMainParserFramePipeline
+            invalidateRenderGeneration()
+        }
+        let resolvedColorRendering = colorRendering ?? (vivid ? .vivid : .accurate)
+        let resolvedGamut = TerminalColorGamut.resolved(
+            renderingMode: resolvedColorRendering,
+            requested: colorGamut
+        )
+        let resolvedTextRendering = textRendering ?? (linearBlending ? .crisp : .native)
+        glyphGamma = resolvedTextRendering.glyphGamma
         ligaturesEnabled = ligatures
         promptGutterEnabled = promptGutter
         let bg = RGBColor(hex: canvasBackgroundHex) ?? RGBColor(red: 0, green: 0, blue: 0)
@@ -260,7 +459,8 @@ public final class HarnessTerminalSurfaceView: NSView {
         }
         self.fontFamily = fontFamily
         self.fontSize = fontSize
-        self.vivid = vivid
+        self.colorRendering = resolvedColorRendering
+        self.colorGamut = resolvedGamut
         self.canvasBackground = bg
         self.canvasForeground = fg
         self.canvasCursor = cursor
@@ -273,15 +473,29 @@ public final class HarnessTerminalSurfaceView: NSView {
         self.selectionBackground = selBg
         self.selectionForeground = selFg
         self.copyOnSelect = copyOnSelect
+        colorProviderState.update(foreground: fg, background: bg, cursor: cursor, palette: palette)
         let resolver = CellColorResolver(
             palette: ANSIPalette(base16: palette),
             defaultForeground: fg,
             defaultBackground: bg
         )
+        self.frameBuildConfiguration = SurfaceFrameBuildConfiguration(
+            resolver: resolver,
+            cursorColor: cursor,
+            canvasOpacity: self.canvasOpacity,
+            colorRendering: resolvedColorRendering,
+            colorGamut: resolvedGamut,
+            cursorStyle: self.cursorStyle,
+            selectionBackground: selBg,
+            selectionForeground: selFg,
+            promptGutterEnabled: promptGutterEnabled
+        )
         self.frameBuilder = FrameBuilder(
             resolver: resolver,
             cursorColor: cursor,
             canvasOpacity: self.canvasOpacity,
+            colorRendering: resolvedColorRendering,
+            colorGamut: resolvedGamut,
             cursorStyle: self.cursorStyle,
             selectionBackground: selBg,
             selectionForeground: selFg,
@@ -289,17 +503,31 @@ public final class HarnessTerminalSurfaceView: NSView {
         )
         // Resolved colors/opacity changed — cached rows hold the old palette; force a full rebuild.
         lastPlainFrame = nil
+        emulatorState.resetPlainFrame()
+        invalidateRenderGeneration()
         restartBlinkTimer()
         // Opaque only when fully opaque; otherwise the layer must be non-opaque so the
         // window-wide blur shows through the translucent canvas.
         metalLayer.isOpaque = self.canvasOpacity >= 1
-        metalLayer.colorspace = CGColorSpace(name: vivid ? CGColorSpace.displayP3 : CGColorSpace.sRGB)
+        metalLayer.colorspace = CGColorSpace(name: layerColorSpaceName)
         buildRenderer()
         updateGridSize()
         scheduleRender()
     }
 
     // MARK: - Setup
+
+    private func emulatorSync<T>(_ body: (TerminalEmulator) -> T) -> T {
+        if offMainParserFramePipelineEnabled {
+            return emulatorState.sync(body)
+        }
+        return body(emulatorState.emulator)
+    }
+
+    private func invalidateRenderGeneration() {
+        renderGeneration &+= 1
+        emulatorState.resetPlainFrame()
+    }
 
     private func configureLayer() {
         // Layer-hosting: assign the custom layer before enabling wantsLayer.
@@ -313,50 +541,84 @@ public final class HarnessTerminalSurfaceView: NSView {
         // parks at the bottom-right instead of being centered into a hairline seam at the
         // top edge during live resize.
         metalLayer.contentsGravity = .topLeft
-        // Tag the layer colorspace so wide-gamut output isn't clamped — the crisp-color
-        // contract (Display-P3 when vivid, sRGB otherwise).
-        metalLayer.colorspace = CGColorSpace(name: vivid ? CGColorSpace.displayP3 : CGColorSpace.sRGB)
+        // Tag the layer to match the frame builder's RGB output. Accurate mode stays sRGB;
+        // vivid mode converts authored sRGB into Display-P3 before tagging the layer P3.
+        metalLayer.colorspace = CGColorSpace(name: layerColorSpaceName)
+    }
+
+    private var layerColorSpaceName: CFString {
+        switch colorGamut {
+        case .displayP3: return CGColorSpace.displayP3
+        case .sRGB, .auto: return CGColorSpace.sRGB
+        }
     }
 
     private func configureEmulatorCallbacks() {
+        let emulator = emulatorState.emulator
         emulator.onResponse = { [weak self] data in
-            self?.onInput?(data)
+            if Thread.isMainThread {
+                self?.onInput?(data)
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.onInput?(data) }
+            }
         }
         emulator.onTitleChange = { [weak self] title in
-            self?.onTitle?(title)
+            if Thread.isMainThread {
+                self?.onTitle?(title)
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.onTitle?(title) }
+            }
         }
         emulator.onWorkingDirectoryChange = { [weak self] path in
-            self?.onPwd?(path)
+            if Thread.isMainThread {
+                self?.onPwd?(path)
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.onPwd?(path) }
+            }
         }
         emulator.onBell = { [weak self] in
-            self?.onBell?()
+            if Thread.isMainThread {
+                self?.onBell?()
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.onBell?() }
+            }
         }
         emulator.onNotification = { [weak self] title, body in
-            self?.onDesktopNotification?(title, body)
+            if Thread.isMainThread {
+                self?.onDesktopNotification?(title, body)
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.onDesktopNotification?(title, body) }
+            }
         }
         emulator.onPointerShapeChange = { [weak self] shape in
-            self?.applyPointerShape(shape)
+            if Thread.isMainThread {
+                self?.applyPointerShape(shape)
+            } else {
+                DispatchQueue.main.async { [weak self] in self?.applyPointerShape(shape) }
+            }
         }
         emulator.onSetClipboard = { [weak self] text in
-            guard let self, self.allowProgramClipboardAccess, !text.isEmpty else { return }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
-            self.onCopy?(text)   // mirror into the daemon paste buffer, like a yank
+            guard !text.isEmpty else { return }
+            if Thread.isMainThread {
+                guard let self, self.allowProgramClipboardAccess else { return }
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                self.onCopy?(text)   // mirror into the daemon paste buffer, like a yank
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.allowProgramClipboardAccess else { return }
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(text, forType: .string)
+                    self.onCopy?(text)   // mirror into the daemon paste buffer, like a yank
+                }
+            }
         }
         // Answer OSC 10/11/12/4 color queries from the resolved theme (light/dark detection).
-        emulator.colorProvider = { [weak self] role in
-            guard let self else { return nil }
-            let c: RGBColor
-            switch role {
-            case .foreground: c = self.canvasForeground
-            case .background: c = self.canvasBackground
-            case .cursor: c = self.canvasCursor
-            case let .palette(i):
-                guard i >= 0, i < self.ansiPalette16.count else { return nil }
-                c = self.ansiPalette16[i]
-            }
-            return (c.red, c.green, c.blue)
+        let colorProviderState = colorProviderState
+        emulator.colorProvider = { role in
+            colorProviderState.resolve(role)
         }
     }
 
@@ -398,8 +660,9 @@ public final class HarnessTerminalSurfaceView: NSView {
         // Tell the engine the real cell pixel size so inline-image cell footprints + cursor
         // advancement match what the renderer draws.
         if let renderer {
-            emulator.setCellPixelSize(width: renderer.cellPixelWidth, height: renderer.cellPixelHeight)
+            emulatorSync { $0.setCellPixelSize(width: renderer.cellPixelWidth, height: renderer.cellPixelHeight) }
         }
+        invalidateRenderGeneration()
     }
 
     // MARK: - Layout & rendering
@@ -427,6 +690,7 @@ public final class HarnessTerminalSurfaceView: NSView {
             blinkTimer?.invalidate()
             blinkTimer = nil
             stopDisplayLink()
+            invalidateRenderGeneration()
         }
     }
 
@@ -518,7 +782,8 @@ public final class HarnessTerminalSurfaceView: NSView {
         guard cols != columns || newRows != rows else { return }
         columns = cols
         rows = newRows
-        emulator.resize(cols: cols, rows: newRows)
+        emulatorSync { $0.resize(cols: cols, rows: newRows) }
+        invalidateRenderGeneration()
         onResize?(cols, newRows)
         scheduler.forceRender() // settle the new size on screen at once (prompt first paint / resize)
     }
@@ -547,7 +812,12 @@ public final class HarnessTerminalSurfaceView: NSView {
     }
 
     private func renderNow() {
+        if offMainParserFramePipelineEnabled {
+            renderNowOffMain()
+            return
+        }
         guard let renderer, let drawable = metalLayer.nextDrawable() else { return }
+        let emulator = emulatorState.emulator
         // Copy mode owns the whole surface while active (its own scroll offset + overlay).
         if renderCopyMode(renderer: renderer, drawable: drawable) { lastPlainFrame = nil; return }
         let grid = scrollOffset > 0 ? emulator.readGrid(scrollbackOffset: scrollOffset) : emulator.readGrid()
@@ -557,15 +827,17 @@ public final class HarnessTerminalSurfaceView: NSView {
         // they take the full path and reset the reuse cache.
         let damage = emulator.consumeDamage()
         let plain = scrollOffset == 0 && currentSelection == nil && markedText.isEmpty
+        let frameBuildStart = DispatchTime.now().uptimeNanoseconds
         var frame: TerminalFrame
         if plain {
             frame = frameBuilder.build(grid, region: nil,
-                                       imageProvider: { [weak self] in self?.emulator.image(for: $0) },
+                                       imageProvider: { emulator.image(for: $0) },
                                        reusing: lastPlainFrame, damage: damage)
         } else {
             frame = frameBuilder.build(grid, selection: currentSelection,
-                                       imageProvider: { [weak self] in self?.emulator.image(for: $0) })
+                                       imageProvider: { emulator.image(for: $0) })
         }
+        let frameBuildNanos = DispatchTime.now().uptimeNanoseconds &- frameBuildStart
         // IME preedit: draw the in-progress composition over the grid at the cursor.
         if !markedText.isEmpty, scrollOffset == 0 {
             overlayPreedit(into: &frame)
@@ -587,18 +859,125 @@ public final class HarnessTerminalSurfaceView: NSView {
         // Clear to the canvas color at canvas opacity so any cell-rounding remainder reads
         // as the canvas (no seam, and translucent when opacity < 1). The grid draws at the
         // padding origin so the inset region shows the canvas.
-        renderer.present(
+        let didPresent = renderer.present(
             frame,
             to: drawable,
-            clearColor: RenderColor(canvasBackground, alpha: canvasOpacity),
+            clearColor: frameBuilder.renderColor(canvasBackground, alpha: canvasOpacity),
             origin: (originOffsetX, originOffsetY),
             gamma: glyphGamma,
-            ligatures: ligaturesEnabled
+            ligatures: ligaturesEnabled,
+            frameBuildNanos: frameBuildNanos
         )
+        if didPresent { onRenderStats?(renderer.stats) }
         StartupMetrics.shared.mark(.firstDrawablePresented) // idempotent: only the first present counts
         // Retain only a plain frame for row reuse; a selection/scrollback/preedit frame would
         // poison the cache with overlay-baked cells, so drop it. (`plain` already excludes IME.)
         lastPlainFrame = plain ? frame : nil
+    }
+
+    private func renderNowOffMain() {
+        guard renderer != nil else { return }
+        let generation = renderGeneration
+        let state = emulatorState
+        let config = frameBuildConfiguration
+        let requestedScrollOffset = scrollOffset
+        let selection = currentSelection
+        let preedit = markedText
+        let blinkSetting = cursorBlinkEnabled
+        let blinkVisible = cursorBlinkVisible
+        let isFocused = focused
+        let copyModeState = copyMode
+        let searchEntry = copyModeSearchEntry
+        let viewRows = rows
+        let viewColumns = columns
+        let fg = canvasForeground
+        let bg = canvasBackground
+        let opacity = canvasOpacity
+        let origin = (originOffsetX, originOffsetY)
+        let gamma = glyphGamma
+        let ligatures = ligaturesEnabled
+
+        state.async { emulator in
+            let builder = config.makeBuilder()
+            let frameBuildStart = DispatchTime.now().uptimeNanoseconds
+            var frame: TerminalFrame
+            if let cm = copyModeState {
+                let offset = cm.scrollbackOffset(historyCount: emulator.historyCount)
+                let grid = emulator.readGrid(scrollbackOffset: offset)
+                let region: SelectionRegion? = cm.viewportSelection(rows: viewRows, columns: viewColumns).map { vs in
+                    switch vs.kind {
+                    case .linear:
+                        return .linear(TerminalSelection((vs.startRow, vs.startColumn), (vs.endRow, vs.endColumn)))
+                    case .block:
+                        return .block(BlockSelection((vs.startRow, vs.startColumn), (vs.endRow, vs.endColumn)))
+                    }
+                }
+                let hits = cm.viewportSearchHits(rows: viewRows).map { m in
+                    TerminalSelection((m.line, m.startColumn), (m.line, max(m.startColumn, m.endColumn - 1)))
+                }
+                frame = builder.build(grid, region: region, searchHighlights: hits,
+                                      copyModeCursor: cm.viewportCursor(rows: viewRows),
+                                      imageProvider: { emulator.image(for: $0) })
+                let statusText = searchEntry.map { (cm.search.reverse ? "?" : "/") + $0 } ?? cm.statusLine()
+                Self.applyCopyModeStatus(into: &frame, text: statusText, builder: builder,
+                                         selectionBackground: config.selectionBackground,
+                                         canvasForeground: fg, canvasBackground: bg)
+                state.lastPlainFrame = nil
+            } else {
+                let grid = requestedScrollOffset > 0
+                    ? emulator.readGrid(scrollbackOffset: requestedScrollOffset)
+                    : emulator.readGrid()
+                let damage = emulator.consumeDamage()
+                let plain = requestedScrollOffset == 0 && selection == nil && preedit.isEmpty
+                if plain {
+                    frame = builder.build(grid, region: nil,
+                                          imageProvider: { emulator.image(for: $0) },
+                                          reusing: state.lastPlainFrame, damage: damage)
+                } else {
+                    frame = builder.build(grid, selection: selection,
+                                          imageProvider: { emulator.image(for: $0) })
+                }
+                if !preedit.isEmpty, requestedScrollOffset == 0 {
+                    Self.applyPreedit(into: &frame, text: preedit, builder: builder, canvasForeground: fg)
+                }
+                switch grid.cursor.shape {
+                case .block: frame.cursor.style = .block
+                case .bar: frame.cursor.style = .bar
+                case .underline: frame.cursor.style = .underline
+                case .default: break
+                }
+                let blinkEnabled = grid.cursor.blinking ?? blinkSetting
+                if frame.cursor.visible, isFocused, blinkEnabled, !blinkVisible {
+                    frame.cursor.visible = false
+                }
+                state.lastPlainFrame = plain ? frame : nil
+            }
+            let result = SurfaceFrameBuildResult(
+                generation: generation,
+                frame: frame,
+                frameBuildNanos: DispatchTime.now().uptimeNanoseconds &- frameBuildStart,
+                clearColor: builder.renderColor(bg, alpha: opacity)
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.renderGeneration == result.generation,
+                      self.window != nil,
+                      let renderer = self.renderer,
+                      let drawable = self.metalLayer.nextDrawable()
+                else { return }
+                let didPresent = renderer.present(
+                    result.frame,
+                    to: drawable,
+                    clearColor: result.clearColor,
+                    origin: origin,
+                    gamma: gamma,
+                    ligatures: ligatures,
+                    frameBuildNanos: result.frameBuildNanos
+                )
+                if didPresent { self.onRenderStats?(renderer.stats) }
+                StartupMetrics.shared.mark(.firstDrawablePresented)
+            }
+        }
     }
 
     // MARK: - Cursor blink
@@ -634,7 +1013,8 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Scroll the viewport by `lines` (positive = back into history). Clamped to the
     /// available history; clears any selection (its coordinates are viewport-relative).
     private func scrollBy(lines: Int) {
-        let target = max(0, min(emulator.historyCount, scrollOffset + lines))
+        let historyCount = emulatorSync { $0.historyCount }
+        let target = max(0, min(historyCount, scrollOffset + lines))
         guard target != scrollOffset else { return }
         scrollOffset = target
         clearSelection()
@@ -653,9 +1033,9 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Scroll so the nearest shell-prompt row *above* the current top-of-viewport line sits at the
     /// top. No-op without shell-integration marks or when already above the first prompt.
     public func jumpToPreviousPrompt() {
-        let prompts = emulator.promptRows
+        let (prompts, historyCount) = emulatorSync { ($0.promptRows, $0.historyCount) }
         guard !prompts.isEmpty else { return }
-        let topVisible = emulator.historyCount - scrollOffset   // buffer index of the top row
+        let topVisible = historyCount - scrollOffset   // buffer index of the top row
         guard let target = prompts.last(where: { $0 < topVisible }) else { return }
         scrollToBufferLine(target)
     }
@@ -663,16 +1043,17 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Scroll so the nearest shell-prompt row *below* the current top-of-viewport line sits at the
     /// top. No-op without marks or when already at/after the last prompt.
     public func jumpToNextPrompt() {
-        let prompts = emulator.promptRows
+        let (prompts, historyCount) = emulatorSync { ($0.promptRows, $0.historyCount) }
         guard !prompts.isEmpty else { return }
-        let topVisible = emulator.historyCount - scrollOffset
+        let topVisible = historyCount - scrollOffset
         guard let target = prompts.first(where: { $0 > topVisible }) else { return }
         scrollToBufferLine(target)
     }
 
     /// Set the scrollback offset so virtual buffer line `index` is the top viewport row.
     private func scrollToBufferLine(_ index: Int) {
-        let target = max(0, min(emulator.historyCount, emulator.historyCount - index))
+        let historyCount = emulatorSync { $0.historyCount }
+        let target = max(0, min(historyCount, historyCount - index))
         guard target != scrollOffset else { return }
         scrollOffset = target
         clearSelection()
@@ -713,7 +1094,7 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Mouse goes to the program when it enabled tracking — unless Shift is held, which
     /// always forces local selection (the standard terminal override).
     private func isMouseReporting(_ event: NSEvent) -> Bool {
-        emulator.modes.mouseTrackingEnabled && !event.modifierFlags.contains(.shift)
+        emulatorSync { $0.modes.mouseTrackingEnabled } && !event.modifierFlags.contains(.shift)
     }
 
     private func mouseModifiers(_ event: NSEvent) -> KeyModifiers {
@@ -727,10 +1108,11 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     private func reportMouse(_ event: NSEvent, button: MouseButton, kind: MouseEventKind) {
         guard let pos = cell(at: event.locationInWindow) else { return }
+        let modes = emulatorSync { $0.modes }
         emit(inputEncoder.encodeMouse(
             button: button, kind: kind,
             column: pos.column, row: pos.row,
-            modifiers: mouseModifiers(event), modes: emulator.modes
+            modifiers: mouseModifiers(event), modes: modes
         ))
     }
 
@@ -757,19 +1139,21 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// The clickable URL at a grid cell: an OSC 8 hyperlink first, else an auto-detected URL in
     /// the row text. The row is built one character per cell so `column` maps directly.
     private func linkURL(atRow row: Int, column col: Int) -> String? {
-        let grid = scrollOffset > 0 ? emulator.readGrid(scrollbackOffset: scrollOffset) : emulator.readGrid()
-        guard row >= 0, row < grid.rows, col >= 0, col < grid.cols else { return nil }
-        if let cell = grid.cell(row: row, col: col), cell.hyperlinkID != 0,
-           let url = emulator.hyperlinkURL(id: cell.hyperlinkID) {
-            return url
+        emulatorSync { emulator in
+            let grid = scrollOffset > 0 ? emulator.readGrid(scrollbackOffset: scrollOffset) : emulator.readGrid()
+            guard row >= 0, row < grid.rows, col >= 0, col < grid.cols else { return nil }
+            if let cell = grid.cell(row: row, col: col), cell.hyperlinkID != 0,
+               let url = emulator.hyperlinkURL(id: cell.hyperlinkID) {
+                return url
+            }
+            var line = ""
+            line.reserveCapacity(grid.cols)
+            for c in 0 ..< grid.cols {
+                guard let cell = grid.cell(row: row, col: c), cell.width != .spacerTail else { line.append(" "); continue }
+                line.unicodeScalars.append(cell.codepoint == 0 ? " " : (Unicode.Scalar(cell.codepoint) ?? " "))
+            }
+            return URLDetection.url(in: line, at: col)
         }
-        var line = ""
-        line.reserveCapacity(grid.cols)
-        for c in 0 ..< grid.cols {
-            guard let cell = grid.cell(row: row, col: c), cell.width != .spacerTail else { line.append(" "); continue }
-            line.unicodeScalars.append(cell.codepoint == 0 ? " " : (Unicode.Scalar(cell.codepoint) ?? " "))
-        }
-        return URLDetection.url(in: line, at: col)
     }
 
     /// Open a clicked link, restricted to safe schemes so terminal output can't trigger a
@@ -784,7 +1168,8 @@ public final class HarnessTerminalSurfaceView: NSView {
         if copyMode != nil { return }
         if isMouseReporting(event) {
             // Only report motion when the app asked for drag / any-motion tracking.
-            if emulator.modes.mouseDrag || emulator.modes.mouseAny {
+            let modes = emulatorSync { $0.modes }
+            if modes.mouseDrag || modes.mouseAny {
                 reportMouse(event, button: .left, kind: .drag)
             }
             return
@@ -873,7 +1258,7 @@ public final class HarnessTerminalSurfaceView: NSView {
             .replacingOccurrences(of: "\n", with: "\r")
         snapToBottom()
         clearSelection()
-        emit(inputEncoder.encodePaste(normalized, modes: emulator.modes))
+        emit(inputEncoder.encodePaste(normalized, modes: emulatorSync { $0.modes }))
     }
 
     /// Select the entire visible viewport (Edit ▸ Select All / ⌘A).
@@ -904,7 +1289,7 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     private func copySelection() {
         guard let sel = currentSelection else { return }
-        let text = selectedText(sel, emulator.readGrid())
+        let text = emulatorSync { selectedText(sel, $0.readGrid()) }
         guard !text.isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -946,11 +1331,20 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// cursor at its end. Best-effort: one cell per scalar (wide composition may pack
     /// loosely until full-width preedit handling lands).
     private func overlayPreedit(into frame: inout TerminalFrame) {
+        Self.applyPreedit(into: &frame, text: markedText, builder: frameBuilder, canvasForeground: canvasForeground)
+    }
+
+    nonisolated private static func applyPreedit(
+        into frame: inout TerminalFrame,
+        text: String,
+        builder: FrameBuilder,
+        canvasForeground: RGBColor
+    ) {
         let row = frame.cursor.row
         guard row >= 0, row < frame.rows else { return }
         var col = frame.cursor.column
-        let fg = RenderColor(canvasForeground)
-        for scalar in markedText.unicodeScalars {
+        let fg = builder.renderColor(canvasForeground)
+        for scalar in text.unicodeScalars {
             let width = max(1, CharacterWidth.width(of: scalar))
             guard col >= 0, col + width <= frame.columns else { break }
             let idx = row * frame.columns + col
@@ -1051,7 +1445,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         if flags.contains(.control) { mods.insert(.control) }
 
         if let special = Self.specialKey(for: event) {
-            emit(inputEncoder.encode(special, modifiers: mods, modes: emulator.modes))
+            emit(inputEncoder.encode(special, modifiers: mods, modes: emulatorSync { $0.modes }))
             return
         }
 
@@ -1060,7 +1454,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         // text arrives via `insertText`, composition via `setMarkedText`.
         if mods.contains(.control) || mods.contains(.option) {
             let text = event.charactersIgnoringModifiers ?? ""
-            emit(inputEncoder.encode(text: text, modifiers: mods, modes: emulator.modes))
+            emit(inputEncoder.encode(text: text, modifiers: mods, modes: emulatorSync { $0.modes }))
             return
         }
         interpretKeyEvents([event])
@@ -1113,9 +1507,11 @@ public final class HarnessTerminalSurfaceView: NSView {
         guard copyMode == nil else { return }
         copyModeTables = KeybindingsStore.load()
         copyModeSearchEntry = nil
-        let live = emulator.readGrid()
-        let cursorLine = emulator.historyCount + live.cursor.row
-        copyMode = CopyModeReducer.initialState(grid: emulator, cursorLine: cursorLine, cursorColumn: live.cursor.col)
+        copyMode = emulatorSync { emulator in
+            let live = emulator.readGrid()
+            let cursorLine = emulator.historyCount + live.cursor.row
+            return CopyModeReducer.initialState(grid: emulator, cursorLine: cursorLine, cursorColumn: live.cursor.col)
+        }
         scrollOffset = 0
         scheduleRender()
     }
@@ -1151,7 +1547,7 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     private func handleCopyModeAction(_ action: CopyModeAction) {
         guard let state = copyMode else { return }
-        let (next, effect) = CopyModeReducer.reduce(state, action, grid: emulator)
+        let (next, effect) = emulatorSync { CopyModeReducer.reduce(state, action, grid: $0) }
         copyMode = next
         switch effect {
         case .none:
@@ -1187,7 +1583,9 @@ public final class HarnessTerminalSurfaceView: NSView {
             let query = copyModeSearchEntry ?? ""
             copyModeSearchEntry = nil
             if let state = copyMode, !query.isEmpty {
-                copyMode = CopyModeReducer.applySearch(state, query: query, reverse: state.search.reverse, grid: emulator)
+                copyMode = emulatorSync {
+                    CopyModeReducer.applySearch(state, query: query, reverse: state.search.reverse, grid: $0)
+                }
             }
             scheduleRender()
         case 0x7F, 0x08: // Backspace
@@ -1271,6 +1669,7 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// copy mode so `renderNow` falls through to the normal path.
     private func renderCopyMode(renderer: TerminalMetalRenderer, drawable: CAMetalDrawable) -> Bool {
         guard let cm = copyMode else { return false }
+        let emulator = emulatorState.emulator
         let offset = cm.scrollbackOffset(historyCount: emulator.historyCount)
         let grid = emulator.readGrid(scrollbackOffset: offset)
         let region: SelectionRegion? = cm.viewportSelection(rows: rows, columns: columns).map { vs in
@@ -1284,26 +1683,48 @@ public final class HarnessTerminalSurfaceView: NSView {
         let hits = cm.viewportSearchHits(rows: rows).map { m in
             TerminalSelection((m.line, m.startColumn), (m.line, max(m.startColumn, m.endColumn - 1)))
         }
+        let frameBuildStart = DispatchTime.now().uptimeNanoseconds
         var frame = frameBuilder.build(grid, region: region, searchHighlights: hits,
                                        copyModeCursor: cm.viewportCursor(rows: rows),
-                                       imageProvider: { [weak self] in self?.emulator.image(for: $0) })
+                                       imageProvider: { emulator.image(for: $0) })
+        let frameBuildNanos = DispatchTime.now().uptimeNanoseconds &- frameBuildStart
         let statusText = copyModeSearchEntry.map { (cm.search.reverse ? "?" : "/") + $0 } ?? cm.statusLine()
         overlayCopyModeStatus(into: &frame, text: statusText)
-        renderer.present(
+        let didPresent = renderer.present(
             frame, to: drawable,
-            clearColor: RenderColor(canvasBackground, alpha: canvasOpacity),
-            origin: (originOffsetX, originOffsetY), gamma: glyphGamma, ligatures: ligaturesEnabled
+            clearColor: frameBuilder.renderColor(canvasBackground, alpha: canvasOpacity),
+            origin: (originOffsetX, originOffsetY), gamma: glyphGamma, ligatures: ligaturesEnabled,
+            frameBuildNanos: frameBuildNanos
         )
+        if didPresent { onRenderStats?(renderer.stats) }
         return true
     }
 
     /// Draw the copy-mode status into the bottom frame row (mode, position, match count, or
     /// the live search query) on an inverted band.
     private func overlayCopyModeStatus(into frame: inout TerminalFrame, text: String) {
+        Self.applyCopyModeStatus(
+            into: &frame,
+            text: text,
+            builder: frameBuilder,
+            selectionBackground: selectionBackground,
+            canvasForeground: canvasForeground,
+            canvasBackground: canvasBackground
+        )
+    }
+
+    nonisolated private static func applyCopyModeStatus(
+        into frame: inout TerminalFrame,
+        text: String,
+        builder: FrameBuilder,
+        selectionBackground: RGBColor?,
+        canvasForeground: RGBColor,
+        canvasBackground: RGBColor
+    ) {
         let row = frame.rows - 1
         guard row >= 0, frame.columns > 0 else { return }
-        let bandBg = RenderColor(selectionBackground ?? canvasForeground)
-        let bandFg = RenderColor(canvasBackground)
+        let bandBg = builder.renderColor(selectionBackground ?? canvasForeground)
+        let bandFg = builder.renderColor(canvasBackground)
         for col in 0 ..< frame.columns {
             let idx = row * frame.columns + col
             frame.cells[idx].codepoint = 0x20
@@ -1376,7 +1797,7 @@ extension HarnessTerminalSurfaceView: @preconcurrency NSTextInputClient {
         let scale = window.backingScaleFactor
         let cellW = CGFloat(renderer.cellPixelWidth) / scale
         let cellH = CGFloat(renderer.cellPixelHeight) / scale
-        let snapshot = emulator.readGrid()
+        let snapshot = emulatorSync { $0.readGrid() }
         let x = paddingPointsX + CGFloat(snapshot.cursor.col) * cellW
         // Convert grid-from-top to AppKit bottom-left origin.
         let yTop = paddingPointsY + CGFloat(snapshot.cursor.row) * cellH

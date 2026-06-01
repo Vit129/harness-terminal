@@ -1,4 +1,5 @@
 import XCTest
+import HarnessCore
 @testable import HarnessTerminalRenderer
 import HarnessTerminalEngine
 import HarnessTheme
@@ -58,6 +59,22 @@ final class CellColorResolverTests: XCTestCase {
     func testTrueColorPassesThrough() {
         let r = resolver.resolve(TerminalGridCell(codepoint: 0x41, foreground: .rgb(r: 1, g: 2, b: 3)))
         XCTAssertEqual(r.foreground, RGBColor(red: 1, green: 2, blue: 3))
+    }
+
+    func testResolverBytesStayGamutFree() {
+        let cell = TerminalGridCell(
+            codepoint: 0x41,
+            foreground: .rgb(r: 1, g: 2, b: 3),
+            background: .rgb(r: 255, g: 0, b: 0)
+        )
+        let resolved = resolver.resolve(cell)
+
+        for mode in [TerminalColorRenderingMode.accurate, .vivid] {
+            _ = RenderColor(resolved.background, renderingMode: mode, gamut: .auto)
+            XCTAssertEqual(resolver.resolve(cell), resolved)
+            XCTAssertEqual(resolved.foreground, RGBColor(red: 1, green: 2, blue: 3))
+            XCTAssertEqual(resolved.background, RGBColor(red: 255, green: 0, blue: 0))
+        }
     }
 
     func testBoldBrightensLowPalette() {

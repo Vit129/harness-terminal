@@ -95,6 +95,10 @@ final class ThemeDocumentTests: XCTestCase {
             backgroundBlur: 20,
             fontFamily: "JetBrains Mono",
             fontSize: 14,
+            sourceColorSpace: .sRGB,
+            appearance: .dark,
+            supportsWideGamut: false,
+            contrastGrade: .high,
             applyToTerminalOutput: true
         )
         return ThemeDocument(definition: def, appearance: appearance, author: "robert")
@@ -111,7 +115,52 @@ final class ThemeDocumentTests: XCTestCase {
         let data = try sampleDocument().encoded()
         let json = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(json.contains("#282a36"), "background hex should appear in JSON")
+        XCTAssertTrue(json.contains("\"sourceColorSpace\""))
         XCTAssertTrue(json.contains("\"applyToTerminalOutput\""))
+    }
+
+    func testOldThemeJSONWithoutColorSpaceMetadataLoads() throws {
+        let legacy = Data("""
+        {
+          "version": 1,
+          "name": "Legacy",
+          "colors": {
+            "background": "#000000",
+            "foreground": "#ffffff",
+            "palette": [
+              "#000000", "#800000", "#008000", "#808000",
+              "#000080", "#800080", "#008080", "#c0c0c0",
+              "#808080", "#ff0000", "#00ff00", "#ffff00",
+              "#0000ff", "#ff00ff", "#00ffff", "#ffffff"
+            ]
+          },
+          "appearance": {
+            "fontFamily": "Menlo",
+            "fontSize": 14
+          }
+        }
+        """.utf8)
+
+        let doc = try ThemeDocument.decoded(from: legacy)
+
+        XCTAssertEqual(doc.name, "Legacy")
+        XCTAssertEqual(doc.appearance?.sourceColorSpace, .sRGB)
+        XCTAssertEqual(doc.appearance?.supportsWideGamut, false)
+    }
+
+    func testThemeMetadataRoundTrips() throws {
+        var doc = sampleDocument()
+        doc.appearance?.sourceColorSpace = .displayP3
+        doc.appearance?.appearance = .light
+        doc.appearance?.supportsWideGamut = true
+        doc.appearance?.contrastGrade = .medium
+
+        let restored = try ThemeDocument.decoded(from: try doc.encoded())
+
+        XCTAssertEqual(restored.appearance?.sourceColorSpace, .displayP3)
+        XCTAssertEqual(restored.appearance?.appearance, .light)
+        XCTAssertEqual(restored.appearance?.supportsWideGamut, true)
+        XCTAssertEqual(restored.appearance?.contrastGrade, .medium)
     }
 
     func testDefinitionConversionRoundTrip() {
@@ -147,5 +196,34 @@ final class ThemeDocumentTests: XCTestCase {
     func testDecodeMalformedThrows() {
         let garbage = Data("not json".utf8)
         XCTAssertThrowsError(try ThemeDocument.decoded(from: garbage))
+    }
+}
+
+final class ThemeDiagnosticsTests: XCTestCase {
+    func testColorCheckContainsANSIAndTruecolorSequences() {
+        let output = ThemeDiagnostics.colorCheck()
+
+        XCTAssertTrue(output.contains("ANSI 0-15"))
+        XCTAssertTrue(output.contains("\u{1B}[40m"))
+        XCTAssertTrue(output.contains("\u{1B}[107m"))
+        XCTAssertTrue(output.contains("\u{1B}[48;5;16m"))
+        XCTAssertTrue(output.contains("\u{1B}[48;5;255m"))
+        XCTAssertTrue(output.contains("\u{1B}[48;2;255;0;0m"))
+        XCTAssertTrue(output.contains("\u{1B}[48;2;0;255;255m"))
+        XCTAssertTrue(output.contains("\u{1B}[1mbold\u{1B}[0m"))
+        XCTAssertTrue(output.contains("\u{1B}[38;2;255;255;255;48;2;0;64;128m"))
+    }
+
+    func testThemePreviewContainsPromptDiagnosticsAndAgentSections() {
+        let output = ThemeDiagnostics.themePreview(HarnessThemeCatalog.theme(named: "Dracula")!)
+
+        XCTAssertTrue(output.contains("PROMPTS"))
+        XCTAssertTrue(output.contains("$ swift test"))
+        XCTAssertTrue(output.contains("DIAGNOSTICS"))
+        XCTAssertTrue(output.contains("error:"))
+        XCTAssertTrue(output.contains("AGENTS"))
+        XCTAssertTrue(output.contains("waiting for approval"))
+        XCTAssertTrue(output.contains("SELECTION / SEARCH"))
+        XCTAssertTrue(output.contains("ANSI SWATCHES"))
     }
 }

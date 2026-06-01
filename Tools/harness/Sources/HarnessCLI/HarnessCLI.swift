@@ -1,5 +1,6 @@
 import Foundation
 import HarnessCore
+import HarnessTheme
 
 @main
 struct HarnessCLI {
@@ -9,8 +10,19 @@ struct HarnessCLI {
             printUsage()
             exit(1)
         }
-        let client = DaemonClient()
         do {
+            switch command {
+            case "color-check":
+                printColorCheck(args)
+                return
+            case "theme-preview":
+                printThemePreview(args)
+                return
+            default:
+                break
+            }
+
+            let client = DaemonClient()
             switch command {
             case "list-workspaces":
                 try printWorkspaces(args, client: client)
@@ -217,6 +229,27 @@ struct HarnessCLI {
             fputs("harness-cli: \(error)\n", stderr)
             exit(1)
         }
+    }
+
+    static func printColorCheck(_ args: [String]) {
+        print(ThemeDiagnostics.colorCheck(), terminator: "")
+    }
+
+    static func printThemePreview(_ args: [String]) {
+        if args.contains("--all") {
+            for (index, theme) in HarnessThemeCatalog.allThemes.enumerated() {
+                if index > 0 { print("") }
+                print(ThemeDiagnostics.themePreview(theme), terminator: "")
+            }
+            return
+        }
+
+        let themeName = flagValue(args, flag: "--theme") ?? HarnessThemeCatalog.defaultThemeName
+        guard let theme = HarnessThemeCatalog.theme(named: themeName) else {
+            fputs("Unknown theme: \(themeName)\n", stderr)
+            exit(1)
+        }
+        print(ThemeDiagnostics.themePreview(theme), terminator: "")
     }
 
     static func handleNewTab(_ args: [String], client: DaemonClient) throws {
@@ -1235,6 +1268,8 @@ struct HarnessCLI {
 
         Commands:
           doctor [--json]                             (diagnose daemon, socket, paths, integrations)
+          color-check                                  (print ANSI/256/truecolor diagnostic swatches)
+          theme-preview [--theme <name>] [--all]       (print deterministic themed sample output)
           completions <zsh|fish|bash>                 (print a shell completion script to stdout)
           list-workspaces [--json] [--pretty]
           list-surfaces [--json] [--pretty]

@@ -1,9 +1,10 @@
+import HarnessCore
 import HarnessTerminalEngine
 import HarnessTheme
 
 /// A color as normalized floats (0...1) — the form a Metal shader consumes. Built from
-/// an `RGBColor`; the colorspace interpretation (sRGB vs Display-P3) is decided by the
-/// layer the renderer draws into, not here.
+/// an `RGBColor` at the renderer boundary. Accurate mode is an sRGB identity mapping;
+/// vivid mode converts authored sRGB into Display-P3 before the Metal layer is tagged P3.
 public struct RenderColor: Equatable, Sendable {
     public var red: Float
     public var green: Float
@@ -252,12 +253,15 @@ public struct FrameBuilder {
     /// so existing callers/tests are unchanged; the GUI passes the user's `showPromptGutter`
     /// setting (off by default), so the stripe only renders when a user opts in.
     public let promptGutterEnabled: Bool
+    private let colorConverter: RenderColorConverter
 
     public init(
         resolver: CellColorResolver,
         cursorColor: RGBColor,
         cursorTextColor: RGBColor? = nil,
         canvasOpacity: Float = 1,
+        colorRendering: TerminalColorRenderingMode = .accurate,
+        colorGamut: TerminalColorGamut = .auto,
         cursorStyle: CursorStyle = .block,
         selectionBackground: RGBColor? = nil,
         selectionForeground: RGBColor? = nil,
@@ -269,6 +273,7 @@ public struct FrameBuilder {
         self.cursorColor = cursorColor
         self.cursorTextColor = cursorTextColor ?? resolver.defaultBackground
         self.canvasOpacity = max(0, min(1, canvasOpacity))
+        self.colorConverter = RenderColorConverter(renderingMode: colorRendering, gamut: colorGamut)
         self.cursorStyle = cursorStyle
         self.selectionBackground = selectionBackground
         self.selectionForeground = selectionForeground
@@ -282,6 +287,8 @@ public struct FrameBuilder {
         theme: HarnessThemeDefinition,
         boldBrightens: Bool = true,
         canvasOpacity: Float = 1,
+        colorRendering: TerminalColorRenderingMode = .accurate,
+        colorGamut: TerminalColorGamut = .auto,
         cursorStyle: CursorStyle = .block,
         selectionBackground: RGBColor? = nil,
         selectionForeground: RGBColor? = nil,
@@ -295,6 +302,8 @@ public struct FrameBuilder {
             cursorColor: theme.cursor ?? theme.foreground,
             cursorTextColor: theme.cursorText ?? theme.background,
             canvasOpacity: canvasOpacity,
+            colorRendering: colorRendering,
+            colorGamut: colorGamut,
             cursorStyle: cursorStyle,
             selectionBackground: selectionBackground,
             selectionForeground: selectionForeground,
@@ -302,6 +311,14 @@ public struct FrameBuilder {
             searchForeground: searchForeground,
             promptGutterEnabled: promptGutterEnabled
         )
+    }
+
+    public func renderColor(_ color: RGBColor) -> RenderColor {
+        colorConverter.color(color)
+    }
+
+    public func renderColor(_ color: RGBColor, alpha: Float) -> RenderColor {
+        colorConverter.color(color, alpha: alpha)
     }
 
     /// Build a frame with an optional linear selection. The original entry point — kept so
@@ -363,13 +380,13 @@ public struct FrameBuilder {
         if let cm = copyModeCursor {
             cursor = CursorRender(
                 row: cm.row, column: cm.column, visible: true,
-                color: RenderColor(cursorColor), textColor: RenderColor(cursorTextColor),
+                color: renderColor(cursorColor), textColor: renderColor(cursorTextColor),
                 style: cursorStyle
             )
         } else {
             cursor = CursorRender(
                 row: snapshot.cursor.row, column: snapshot.cursor.col, visible: snapshot.cursor.visible,
-                color: RenderColor(cursorColor), textColor: RenderColor(cursorTextColor),
+                color: renderColor(cursorColor), textColor: renderColor(cursorTextColor),
                 style: cursorStyle
             )
         }
@@ -416,18 +433,18 @@ public struct FrameBuilder {
             // any non-default background must be drawn.
             let drawBackground: Bool
             if selected, let selBg = selectionBackground {
-                background = RenderColor(selBg)
-                foreground = selectionForeground.map { RenderColor($0) } ?? RenderColor(colors.foreground)
+                background = renderColor(selBg)
+                foreground = selectionForeground.map { renderColor($0) } ?? renderColor(colors.foreground)
                 drawBackground = true
             } else if isSearchHit, let searchBg = searchBackground {
-                background = RenderColor(searchBg)
-                foreground = searchForeground.map { RenderColor($0) } ?? RenderColor(colors.foreground)
+                background = renderColor(searchBg)
+                foreground = searchForeground.map { renderColor($0) } ?? renderColor(colors.foreground)
                 drawBackground = true
             } else {
                 background = isCanvasBackground
-                    ? RenderColor(colors.background, alpha: canvasOpacity)
-                    : RenderColor(colors.background)
-                foreground = RenderColor(colors.foreground)
+                    ? renderColor(colors.background, alpha: canvasOpacity)
+                    : renderColor(colors.background)
+                foreground = renderColor(colors.foreground)
                 // Default canvas cells match the clear color; everything else (explicit SGR
                 // background, inverse) needs its quad.
                 drawBackground = !isCanvasBackground
@@ -438,7 +455,7 @@ public struct FrameBuilder {
                 codepoint: cell.codepoint,
                 foreground: foreground,
                 background: background,
-                underlineColor: RenderColor(underline),
+                underlineColor: renderColor(underline),
                 bold: cell.bold,
                 italic: cell.italic,
                 underline: cell.underline,
@@ -454,9 +471,9 @@ public struct FrameBuilder {
     /// known exit is green (0) or red (non-zero); an unfinished prompt is neutral (bright-black).
     private func resolvePromptGutter(_ marks: [Int: SemanticMark]) -> [Int: RenderColor] {
         guard !marks.isEmpty else { return [:] }
-        let success = RenderColor(resolver.palette.color(at: 2))   // ANSI green
-        let failure = RenderColor(resolver.palette.color(at: 1))   // ANSI red
-        let neutral = RenderColor(resolver.palette.color(at: 8))   // bright black (gray)
+        let success = renderColor(resolver.palette.color(at: 2))   // ANSI green
+        let failure = renderColor(resolver.palette.color(at: 1))   // ANSI red
+        let neutral = renderColor(resolver.palette.color(at: 8))   // bright black (gray)
         var gutter: [Int: RenderColor] = [:]
         gutter.reserveCapacity(marks.count)
         for (row, mark) in marks {

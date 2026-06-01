@@ -53,11 +53,10 @@ let package = Package(
             path: "Packages/HarnessTheme/Sources/HarnessTheme",
             resources: [.process("Resources/themes.json")]
         ),
-        // Native renderer — depends on the engine (grid types) and theme (colors). The
-        // color-resolution layer here is pure Swift; Metal/CoreText code lands later.
+        // Native renderer — first-party frame building, CoreText glyph atlas, and Metal drawing.
         .target(
             name: "HarnessTerminalRenderer",
-            dependencies: ["HarnessTerminalEngine", "HarnessTheme"],
+            dependencies: ["HarnessCore", "HarnessTerminalEngine", "HarnessTheme"],
             path: "Packages/HarnessTerminalRenderer/Sources/HarnessTerminalRenderer"
         ),
         .target(
@@ -93,7 +92,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "HarnessCLI",
-            dependencies: ["HarnessCore", "HarnessTerminalEngine", "HarnessCopyMode", "HarnessTerminalKit"],
+            dependencies: ["HarnessCore", "HarnessTerminalEngine", "HarnessCopyMode", "HarnessTerminalKit", "HarnessTheme"],
             path: "Tools/harness/Sources/HarnessCLI"
         ),
         .executableTarget(
@@ -130,7 +129,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HarnessTerminalRendererTests",
-            dependencies: ["HarnessTerminalRenderer", "HarnessTerminalEngine", "HarnessTheme"],
+            dependencies: ["HarnessCore", "HarnessTerminalRenderer", "HarnessTerminalEngine", "HarnessTheme"],
             path: "Tests/HarnessTerminalRendererTests"
         ),
         .testTarget(
@@ -150,14 +149,16 @@ let package = Package(
             path: "Tests/HarnessDaemonTests"
         ),
         // Performance baselines for the hot paths (VT parse, IPC codec, scrollback,
-        // compositor). Gated behind HARNESS_BENCHMARKS=1 so a normal `swift test` stays fast;
-        // run with `HARNESS_BENCHMARKS=1 swift test --filter HarnessBenchmarks`.
+        // compositor, renderer stats). Gated behind HARNESS_BENCHMARKS=1 so a normal
+        // `swift test` stays fast; run with `make bench`.
         .testTarget(
             name: "HarnessBenchmarks",
             dependencies: [
                 "HarnessCore",
                 "HarnessTerminalEngine",
                 "HarnessTerminalKit",
+                "HarnessTerminalRenderer",
+                "HarnessTheme",
             ],
             path: "Tests/HarnessBenchmarks"
         ),

@@ -1,26 +1,57 @@
+import CoreGraphics
+import Foundation
+import ImageIO
 import Metal
+import UniformTypeIdentifiers
 import XCTest
 @testable import HarnessTerminalRenderer
 import HarnessTerminalEngine
 import HarnessTheme
 
-/// Offscreen golden-image tests: render a known frame to a texture and read pixels back.
-/// They validate the whole GPU path (device, pipelines, atlas, coordinate mapping,
-/// blending) without a window. Skipped where no Metal device is available.
+/// Harness's own offscreen renderer conformance suite: render a known frame to a texture,
+/// read pixels/stats back, and assert structural behavior without an external oracle.
+///
+/// Set `HARNESS_WRITE_RENDER_SNAPSHOTS=1` to dump PNGs to
+/// `$TMPDIR/HarnessRenderSnapshots/` for human debugging. CI must rely on the structural
+/// assertions here, not pixel-perfect snapshot files.
 final class MetalRendererTests: XCTestCase {
     private let theme = HarnessThemeCatalog.theme(named: "Dracula")!
+
+    private struct RenderedFixture {
+        let stats: TerminalRenderStats
+        let pixel: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)
+    }
 
     private func makeRenderer() throws -> (MTLDevice, TerminalMetalRenderer) {
         guard let device = MTLCreateSystemDefaultDevice() else {
             throw XCTSkip("No Metal device available")
         }
+        let renderer = try makeRenderer(device: device)
+        return (device, renderer)
+    }
+
+    private func makeRenderer(device: MTLDevice, atlasSize: Int = 1024, atlasMaxPages: Int = 4) throws -> TerminalMetalRenderer {
         // A device exists, so a nil renderer means a real shader/pipeline failure — fail
         // rather than skip so it surfaces.
-        let renderer = try XCTUnwrap(
-            TerminalMetalRenderer(device: device, fontFamily: "Menlo", fontSize: 14, scale: 2),
+        return try XCTUnwrap(
+            TerminalMetalRenderer(
+                device: device,
+                fontFamily: "Menlo",
+                fontSize: 14,
+                scale: 2,
+                atlasSize: atlasSize,
+                atlasMaxPages: atlasMaxPages
+            ),
             "TerminalMetalRenderer failed to build (shader/pipeline error)"
         )
-        return (device, renderer)
+    }
+
+    private func makeAtlas(_ device: MTLDevice, size: Int = 1024, maxPages: Int = 4) throws -> GlyphAtlas {
+        let rasterizer = GlyphRasterizer(fontFamily: "Menlo", size: 14, scale: 2)
+        return try XCTUnwrap(
+            GlyphAtlas(device: device, rasterizer: rasterizer, size: size, maxPages: maxPages),
+            "GlyphAtlas failed to build"
+        )
     }
 
     private func makeTarget(_ device: MTLDevice, width: Int, height: Int) -> MTLTexture? {
@@ -33,9 +64,67 @@ final class MetalRendererTests: XCTestCase {
     }
 
     private func frame(_ bytes: String, cols: Int, rows: Int) -> TerminalFrame {
+        FrameBuilder(theme: theme).build(snapshot(bytes, cols: cols, rows: rows))
+    }
+
+    private func snapshot(_ bytes: String, cols: Int, rows: Int) -> TerminalGridSnapshot {
         let term = HarnessGridTerminal(cols: cols, rows: rows)!
         term.feed(bytes)
-        return FrameBuilder(theme: theme).build(term.readGrid()!)
+        return term.readGrid()!
+    }
+
+    private func backgroundFrame(
+        _ colors: [RenderColor],
+        codepoints: [UInt32]? = nil,
+        foregrounds: [RenderColor]? = nil
+    ) -> TerminalFrame {
+        let fg = RenderColor(red: 1, green: 1, blue: 1, alpha: 1)
+        let cells = colors.enumerated().map { column, color in
+            RenderCell(
+                row: 0,
+                column: column,
+                codepoint: codepoints?[column] ?? 0x20,
+                foreground: foregrounds?[column] ?? fg,
+                background: color,
+                underlineColor: foregrounds?[column] ?? fg,
+                bold: false,
+                italic: false,
+                underline: .none,
+                strikethrough: false,
+                overline: false,
+                width: .normal,
+                drawBackground: true
+            )
+        }
+        return TerminalFrame(
+            columns: colors.count,
+            rows: 1,
+            cells: cells,
+            cursor: CursorRender(
+                row: 0,
+                column: 0,
+                visible: false,
+                color: fg,
+                textColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1)
+            )
+        )
+    }
+
+    private func renderFixture(
+        _ frame: TerminalFrame,
+        name: String,
+        cols: Int,
+        rows: Int,
+        device: MTLDevice,
+        renderer: TerminalMetalRenderer,
+        clearColor: RenderColor = RenderColor(red: 0, green: 0, blue: 0, alpha: 1),
+        ligatures: Bool = false
+    ) throws -> RenderedFixture {
+        let (w, h) = renderer.surfacePixelSize(columns: cols, rows: rows)
+        guard let target = makeTarget(device, width: w, height: h) else { throw XCTSkip("no texture") }
+        renderer.render(frame, to: target, clearColor: clearColor, ligatures: ligatures)
+        writeSnapshotIfRequested(texture: target, width: w, height: h, name: name)
+        return RenderedFixture(stats: renderer.stats, pixel: readPixels(target, width: w, height: h))
     }
 
     func testRendererInitializes() throws {
@@ -45,6 +134,155 @@ final class MetalRendererTests: XCTestCase {
         let size = renderer.surfacePixelSize(columns: 80, rows: 24)
         XCTAssertEqual(size.width, renderer.cellPixelWidth * 80)
         XCTAssertEqual(size.height, renderer.cellPixelHeight * 24)
+    }
+
+    func testRenderStatsDistinguishNonEmptyAndDefaultCanvasFrames() throws {
+        let (device, renderer) = try makeRenderer()
+        let nonEmpty = frame("\u{1b}[?25l\u{1b}[48;2;255;0;0mA", cols: 1, rows: 1)
+        var size = renderer.surfacePixelSize(columns: 1, rows: 1)
+        guard let nonEmptyTarget = makeTarget(device, width: size.width, height: size.height) else {
+            throw XCTSkip("no texture")
+        }
+
+        renderer.render(nonEmpty, to: nonEmptyTarget, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let nonEmptyStats = renderer.stats
+        XCTAssertGreaterThan(nonEmptyStats.cells, 0)
+        XCTAssertGreaterThan(nonEmptyStats.glyphInstances, 0)
+        XCTAssertGreaterThan(nonEmptyStats.bgInstances, 0)
+        XCTAssertEqual(nonEmptyStats.bgSpans, nonEmptyStats.bgInstances)
+        XCTAssertEqual(nonEmptyStats.bgCells, 1)
+        XCTAssertEqual(nonEmptyStats.atlasPages, 1)
+        XCTAssertGreaterThan(nonEmptyStats.encodeNanos, 0)
+
+        let blank = frame("\u{1b}[?25l", cols: 2, rows: 1)
+        size = renderer.surfacePixelSize(columns: 2, rows: 1)
+        guard let blankTarget = makeTarget(device, width: size.width, height: size.height) else {
+            throw XCTSkip("no texture")
+        }
+
+        renderer.render(blank, to: blankTarget, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let blankStats = renderer.stats
+        XCTAssertGreaterThan(blankStats.cells, 0)
+        XCTAssertEqual(blankStats.bgInstances, 0)
+        XCTAssertEqual(blankStats.bgCells, 0)
+        XCTAssertEqual(blankStats.glyphInstances, 0)
+        XCTAssertNotEqual(nonEmptyStats.bgInstances, blankStats.bgInstances)
+        XCTAssertNotEqual(nonEmptyStats.glyphInstances, blankStats.glyphInstances)
+    }
+
+    func testGlyphAtlasStatsTrackMissThenHit() throws {
+        let (device, _) = try makeRenderer()
+        let atlas = try makeAtlas(device)
+        let key = GlyphKey(codepoint: UInt32(UnicodeScalar("A").value), bold: false, italic: false)
+
+        XCTAssertEqual(atlas.stats.hits, 0)
+        XCTAssertEqual(atlas.stats.misses, 0)
+        let first = try XCTUnwrap(atlas.entry(for: key))
+        XCTAssertEqual(first.pageIndex, 0)
+        XCTAssertEqual(atlas.stats.entries, 1)
+        XCTAssertEqual(atlas.stats.misses, 1)
+        XCTAssertEqual(atlas.stats.hits, 0)
+
+        let second = try XCTUnwrap(atlas.entry(for: key))
+        XCTAssertEqual(second.pageIndex, 0)
+        XCTAssertEqual(atlas.stats.entries, 1)
+        XCTAssertEqual(atlas.stats.misses, 1)
+        XCTAssertEqual(atlas.stats.hits, 1)
+        XCTAssertEqual(atlas.stats.pages, 1)
+    }
+
+    func testGlyphAtlasSinglePageEntriesUsePageZero() throws {
+        let (device, _) = try makeRenderer()
+        let atlas = try makeAtlas(device)
+
+        for scalar in "Harness".unicodeScalars {
+            let entry = try XCTUnwrap(atlas.entry(for: GlyphKey(codepoint: scalar.value, bold: false, italic: false)))
+            XCTAssertEqual(entry.pageIndex, 0)
+        }
+
+        XCTAssertEqual(atlas.stats.pages, 1)
+        XCTAssertEqual(atlas.stats.resets, 0)
+    }
+
+    func testGlyphAtlasGrowsPagesWithoutReset() throws {
+        let (device, _) = try makeRenderer()
+        let atlas = try makeAtlas(device, size: 48, maxPages: 2)
+        var seenPages = Set<Int>()
+
+        for scalar in atlasPressureScalars() {
+            guard let entry = atlas.entry(for: GlyphKey(codepoint: scalar.value, bold: false, italic: false)) else {
+                continue
+            }
+            seenPages.insert(entry.pageIndex)
+            if seenPages.contains(0), seenPages.contains(1) { break }
+        }
+
+        XCTAssertEqual(seenPages, [0, 1])
+        XCTAssertEqual(atlas.stats.pages, 2)
+        XCTAssertEqual(atlas.stats.resets, 0)
+    }
+
+    func testMultiPageAtlasGlyphsRenderFromBothPages() throws {
+        let (device, _) = try makeRenderer()
+        let probe = try multiPageProbeText(device: device, atlasSize: 48, atlasMaxPages: 2)
+        let renderer = try makeRenderer(device: device, atlasSize: 48, atlasMaxPages: 2)
+        let f = frame("\u{1b}[?25l\(probe.text)", cols: probe.text.count, rows: 1)
+        let rendered = try renderFixture(f, name: "glyph_atlas_multi_page", cols: probe.text.count, rows: 1,
+                                         device: device, renderer: renderer)
+
+        XCTAssertEqual(renderer.glyphAtlasStats.pages, 2)
+        XCTAssertEqual(renderer.glyphAtlasStats.resets, 0)
+        assertCellContainsInk(rendered, renderer: renderer, column: probe.pageZeroColumn, label: "page 0 glyph")
+        assertCellContainsInk(rendered, renderer: renderer, column: probe.pageOneColumn, label: "page 1 glyph")
+    }
+
+    func testGlyphAtlasOverflowAllPagesResetsAndHeals() throws {
+        let (device, _) = try makeRenderer()
+        let atlas = try makeAtlas(device, size: 48, maxPages: 1)
+        var healedEntry: AtlasEntry?
+
+        for scalar in atlasPressureScalars() {
+            healedEntry = atlas.entry(for: GlyphKey(codepoint: scalar.value, bold: false, italic: false))
+            if atlas.stats.resets > 0, healedEntry != nil { break }
+        }
+
+        let entry = try XCTUnwrap(healedEntry, "expected a glyph to render after max-page reset")
+        XCTAssertEqual(entry.pageIndex, 0)
+        XCTAssertEqual(atlas.stats.pages, 1)
+        XCTAssertGreaterThan(atlas.stats.resets, 0)
+    }
+
+    func testLigatedRunsUseShapedRunCacheAcrossFrames() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25loffice => != ->", cols: 18, rows: 1)
+        let (w, h) = renderer.surfacePixelSize(columns: 18, rows: 1)
+        guard let target = makeTarget(device, width: w, height: h) else { throw XCTSkip("no texture") }
+
+        renderer.render(f, to: target, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1), ligatures: true)
+        let afterFirst = renderer.glyphAtlasStats
+        XCTAssertGreaterThan(afterFirst.shapedRunEntries, 0)
+        XCTAssertGreaterThan(afterFirst.shapedRunCacheMisses, 0)
+        XCTAssertEqual(afterFirst.shapedRunCacheHits, 0)
+        XCTAssertGreaterThan(renderer.stats.glyphInstances, 0)
+
+        renderer.render(f, to: target, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1), ligatures: true)
+        let afterSecond = renderer.glyphAtlasStats
+        XCTAssertEqual(afterSecond.shapedRunEntries, afterFirst.shapedRunEntries)
+        XCTAssertEqual(afterSecond.shapedRunCacheMisses, afterFirst.shapedRunCacheMisses)
+        XCTAssertGreaterThan(afterSecond.shapedRunCacheHits, afterFirst.shapedRunCacheHits)
+    }
+
+    func testProceduralBoxAndBlockCellsDoNotEnterShapedRunCache() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l\u{2500}\u{2588}", cols: 2, rows: 1)
+        let rendered = try renderFixture(f, name: "procedural_no_shaped_run_cache", cols: 2, rows: 1,
+                                         device: device, renderer: renderer, ligatures: true)
+
+        XCTAssertGreaterThan(rendered.stats.glyphInstances, 0, "box drawing still emits its procedural sprite")
+        XCTAssertGreaterThan(rendered.stats.bgInstances, 0, "block element still emits its procedural fill")
+        XCTAssertEqual(renderer.glyphAtlasStats.shapedRunEntries, 0)
+        XCTAssertEqual(renderer.glyphAtlasStats.shapedRunCacheHits, 0)
+        XCTAssertEqual(renderer.glyphAtlasStats.shapedRunCacheMisses, 0)
     }
 
     func testBackgroundColorsRenderPerCell() throws {
@@ -61,6 +299,87 @@ final class MetalRendererTests: XCTestCase {
         let right = px(renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2)
         assertColor(left, r: 255, g: 0, b: 0, label: "left cell red bg")
         assertColor(right, r: 0, g: 0, b: 255, label: "right cell blue bg")
+    }
+
+    func testUniformBackgroundRowCoalescesWithoutChangingReadback() throws {
+        let (device, renderer) = try makeRenderer()
+        let red = RenderColor(red: 1, green: 0, blue: 0, alpha: 1)
+        // Alpha > 1 clamps to the same rgba8Unorm byte, but the color value is unequal, so
+        // this reference frame exercises the old one-instance-per-cell shape.
+        let equivalentRed = RenderColor(red: 1, green: 0, blue: 0, alpha: 1.0001)
+        let coalesced = backgroundFrame(Array(repeating: red, count: 8))
+        let unmergedEquivalent = backgroundFrame((0 ..< 8).map { $0.isMultiple(of: 2) ? red : equivalentRed })
+        let (w, h) = renderer.surfacePixelSize(columns: 8, rows: 1)
+        guard let coalescedTarget = makeTarget(device, width: w, height: h),
+              let unmergedTarget = makeTarget(device, width: w, height: h)
+        else { throw XCTSkip("no texture") }
+
+        renderer.render(coalesced, to: coalescedTarget, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let coalescedStats = renderer.stats
+        let coalescedBytes = readPixelBytes(coalescedTarget, width: w, height: h)
+
+        renderer.render(unmergedEquivalent, to: unmergedTarget, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let unmergedStats = renderer.stats
+        let unmergedBytes = readPixelBytes(unmergedTarget, width: w, height: h)
+
+        XCTAssertEqual(coalescedBytes, unmergedBytes)
+        XCTAssertEqual(coalescedStats.bgCells, 8)
+        XCTAssertEqual(coalescedStats.bgSpans, 1)
+        XCTAssertEqual(coalescedStats.bgInstances, 1)
+        XCTAssertEqual(unmergedStats.bgCells, 8)
+        XCTAssertEqual(unmergedStats.bgSpans, 8)
+        XCTAssertEqual(unmergedStats.bgInstances, 8)
+    }
+
+    func testBackgroundSpanStatsFollowColorRuns() throws {
+        let (device, renderer) = try makeRenderer()
+        let red = RenderColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let blue = RenderColor(red: 0, green: 0, blue: 1, alpha: 1)
+        let f = backgroundFrame([red, red, blue, blue, red])
+        let rendered = try renderFixture(f, name: "background_runs", cols: 5, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgCells, 5)
+        XCTAssertEqual(rendered.stats.bgSpans, 3)
+        XCTAssertEqual(rendered.stats.bgInstances, 3)
+    }
+
+    func testBackgroundSpanBreaksBeforeBlockElementFill() throws {
+        let (device, renderer) = try makeRenderer()
+        let red = RenderColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let green = RenderColor(red: 0, green: 1, blue: 0, alpha: 1)
+        let f = backgroundFrame(
+            [red, red, red],
+            codepoints: [0x20, 0x2588, 0x20],
+            foregrounds: [green, green, green]
+        )
+        let rendered = try renderFixture(f, name: "background_block_break", cols: 3, rows: 1,
+                                         device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgCells, 3)
+        XCTAssertEqual(rendered.stats.bgSpans, 3)
+        XCTAssertEqual(rendered.stats.bgInstances, 4, "block fill remains a separate background-pass instance")
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: 255, g: 0, b: 0, label: "left red background")
+        assertColor(rendered.pixel(renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: 0, g: 255, b: 0, label: "block fill stays on top")
+        assertColor(rendered.pixel(2 * renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: 255, g: 0, b: 0, label: "right red background")
+    }
+
+    func testPureRedBackgroundReadbackIsIdentity() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l\u{1b}[48;2;255;0;0m ", cols: 1, rows: 1)
+        let (w, h) = renderer.surfacePixelSize(columns: 1, rows: 1)
+        guard let target = makeTarget(device, width: w, height: h) else { throw XCTSkip("no texture") }
+
+        renderer.render(f, to: target, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let px = readPixels(target, width: w, height: h)
+        let center = px(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2)
+
+        XCTAssertEqual(center.0, 255)
+        XCTAssertEqual(center.1, 0)
+        XCTAssertEqual(center.2, 0)
+        XCTAssertEqual(center.3, 255)
     }
 
     func testGlyphRendersForegroundColor() throws {
@@ -91,6 +410,7 @@ final class MetalRendererTests: XCTestCase {
 
         renderer.render(f, to: target, clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1))
         let px = readPixels(target, width: w, height: h)
+        XCTAssertEqual(renderer.stats.imageInstances, 1)
         // Inside the image: green. A cell with no image: not green.
         assertColor(px(iw / 2, ih / 2), r: 0, g: 255, b: 0, label: "inline image green", tolerance: 24)
         XCTAssertLessThan(Int(px(iw + iw / 2, ih + ih / 2).1), 160, "no-image cell isn't green")
@@ -110,6 +430,8 @@ final class MetalRendererTests: XCTestCase {
                         clearColor: RenderColor(red: 0, green: 0, blue: 0, alpha: 1),
                         origin: (x: pad, y: 0))
         let px = readPixels(target, width: grid.width + pad, height: grid.height)
+        XCTAssertEqual(renderer.stats.bgInstances, 1, "prompt gutter emits one background-pass instance")
+        XCTAssertEqual(renderer.stats.bgSpans, 0, "prompt gutter does not count as a cell background span")
 
         // The stripe sits in the padding flush to the grid's left edge ([pad-gutterW, pad)), on
         // the prompt row (row 0). Sample its rightmost pixel; the far-left padding stays black.
@@ -174,23 +496,304 @@ final class MetalRendererTests: XCTestCase {
         }
     }
 
+    // MARK: - Harness-owned renderer guardrails
+
+    func testHarnessRendererFixtureDefaultTextReportsPlausibleGlyphStats() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25lABC", cols: 5, rows: 1)
+        let rendered = try renderFixture(f, name: "default_text", cols: 5, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.cells, 5)
+        XCTAssertEqual(rendered.stats.bgInstances, 0, "default-canvas cells rely on the clear color")
+        XCTAssertEqual(rendered.stats.bgCells, 0)
+        XCTAssertEqual(rendered.stats.glyphInstances, 3)
+        XCTAssertEqual(rendered.stats.decoInstances, 0)
+        XCTAssertGreaterThan(rendered.stats.encodeNanos, 0)
+    }
+
+    func testHarnessRendererFixtureANSIColorBackgroundsFill() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l\u{1b}[41m \u{1b}[42m ", cols: 2, rows: 1)
+        let rendered = try renderFixture(f, name: "ansi_backgrounds", cols: 2, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgCells, 2)
+        XCTAssertEqual(rendered.stats.bgSpans, 2)
+        XCTAssertEqual(rendered.stats.bgInstances, 2)
+        let red = theme.palette[1]
+        let green = theme.palette[2]
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: Int(red.red), g: Int(red.green), b: Int(red.blue),
+                    label: "ANSI red background", tolerance: 24)
+        assertColor(rendered.pixel(renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: Int(green.red), g: Int(green.green), b: Int(green.blue),
+                    label: "ANSI green background", tolerance: 24)
+    }
+
+    func testHarnessRendererFixtureTruecolorGradientFillsEveryCell() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame(
+            "\u{1b}[?25l\u{1b}[48;2;0;0;0m \u{1b}[48;2;85;0;0m \u{1b}[48;2;170;0;0m \u{1b}[48;2;255;0;0m ",
+            cols: 4,
+            rows: 1
+        )
+        let rendered = try renderFixture(f, name: "truecolor_gradient", cols: 4, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgCells, 4)
+        XCTAssertEqual(rendered.stats.bgSpans, 4)
+        XCTAssertEqual(rendered.stats.bgInstances, 4)
+        for (column, red) in [0, 85, 170, 255].enumerated() {
+            assertColor(
+                rendered.pixel(column * renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                r: red, g: 0, b: 0, label: "truecolor gradient column \(column)", tolerance: 10
+            )
+        }
+    }
+
+    func testHarnessRendererFixtureSelectionAndSearchHighlightsFill() throws {
+        let (device, renderer) = try makeRenderer()
+        let grid = snapshot("\u{1b}[?25l    ", cols: 4, rows: 1)
+        let selection = HarnessTheme.RGBColor(red: 10, green: 20, blue: 30)
+        let search = HarnessTheme.RGBColor(red: 40, green: 50, blue: 60)
+        let builder = FrameBuilder(
+            theme: theme,
+            selectionBackground: selection,
+            searchBackground: search
+        )
+        let f = builder.build(
+            grid,
+            region: SelectionRegion.linear(TerminalSelection((0, 0), (0, 1))),
+            searchHighlights: [TerminalSelection((0, 2), (0, 3))]
+        )
+        let rendered = try renderFixture(f, name: "selection_search", cols: 4, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgCells, 4)
+        XCTAssertEqual(rendered.stats.bgSpans, 2)
+        XCTAssertEqual(rendered.stats.bgInstances, 2)
+        XCTAssertEqual(rendered.stats.glyphInstances, 0)
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: Int(selection.red), g: Int(selection.green), b: Int(selection.blue),
+                    label: "selection fill", tolerance: 10)
+        assertColor(rendered.pixel(2 * renderer.cellPixelWidth + renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: Int(search.red), g: Int(search.green), b: Int(search.blue),
+                    label: "search fill", tolerance: 10)
+    }
+
+    func testHarnessRendererFixtureUnderlineStylesStrikeAndOverlineEmitDecorations() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame(
+            "\u{1b}[?25l\u{1b}[4mA\u{1b}[4:3mB\u{1b}[4:4mC\u{1b}[4:5mD\u{1b}[24m\u{1b}[9mS\u{1b}[29m\u{1b}[53mO",
+            cols: 6,
+            rows: 1
+        )
+        let rendered = try renderFixture(f, name: "decorations", cols: 6, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.glyphInstances, 6)
+        XCTAssertEqual(rendered.stats.decoInstances, 6)
+    }
+
+    func testHarnessRendererFixtureBlockElementsAreProceduralFills() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l\u{1b}[38;2;0;255;0m\u{2580}", cols: 1, rows: 1)
+        let rendered = try renderFixture(f, name: "block_element", cols: 1, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.glyphInstances, 0, "block elements must not come from the font atlas")
+        XCTAssertEqual(rendered.stats.bgInstances, 1)
+        XCTAssertEqual(rendered.stats.bgSpans, 0)
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 4),
+                    r: 0, g: 255, b: 0, label: "upper-half block fill", tolerance: 24)
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight * 3 / 4),
+                    r: 0, g: 0, b: 0, label: "lower half stays clear", tolerance: 8)
+    }
+
+    func testHarnessRendererFixtureBoxDrawingUsesProceduralSpritePath() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l\u{1b}[38;2;0;255;255m\u{2500}", cols: 1, rows: 1)
+        let rendered = try renderFixture(f, name: "box_drawing", cols: 1, rows: 1, device: device, renderer: renderer)
+
+        XCTAssertEqual(rendered.stats.bgInstances, 0)
+        XCTAssertEqual(rendered.stats.glyphInstances, 1)
+        assertColor(rendered.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: 0, g: 255, b: 255, label: "box drawing center stroke", tolerance: 48)
+    }
+
+    func testHarnessRendererFixtureCursorStylesPreserveFillGeometry() throws {
+        let (device, renderer) = try makeRenderer()
+        let grid = snapshot("", cols: 1, rows: 1)
+        let clear = RenderColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let cursor = theme.cursor ?? theme.foreground
+
+        let block = FrameBuilder(theme: theme, cursorStyle: .block).build(grid)
+        let blockOut = try renderFixture(block, name: "cursor_block", cols: 1, rows: 1,
+                                         device: device, renderer: renderer, clearColor: clear)
+        XCTAssertEqual(blockOut.stats.bgInstances, 1)
+        XCTAssertEqual(blockOut.stats.bgSpans, 0)
+        assertColor(blockOut.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: Int(cursor.red), g: Int(cursor.green), b: Int(cursor.blue),
+                    label: "block cursor center", tolerance: 24)
+
+        let bar = FrameBuilder(theme: theme, cursorStyle: .bar).build(grid)
+        let barOut = try renderFixture(bar, name: "cursor_bar", cols: 1, rows: 1,
+                                       device: device, renderer: renderer, clearColor: clear)
+        XCTAssertEqual(barOut.stats.bgInstances, 1)
+        XCTAssertEqual(barOut.stats.bgSpans, 0)
+        assertColor(barOut.pixel(1, renderer.cellPixelHeight / 2),
+                    r: Int(cursor.red), g: Int(cursor.green), b: Int(cursor.blue),
+                    label: "bar cursor left edge", tolerance: 24)
+        assertColor(barOut.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight / 2),
+                    r: 0, g: 0, b: 0, label: "bar cursor center stays clear", tolerance: 8)
+
+        let underline = FrameBuilder(theme: theme, cursorStyle: .underline).build(grid)
+        let underlineOut = try renderFixture(underline, name: "cursor_underline", cols: 1, rows: 1,
+                                             device: device, renderer: renderer, clearColor: clear)
+        XCTAssertEqual(underlineOut.stats.bgInstances, 1)
+        XCTAssertEqual(underlineOut.stats.bgSpans, 0)
+        assertColor(underlineOut.pixel(renderer.cellPixelWidth / 2, renderer.cellPixelHeight - 1),
+                    r: Int(cursor.red), g: Int(cursor.green), b: Int(cursor.blue),
+                    label: "underline cursor bottom edge", tolerance: 24)
+        assertColor(underlineOut.pixel(renderer.cellPixelWidth / 2, 1),
+                    r: 0, g: 0, b: 0, label: "underline cursor top stays clear", tolerance: 8)
+    }
+
+    func testHarnessRendererFixtureLigatureShapingPathReportsPlausibleGlyphs() throws {
+        let (device, renderer) = try makeRenderer()
+        let f = frame("\u{1b}[?25l=>!=", cols: 4, rows: 1)
+        let rendered = try renderFixture(f, name: "ligature_path", cols: 4, rows: 1,
+                                         device: device, renderer: renderer, ligatures: true)
+
+        XCTAssertGreaterThan(rendered.stats.glyphInstances, 0)
+        XCTAssertLessThanOrEqual(rendered.stats.glyphInstances, 4)
+        XCTAssertEqual(rendered.stats.bgInstances, 0)
+    }
+
+    // MARK: - Atlas test helpers
+
+    private func atlasPressureScalars() -> [Unicode.Scalar] {
+        var scalars: [Unicode.Scalar] = []
+        for value in 0x21 ... 0x7E {
+            if let scalar = Unicode.Scalar(value) { scalars.append(scalar) }
+        }
+        for value in 0xA1 ... 0xFF {
+            if let scalar = Unicode.Scalar(value) { scalars.append(scalar) }
+        }
+        return scalars
+    }
+
+    private func multiPageProbeText(
+        device: MTLDevice,
+        atlasSize: Int,
+        atlasMaxPages: Int
+    ) throws -> (text: String, pageZeroColumn: Int, pageOneColumn: Int) {
+        let atlas = try makeAtlas(device, size: atlasSize, maxPages: atlasMaxPages)
+        var scalars = String.UnicodeScalarView()
+        var pageZeroColumn: Int?
+        var pageOneColumn: Int?
+
+        for scalar in atlasPressureScalars() {
+            guard let entry = atlas.entry(for: GlyphKey(codepoint: scalar.value, bold: false, italic: false)) else {
+                continue
+            }
+            let column = scalars.count
+            scalars.append(scalar)
+            if entry.pageIndex == 0, pageZeroColumn == nil {
+                pageZeroColumn = column
+            } else if entry.pageIndex == 1, pageOneColumn == nil {
+                pageOneColumn = column
+                break
+            }
+        }
+
+        XCTAssertEqual(atlas.stats.resets, 0)
+        return (
+            String(scalars),
+            try XCTUnwrap(pageZeroColumn, "expected at least one glyph on page 0"),
+            try XCTUnwrap(pageOneColumn, "expected atlas pressure text to spill onto page 1")
+        )
+    }
+
     // MARK: - Pixel helpers
 
-    private func readPixels(_ texture: MTLTexture, width: Int, height: Int) -> (Int, Int) -> (UInt8, UInt8, UInt8, UInt8) {
+    private func readPixelBytes(_ texture: MTLTexture, width: Int, height: Int) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         bytes.withUnsafeMutableBytes { raw in
             texture.getBytes(raw.baseAddress!, bytesPerRow: width * 4,
                              from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         }
+        return bytes
+    }
+
+    private func readPixels(_ texture: MTLTexture, width: Int, height: Int) -> (Int, Int) -> (UInt8, UInt8, UInt8, UInt8) {
+        let bytes = readPixelBytes(texture, width: width, height: height)
         return { x, y in
             let i = (y * width + x) * 4
             return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
         }
     }
 
+    private func writeSnapshotIfRequested(texture: MTLTexture, width: Int, height: Int, name: String) {
+        guard ProcessInfo.processInfo.environment["HARNESS_WRITE_RENDER_SNAPSHOTS"] == "1" else { return }
+
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(raw.baseAddress!, bytesPerRow: width * 4,
+                             from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        let data = Data(bytes)
+        guard let provider = CGDataProvider(data: data as CFData),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let image = CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              )
+        else { return }
+
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("HarnessRenderSnapshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(name).png")
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else { return }
+        CGImageDestinationAddImage(destination, image, nil)
+        CGImageDestinationFinalize(destination)
+    }
+
     private func assertColor(_ c: (UInt8, UInt8, UInt8, UInt8), r: Int, g: Int, b: Int, label: String, tolerance: Int = 8) {
         XCTAssertLessThanOrEqual(abs(Int(c.0) - r), tolerance, "\(label) red (\(c.0) vs \(r))")
         XCTAssertLessThanOrEqual(abs(Int(c.1) - g), tolerance, "\(label) green (\(c.1) vs \(g))")
         XCTAssertLessThanOrEqual(abs(Int(c.2) - b), tolerance, "\(label) blue (\(c.2) vs \(b))")
+    }
+
+    private func assertCellContainsInk(
+        _ rendered: RenderedFixture,
+        renderer: TerminalMetalRenderer,
+        column: Int,
+        row: Int = 0,
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let startX = column * renderer.cellPixelWidth
+        let startY = row * renderer.cellPixelHeight
+        for y in startY ..< startY + renderer.cellPixelHeight {
+            for x in startX ..< startX + renderer.cellPixelWidth {
+                let pixel = rendered.pixel(x, y)
+                if Int(pixel.0) + Int(pixel.1) + Int(pixel.2) > 32 {
+                    return
+                }
+            }
+        }
+        XCTFail("\(label) cell did not contain rendered glyph ink", file: file, line: line)
     }
 }

@@ -79,6 +79,15 @@ These query the current Harness state and do not change your layout.
 | `has-session --session <name\|uuid>` | Scripting verb: exit `0` if it exists, `1` if not; prints nothing. |
 | `list-commands` | Print the bindable command vocabulary. |
 
+### Local diagnostics
+
+These CLI commands are pure local output and do not require the daemon.
+
+| Command | Effect |
+|---|---|
+| `harness-cli color-check` | Print a deterministic SGR diagnostic page: ANSI 0-15, the 256-color cube, grayscale ramp, truecolor primaries, gradients, text attributes, and foreground/background combinations. |
+| `harness-cli theme-preview [--theme <name>] [--all]` | Print realistic prompt, git/build, diagnostic, agent-state, selection/search, and ANSI-swatch examples for one theme or every built-in theme. |
+
 ## Modes
 
 | Command | Effect |

@@ -1,7 +1,10 @@
-.PHONY: build preview preview-stop preview-clean release package dmg sign appcast finalize icon clean
+.PHONY: build bench preview preview-stop preview-clean release package dmg sign appcast finalize icon clean
 
 build:
 	swift build
+
+bench:
+	HARNESS_BENCHMARKS=1 swift test -c release --filter HarnessBenchmarks
 
 preview:
 	./Scripts/preview.sh

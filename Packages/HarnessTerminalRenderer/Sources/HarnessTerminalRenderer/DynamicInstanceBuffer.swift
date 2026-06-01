@@ -52,7 +52,7 @@ final class DynamicInstanceBuffer {
         guard let target = buffers[slot] else { return nil }
         instances.withUnsafeBytes { raw in
             // `raw.baseAddress` is non-nil because the array is non-empty.
-            memcpy(target.contents(), raw.baseAddress!, needed)
+            _ = memcpy(target.contents(), raw.baseAddress!, needed)
         }
         return target
     }
