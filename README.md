@@ -10,11 +10,11 @@ One self-contained app. The terminal engine, daemon, and CLI are all first-party
 
 ## Download
 
-**[Download Harness 1.0.1 for macOS →](https://github.com/robzilla1738/harness-cli/releases/download/v1.0.1/Harness.dmg)**
+**[Download Harness 1.0.2 for macOS →](https://github.com/robzilla1738/harness-cli/releases/download/v1.0.2/Harness.dmg)**
 
 Open the DMG, drag `Harness.app` to Applications, and launch it normally. The release is signed, notarized, and built for Apple silicon Macs running macOS 15 or later.
 
-SHA-256: `8f2c90d0cc8ea9b42a244cece03f454cdc2502acedd86fb452f222171d81cf1e`
+SHA-256: `e7df282e2f499ed11df88c15ad3ad1097287ef73512468226efd289c758c7f80`
 
 Prefer to build it yourself? Jump to [Build from source](#build-from-source).
 

@@ -17,7 +17,7 @@ set -euo pipefail
 #     APPLE_ID=you@example.com APPLE_TEAM_ID=9F2JXY8TCK APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 #
 # Optional:
-#   TAG=v1.0.1                               # GitHub release tag to re-upload the stapled DMG to
+#   TAG=v1.0.2                               # GitHub release tag to re-upload the stapled DMG to
 #   DEPLOY_WEBSITE=1 WEBSITE_DIR=~/Code/harness-website   # copy appcast.xml into public/ and `vercel --prod`
 #
 # Usage:  ASC_ISSUER_ID=<uuid> ./Scripts/finalize-release.sh
@@ -26,7 +26,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 APP="$ROOT/Harness.app"
 DMG="$ROOT/Harness.dmg"
-TAG="${TAG:-v1.0.1}"
+TAG="${TAG:-v1.0.2}"
 REPO="${REPO:-robzilla1738/harness-cli}"
 
 [[ -d "$APP" ]] || { echo "Harness.app missing — run build-release.sh + sign-and-notarize.sh + create-dmg.sh first." >&2; exit 1; }
