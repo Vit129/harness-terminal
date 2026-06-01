@@ -77,7 +77,7 @@ final class ImmersiveOnboardingWindowController: NSWindowController, NSWindowDel
         guard !isClosing else { return }
         isClosing = true
 
-        if launchDemo { DemoLauncher.run() }
+        if launchDemo { NSApp.activate(ignoringOtherApps: true) }
 
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -88,6 +88,9 @@ final class ImmersiveOnboardingWindowController: NSWindowController, NSWindowDel
             MainActor.assumeIsolated {
                 self?.close()
                 self?.onDismiss()
+                if launchDemo {
+                    NSApp.windows.first(where: { !($0 is NSPanel) })?.makeKeyAndOrderFront(nil)
+                }
             }
         })
     }
@@ -98,39 +101,6 @@ private final class ImmersivePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func cancelOperation(_ sender: Any?) { onCancel?() }
-}
-
-@MainActor
-enum DemoLauncher {
-    static func run() {
-        // Call the CLI by its absolute installed path (a fresh Terminal session won't have it on
-        // PATH yet), and prepend the bin dir to PATH so the suggested commands work if the user
-        // types them. Handles all three states: not installed, installed-but-daemon-down, ready.
-        let cli = HarnessCLIPaths.installedCLIPath.path
-        let binDir = HarnessCLIPaths.binDirectory.path
-        let script = """
-        #!/bin/bash
-        clear
-        export PATH="\(binDir):$PATH"
-        printf '\\n  Welcome to Harness\\n\\n'
-        if [ -x "\(cli)" ]; then
-          if "\(cli)" ping >/dev/null 2>&1; then
-            printf '  harness-cli is installed and the daemon is running.\\n\\n  Your sessions:\\n'
-            "\(cli)" list-surfaces 2>/dev/null | sed 's/^/    /'
-            printf '\\n  Try:  harness-cli list-surfaces\\n        harness-cli attach-window --tab <id>\\n\\n'
-          else
-            printf '  harness-cli is installed. Open Harness, then run:\\n\\n    harness-cli list-surfaces\\n\\n'
-          fi
-        else
-          printf '  harness-cli is not installed yet — run the Install step in the wizard.\\n\\n'
-        fi
-        """
-        let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("harness-cli-demo-\(UUID().uuidString).command")
-        try? script.write(to: url, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-        NSWorkspace.shared.open(url)
-    }
 }
 
 private struct ImmersiveRootView: View {

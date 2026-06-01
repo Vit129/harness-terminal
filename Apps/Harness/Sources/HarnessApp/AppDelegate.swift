@@ -38,7 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SessionCoordinator.shared.noteDaemonError(DaemonClientError.timeout)
             }
             Self.reconcileSessionPersistenceWithModeOnce()
-            FirstRunExperience.offerCLIInstallIfNeeded()
             OnboardingController.presentIfNeeded()
             self.externalOpenReady = true
             self.drainQueuedExternalOpenURLs()

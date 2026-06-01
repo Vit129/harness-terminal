@@ -110,21 +110,3 @@ enum CLIInstaller {
         alert.runModal()
     }
 }
-
-enum FirstRunExperience {
-    static func offerCLIInstallIfNeeded() {
-        let key = "HarnessOfferedCLIInstall"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            let alert = NSAlert()
-            alert.messageText = "Install harness-cli?"
-            alert.informativeText = "Add harness-cli to your PATH for agent hooks and automation."
-            alert.addButton(withTitle: "Install")
-            alert.addButton(withTitle: "Later")
-            if alert.runModal() == .alertFirstButtonReturn {
-                CLIInstaller.install()
-            }
-        }
-    }
-}

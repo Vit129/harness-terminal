@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Final ready state. Clean text, a few practical commands, and one optional Terminal launch.
+/// Final ready state. Clean text, a few practical commands, and one in-app handoff.
 struct CompleteStepView: View {
     let onOpenDemo: () -> Void
 
@@ -14,7 +14,7 @@ struct CompleteStepView: View {
             StepIntro(
                 eyebrow: "Ready",
                 title: "You are set.",
-                bodyText: "Open a new shell and try a command. The CLI is installed, your shell can find it, and the daemon is running in the background."
+                bodyText: "Harness is ready. The CLI is installed, your shell can find it, and the daemon is running in the background."
             )
 
             VStack(spacing: 12) {
@@ -25,7 +25,7 @@ struct CompleteStepView: View {
             .frame(maxWidth: 420)
 
             Button(action: onOpenDemo) {
-                Text("Open a terminal")
+                Text("Open Harness")
                     .frame(width: 200)
             }
             .buttonStyle(GlassPrimaryButtonStyle())

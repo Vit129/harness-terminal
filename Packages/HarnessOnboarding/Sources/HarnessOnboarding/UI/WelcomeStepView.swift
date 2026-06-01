@@ -11,10 +11,7 @@ struct WelcomeStepView: View {
         VStack(spacing: 24) {
             Spacer(minLength: 10)
 
-            Image("HarnessLogo")
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
+            logo
                 .frame(width: 210, height: 210)
                 .shadow(color: .black.opacity(0.22), radius: 28, x: 0, y: 18)
                 .accessibilityHidden(true)
@@ -39,6 +36,28 @@ struct WelcomeStepView: View {
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared || reduceMotion ? 0 : 12)
         .onAppear(perform: animateIn)
+    }
+
+    @ViewBuilder
+    private var logo: some View {
+        if let image = Self.logoImage() {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+        } else {
+            Image(systemName: "app.connected.to.app.below.fill")
+                .font(.system(size: 92, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.92))
+        }
+    }
+
+    static func logoImage(bundle: Bundle = .main) -> NSImage? {
+        if let url = bundle.url(forResource: "HarnessLogo", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSApp.applicationIconImage
     }
 
     private func animateIn() {
