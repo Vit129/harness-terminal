@@ -14,7 +14,7 @@ One self-contained app. The terminal engine, daemon, and CLI are all first-party
 
 Open the DMG, drag `Harness.app` to Applications, and launch it normally. The release is signed, notarized, and built for Apple silicon Macs running macOS 15 or later.
 
-SHA-256: `6db8549159c60438b528ed44e227c055fc39444a2aaab4c9040242d59373377f`
+SHA-256: `8f2c90d0cc8ea9b42a244cece03f454cdc2502acedd86fb452f222171d81cf1e`
 
 Prefer to build it yourself? Jump to [Build from source](#build-from-source).
 

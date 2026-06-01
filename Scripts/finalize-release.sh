@@ -58,9 +58,12 @@ xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
 
 echo "==> Stapling the ticket onto the app and the DMG…"
 xcrun stapler staple "$APP"
-# Rebuild the DMG so it carries the freshly-stapled app, then staple the DMG itself.
+# Rebuild the DMG so it carries the freshly-stapled app. The rebuilt DMG has a new
+# signature/hash, so submit that final archive before stapling it.
 "$ROOT/Scripts/create-dmg.sh"
 codesign --force --sign "Developer ID Application: Robert Courson (9F2JXY8TCK)" --timestamp "$DMG"
+echo "==> Submitting rebuilt DMG to the notary service…"
+xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
 xcrun stapler staple "$DMG"
 echo "==> Verifying Gatekeeper acceptance…"
 spctl -a -t open --context context:primary-signature -v "$DMG" 2>&1 | sed 's/^/    /' || true
