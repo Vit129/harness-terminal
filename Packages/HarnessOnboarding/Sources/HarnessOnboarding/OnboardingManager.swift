@@ -17,13 +17,16 @@ public enum HarnessOnboarding {
     /// finish/skip callbacks would never fire.
     private static var activeController: ImmersiveOnboardingWindowController?
 
-    /// Present on true first run only (or when `force` is set). Marks completion immediately
-    /// so a crash mid-wizard doesn't loop the user.
+    /// Present on true first run only (or when `force` is set). Completion is recorded when the
+    /// wizard is *dismissed* (see `showController`), not here — so a launch where the panel never
+    /// actually reaches the screen (early exit, the async present losing the race) doesn't burn the
+    /// one-shot flag and skip onboarding forever.
     public static func presentIfNeeded(force: Bool = false) {
         let defaults = UserDefaults.standard
         if !force && defaults.bool(forKey: shownKey) { return }
-        if !force { defaults.set(true, forKey: shownKey) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showController() }
+        // `force` (Help → Welcome) is a deliberate re-show and must never re-arm the first-run flag.
+        let persistOnDismiss = !force
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showController(persistOnDismiss: persistOnDismiss) }
     }
 
     /// Force re-show even if the flag is set (Help → Welcome to Harness).
@@ -36,13 +39,15 @@ public enum HarnessOnboarding {
         UserDefaults.standard.removeObject(forKey: shownKey)
     }
 
-    private static func showController() {
+    private static func showController(persistOnDismiss: Bool) {
         // Already on screen — bring it forward instead of stacking a second panel.
         if let existing = activeController {
             existing.showWindow(nil)
             return
         }
         let controller = ImmersiveOnboardingWindowController(onDismiss: {
+            // Record completion now that the user has actually seen + dismissed the wizard.
+            if persistOnDismiss { UserDefaults.standard.set(true, forKey: shownKey) }
             activeController = nil
         })
         activeController = controller

@@ -91,8 +91,20 @@ final class SessionCoordinator: NSObject {
         NotificationCenter.default.post(name: NotificationBus.shared.tabStatusChanged, object: nil)
     }
 
-    func syncFromDaemon(metadataOnly: Bool = false) {
-        guard let remote = try? daemon.fetchSnapshot() else { return }
+    /// Hydrate from the daemon's snapshot. Returns whether the fetch succeeded so launch-time callers
+    /// can gate work (e.g. draining queued external opens) on a real hydration rather than guessing.
+    @discardableResult
+    func syncFromDaemon(metadataOnly: Bool = false) -> Bool {
+        let remote: SessionSnapshot
+        do {
+            remote = try daemon.fetchSnapshot()
+        } catch {
+            // Don't silently no-op: a failed hydration leaves the UI showing stale layout/metadata.
+            // Log + throttled toast (`noteDaemonError`); the app self-heals on the next sync.
+            fputs("Harness: snapshot fetch failed: \(error)\n", stderr)
+            noteDaemonError(error)
+            return false
+        }
         StartupMetrics.shared.mark(.firstSnapshot) // idempotent: records the first hydration only
         let structureChanged = structureFingerprint(remote) != structureFingerprint(snapshot)
         snapshot = remote
@@ -118,6 +130,19 @@ final class SessionCoordinator: NSObject {
                 "metadataOnly": metadataOnly,
             ]
         )
+        return true
+    }
+
+    /// Clean-quit reap of ephemeral (Plain-mode, unpinned) sessions. Best-effort but *reliable*: the
+    /// daemon can be momentarily busy at quit and a single default-timeout request that drops would
+    /// silently leave Plain tabs alive (breaking "quit closes my tabs"). Uses a longer timeout and one
+    /// retry, and is bounded so it can never hang process exit. Synchronous — must finish before exit.
+    func closeEphemeralSessionsBeforeQuit() {
+        for attempt in 0 ..< 2 {
+            if (try? daemon.request(.closeEphemeralSessions, timeout: 4)) != nil { return }
+            if attempt == 0 { Thread.sleep(forTimeInterval: 0.1) } // brief gap before the single retry
+        }
+        fputs("Harness: closeEphemeralSessions did not confirm before quit\n", stderr)
     }
 
     private func structureFingerprint(_ snap: SessionSnapshot) -> String {
@@ -1126,6 +1151,9 @@ final class SessionCoordinator: NSObject {
     func openNotification(_ entry: NotificationEntry) {
         selectWorkspace(entry.workspaceID)
         selectTab(workspaceID: entry.workspaceID, tabID: entry.tabID)
+        // Focus the target pane so the keyboard is live immediately on arrival (mirrors
+        // ensureActivePane/setActiveSurface) — selectTab alone leaves focus on the prior pane.
+        terminalHosts.host(for: entry.surfaceID)?.focusTerminal()
         clearNotification(surfaceID: entry.surfaceID)
     }
 

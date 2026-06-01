@@ -11,6 +11,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pin the toolchain to a known major so a `latest-stable` jump (e.g. to a new Xcode with
+  # source-breaking changes) can't turn a green main red without a deliberate bump here.
+  XCODE_VERSION: "16"
+
 jobs:
   build-test:
     name: Build & test (macOS)
@@ -18,10 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select latest stable Xcode
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Toolchain versions
         run: |
@@ -34,19 +39,79 @@ jobs:
           path: |
             .build
             ~/Library/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
+          # Key on the resolved dependency graph too, so a Sparkle bump invalidates the cache
+          # instead of restoring stale prebuilt artifacts.
+          key: spm-${{ runner.os }}-${{ env.XCODE_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
+            spm-${{ runner.os }}-${{ env.XCODE_VERSION }}-
             spm-${{ runner.os }}-
 
       # Compiles every target, including the AppKit `HarnessApp` executable target,
       # so a green build proves the GUI code compiles too.
-      - name: Build
+      - name: Build (debug)
         run: swift build
+
+      # Release build catches release-only breakage the debug build can't — `assert`/`#if DEBUG`
+      # code paths drop out, optimizer-sensitive code compiles, and the benchmarks/release config
+      # are exercised. This guards the renderer/engine release-safety hardening (clamp-not-trap).
+      - name: Build (release)
+        run: swift build -c release
 
       # All eight suites (Core / Engine / CopyMode / Theme / Renderer / Kit / Daemon).
       # Renderer tests run offscreen, which is fine on a headless runner.
       - name: Test
         run: swift test
+
+  live-daemon-tests:
+    name: Live daemon tests (socket / PTY / security)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/org.swift.swiftpm
+          key: spm-live-${{ runner.os }}-${{ env.XCODE_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            spm-live-${{ runner.os }}-${{ env.XCODE_VERSION }}-
+            spm-${{ runner.os }}-${{ env.XCODE_VERSION }}-
+
+      # The socket/PTY/security round-trip suites (DaemonRoundTrip, RealPtyLifecycle, contention,
+      # hook-firing) are gated behind HARNESS_LIVE_DAEMON_TESTS and therefore NEVER run in the default
+      # `swift test`. Run the full suite with the gate ON here so those live tests — spawning a real
+      # shell + Unix socket and checking the daemon's IPC, reconnect, and peer-credential paths — are
+      # actually exercised in CI.
+      - name: Live daemon tests
+        env:
+          HARNESS_LIVE_DAEMON_TESTS: "1"
+        run: swift test
+
+  lint:
+    name: Format lint (advisory)
+    runs-on: macos-15
+    # Style only — never block a merge on formatting. Surfaces drift for a human to clean up.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: swift-format lint
+        run: |
+          # `swift format` ships with the toolchain; lint (don't rewrite) the first-party sources.
+          swift format lint --recursive --parallel \
+            Apps Packages Tools Tests Package.swift || true
 
   benchmarks:
     name: Benchmarks (non-blocking)
@@ -56,10 +121,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select latest stable Xcode
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Run benchmark suite
         env:

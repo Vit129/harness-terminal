@@ -55,6 +55,15 @@
     </array>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Harness. Released under the MIT License.</string>
+    <!-- Harness implements no non-exempt encryption of its own: TLS is the system's (Sparkle's
+         HTTPS appcast), and ssh/telnet are launched as external tools, not bundled crypto. Declaring
+         this avoids the export-compliance prompt and documents the exemption for distribution. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>

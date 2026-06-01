@@ -25,7 +25,7 @@ enum Phase67UI {
     private final class MenuActionTarget: NSObject {
         let command: Command
         init(_ command: Command) { self.command = command }
-        @objc func fire() { try? MainExecutor.shared.execute(command) }
+        @objc func fire() { MainExecutor.shared.executeSurfacingErrors(command) }
     }
     private static var menuTargets: [MenuActionTarget] = []
 

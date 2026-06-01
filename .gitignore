@@ -13,6 +13,8 @@ xcuserdata/
 Harness.app/
 Harness.dmg
 *.dmg
+Harness-notarize.zip
+*.notarize.zip
 .harness-preview/
 .dmg-staging/
 .icon-staging*/

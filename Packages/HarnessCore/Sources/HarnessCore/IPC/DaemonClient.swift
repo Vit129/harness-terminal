@@ -165,6 +165,11 @@ public final class DaemonSubscription: @unchecked Sendable {
     private let fd: Int32
     private let queue = DispatchQueue(label: "com.robert.harness.daemon-subscription")
     private let lock = NSLock()
+    /// Serializes writes to the single full-duplex `fd` so concurrent writers (keystroke `sendInput`
+    /// + `detachSurface`) can never interleave bytes mid-frame. Distinct from `lock` (which guards
+    /// the cancel flags) so a blocking write can't wedge `cancel()`. Uncontended in practice —
+    /// input is already serialized upstream on the host's IO queue.
+    private let writeLock = NSLock()
     private var cancelled = false
     private var finished = false
 
@@ -182,7 +187,29 @@ public final class DaemonSubscription: @unchecked Sendable {
         guard !dead,
               let payload = try? IPCCodec.encode(IPCEnvelope(request: .detachSurface(surfaceID: surfaceID)))
         else { return }
+        writeFrame(payload)
+    }
+
+    /// Write keystroke/paste bytes to `surfaceID` over this persistent full-duplex connection,
+    /// fire-and-forget (no reply). Replaces the per-keystroke `DaemonClient.request(.sendData:)`,
+    /// which opened a fresh socket and blocked for the `.ok`. Safe from any thread — the read loop
+    /// runs on its own queue and only reads; the `cancelled`/`finished` guard (same as
+    /// `detachSurface`) prevents writing to a torn-down fd.
+    public func sendInput(_ data: Data, surfaceID: String) {
+        lock.lock(); let dead = cancelled || finished; lock.unlock()
+        guard !dead,
+              let payload = try? IPCCodec.encodeInputFrame(surfaceID: surfaceID, payload: data)
+        else { return }
+        writeFrame(payload)
+    }
+
+    /// Write one complete framed message to `fd`, retrying partial/interrupted writes. Holds
+    /// `writeLock` for the whole frame so two writers can't interleave bytes. A hard error (peer
+    /// gone) just stops — the read loop independently observes EOF and tears down.
+    private func writeFrame(_ payload: Data) {
         let bytes = [UInt8](payload)
+        writeLock.lock()
+        defer { writeLock.unlock() }
         var off = 0
         while off < bytes.count {
             let n = bytes.withUnsafeBytes { write(fd, $0.baseAddress!.advanced(by: off), bytes.count - off) }
@@ -229,11 +256,23 @@ public final class DaemonSubscription: @unchecked Sendable {
                 if count <= 0 { break }
                 buffer.append(contentsOf: temp.prefix(count))
                 while true {
-                    let reply: IPCReply?
-                    do { reply = try IPCCodec.decodeReply(from: &buffer) }
+                    let decoded: IPCCodec.DecodedReplyFrame?
+                    do { decoded = try IPCCodec.decodeReplyOrData(from: &buffer) }
                     catch { break outer } // oversized/garbage frame — unrecoverable on a stream
-                    guard let reply else { break }
-                    onResponse(reply.response)
+                    guard let decoded else { break }
+                    switch decoded {
+                    case let .reply(response):
+                        onResponse(response)
+                        // A subscription connection only carries `.ok`/`.error` acks before `.data`
+                        // flows. An `.error` means the subscribe was rejected (e.g. surface gone) and
+                        // the daemon leaves the fd open — so the read loop would block forever and
+                        // `onEnd` would never fire. Treat it as fatal (like EOF) so callers (GUI
+                        // reconnect, CLI attach) finish and can retry instead of hanging.
+                        if case .error = response { break outer }
+                    // Binary output frame → present it as `.data` so `onData` consumers (app +
+                    // every CLI attach client) are unchanged and get the no-base64 fast path free.
+                    case let .output(data, sequence): onResponse(.data(data, sequence: sequence))
+                    }
                 }
             }
             if let self {

@@ -203,8 +203,12 @@ public final class TerminalMetalRenderer {
         )
     }
 
-    /// Depth of the instance-buffer ring and the cap on frames the GPU may have in flight.
-    private static let maxFramesInFlight = 3
+    /// Depth of the instance-buffer ring and the cap on frames the GPU may have in flight. Matched to
+    /// the surface layer's `maximumDrawableCount` (2 — double-buffered for low keystroke-echo latency):
+    /// with only 2 drawables the CPU can never get more than 2 frames ahead anyway, so a deeper ring
+    /// just wastes a buffer and lets the semaphore advertise headroom that `nextDrawable()` won't grant.
+    /// Keep these two in lockstep.
+    private static let maxFramesInFlight = 2
     /// Reusable, growable instance buffers (one ring each) replacing per-frame `makeBuffer`.
     private let bgInstanceBuffer: DynamicInstanceBuffer
     private let glyphInstanceBuffer: DynamicInstanceBuffer

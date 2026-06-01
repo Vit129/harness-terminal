@@ -129,11 +129,14 @@ Validate a source checkout before shipping changes:
 
 ```bash
 swift build
-swift test
+swift test                              # fast, deterministic suite
+HARNESS_LIVE_DAEMON_TESTS=1 swift test  # adds the real socket / PTY / security tests
 make bench
 ```
 
-`make bench` runs opt-in release benchmarks and prints machine-readable JSON timing lines. CI should use the structure of those tests, not absolute GPU or timing thresholds.
+CI runs all three on every push: the deterministic suite, the live daemon tests, and a release build. The live tests spin up a real daemon over a Unix socket and a real PTY, so run them locally before changing the daemon, IPC, or PTY code.
+
+`make bench` runs opt-in release benchmarks and prints machine-readable JSON timing lines. Treat those as a structural baseline, not a pass/fail gate — GPU and timing numbers vary by machine.
 
 Renderer tests use structural offscreen readbacks by default. Set `HARNESS_WRITE_RENDER_SNAPSHOTS=1` when running `swift test --filter MetalRendererTests` to write PNGs under `/tmp/HarnessRenderSnapshots` for human debugging only.
 

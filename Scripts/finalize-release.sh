@@ -11,31 +11,48 @@ set -euo pipefail
 # Auth — provide ONE of:
 #   App Store Connect API key (recommended):
 #     ASC_ISSUER_ID=<issuer-uuid>            # App Store Connect → Users and Access → Integrations → Keys
-#     ASC_KEY_ID=53WA44Z689                  # defaults to 53WA44Z689
-#     ASC_KEY=~/Downloads/AuthKey_53WA44Z689.p8   # defaults to ~/Downloads/AuthKey_<ASC_KEY_ID>.p8
+#     ASC_KEY_ID=<key-id>                    # required when ASC_ISSUER_ID is set (no baked-in default)
+#     ASC_KEY=~/Downloads/AuthKey_<ASC_KEY_ID>.p8   # defaults to ~/Downloads/AuthKey_<ASC_KEY_ID>.p8
 #   …or an Apple ID app-specific password:
-#     APPLE_ID=you@example.com APPLE_TEAM_ID=9F2JXY8TCK APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+#     APPLE_ID=you@example.com APPLE_TEAM_ID=<team-id> APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 #
-# Optional:
-#   TAG=v1.0.3                               # GitHub release tag to re-upload the stapled DMG to
+# Optional (all default sensibly — no personal values are hardcoded):
+#   TAG=v1.0.3                               # release tag; defaults to v<CFBundleShortVersionString>
+#   REPO=<owner/name>                        # GitHub repo; defaults to the checkout's `gh` context
+#   SIGNING_IDENTITY="Developer ID Application: …"  # defaults to the identity that signed Harness.app
 #   DEPLOY_WEBSITE=1 WEBSITE_DIR=~/Code/harness-website   # copy appcast.xml into public/ and `vercel --prod`
 #
-# Usage:  ASC_ISSUER_ID=<uuid> ./Scripts/finalize-release.sh
+# Usage:  ASC_ISSUER_ID=<uuid> ASC_KEY_ID=<key-id> ./Scripts/finalize-release.sh
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 APP="$ROOT/Harness.app"
 DMG="$ROOT/Harness.dmg"
-TAG="${TAG:-v1.0.3}"
-REPO="${REPO:-robzilla1738/harness-cli}"
 
 [[ -d "$APP" ]] || { echo "Harness.app missing — run build-release.sh + sign-and-notarize.sh + create-dmg.sh first." >&2; exit 1; }
 [[ -f "$DMG" ]] || { echo "Harness.dmg missing — run create-dmg.sh first." >&2; exit 1; }
 
+# Single-source the version: derive it (and the default release TAG) from the *built* app's
+# Info.plist — the one thing that's authoritative about what's actually being shipped — instead of
+# hardcoding a literal that silently drifts from the bundle on every bump.
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+[[ -n "$VERSION" ]] || { echo "Could not read CFBundleShortVersionString from $APP/Contents/Info.plist" >&2; exit 1; }
+TAG="${TAG:-v$VERSION}"
+
+# Repo for the GitHub upload: env override, else auto-detect from the checkout's `gh` context — no
+# personal default baked into the script.
+REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)}"
+[[ -n "$REPO" ]] || { echo "Set REPO=<owner/name> (could not auto-detect via gh)." >&2; exit 1; }
+
+# Re-sign the rebuilt DMG with the same Developer-ID identity that signed the app (read back from its
+# signature) unless overridden — so the identity isn't a hardcoded personal string in the repo.
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-$(codesign -dvv "$APP" 2>&1 | awk -F= '/^Authority=Developer ID Application/{print substr($0, index($0, "=") + 1); exit}')}"
+[[ -n "$SIGNING_IDENTITY" ]] || { echo "Set SIGNING_IDENTITY (could not read it from $APP's signature)." >&2; exit 1; }
+
 # Build the notarytool auth args from whichever credential set is present.
 NOTARY_AUTH=()
 if [[ -n "${ASC_ISSUER_ID:-}" ]]; then
-  KEY_ID="${ASC_KEY_ID:-53WA44Z689}"
+  KEY_ID="${ASC_KEY_ID:?Set ASC_KEY_ID to your App Store Connect API key id when using ASC_ISSUER_ID}"
   KEY="${ASC_KEY:-$HOME/Downloads/AuthKey_${KEY_ID}.p8}"
   [[ -f "$KEY" ]] || { echo "API key not found: $KEY" >&2; exit 1; }
   NOTARY_AUTH=(--key "$KEY" --key-id "$KEY_ID" --issuer "$ASC_ISSUER_ID")
@@ -61,12 +78,17 @@ xcrun stapler staple "$APP"
 # Rebuild the DMG so it carries the freshly-stapled app. The rebuilt DMG has a new
 # signature/hash, so submit that final archive before stapling it.
 "$ROOT/Scripts/create-dmg.sh"
-codesign --force --sign "Developer ID Application: Robert Courson (9F2JXY8TCK)" --timestamp "$DMG"
+codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG"
 echo "==> Submitting rebuilt DMG to the notary service…"
 xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
 xcrun stapler staple "$DMG"
 echo "==> Verifying Gatekeeper acceptance…"
-spctl -a -t open --context context:primary-signature -v "$DMG" 2>&1 | sed 's/^/    /' || true
+# No `|| true` masking: a Gatekeeper rejection here means the DMG would be blocked on users' Macs,
+# so fail the release loudly instead of printing the rejection and continuing.
+if ! spctl -a -t open --context context:primary-signature -v "$DMG"; then
+  echo "Gatekeeper rejected $DMG (spctl). Not publishing." >&2
+  exit 1
+fi
 xcrun stapler validate "$DMG" && echo "    DMG ticket stapled + valid."
 
 echo "==> Re-uploading the notarized DMG to GitHub release $TAG…"

@@ -11,12 +11,20 @@ public enum KeybindingsStore {
 
     public static func load() -> KeyTableSet {
         let defaults = KeyTableSet.defaults
-        guard let data = try? Data(contentsOf: fileURL),
-              let stored = try? JSONDecoder().decode(KeyTableSet.self, from: data)
-        else {
-            // Best-effort seed; if the disk is read-only or directories aren't
+        guard let data = try? Data(contentsOf: fileURL) else {
+            // Absent → best-effort seed; if the disk is read-only or directories aren't
             // writable, the in-memory defaults are still fine to use for this run.
             _ = try? save(defaults)
+            return defaults
+        }
+        guard let stored = try? JSONDecoder().decode(KeyTableSet.self, from: data) else {
+            // Present but unreadable: preserve it as `.corrupt` for recovery rather than
+            // silently overwriting the user's bindings with defaults. Mirrors
+            // SessionStore/OptionStore — return defaults WITHOUT rewriting the file.
+            let backup = fileURL.appendingPathExtension("corrupt")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: fileURL, to: backup)
+            fputs("Harness: keybindings.json unreadable — backed up to \(backup.lastPathComponent)\n", stderr)
             return defaults
         }
         // Merge: stored tables win for any spec they explicitly define, but

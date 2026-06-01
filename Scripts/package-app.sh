@@ -25,15 +25,27 @@ done
 # Embed Sparkle.framework (the only external dependency, GUI-only). SwiftPM links it via
 # `@rpath`, so the app binary needs an rpath into Contents/Frameworks. `ditto` preserves the
 # framework's version symlinks + nested code signatures (a plain `cp` would flatten them).
+# SwiftPM normally drops it at .build/$CONFIG/Sparkle.framework; fall back to the artifacts
+# cache for older/newer SwiftPM layouts. A missing framework is FATAL — the app links Sparkle
+# at compile time, so shipping without it crashes the moment the menu touches SparkleUpdater.
 FRAMEWORK="$BUILD_DIR/Sparkle.framework"
-if [[ -d "$FRAMEWORK" ]]; then
-  mkdir -p "$APP/Contents/Frameworks"
-  ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
-  if ! otool -l "$APP/Contents/MacOS/Harness" | grep -q "@executable_path/../Frameworks"; then
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Harness"
-  fi
-else
-  echo "warning: $FRAMEWORK not found — build the Harness product first (Sparkle won't load)." >&2
+if [[ ! -d "$FRAMEWORK" ]]; then
+  FRAMEWORK="$(find "$ROOT/.build/artifacts" "$ROOT/.build" -name Sparkle.framework -type d 2>/dev/null | head -n1 || true)"
+fi
+if [[ -z "$FRAMEWORK" || ! -d "$FRAMEWORK" ]]; then
+  echo "error: Sparkle.framework not found under .build — build the Harness product first (the app would crash without it)." >&2
+  exit 1
+fi
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
+if ! otool -l "$APP/Contents/MacOS/Harness" | grep -q "@executable_path/../Frameworks"; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Harness"
+fi
+# Verify the embed actually took (framework present + rpath wired), or fail before we ship.
+if [[ ! -d "$APP/Contents/Frameworks/Sparkle.framework" ]] \
+   || ! otool -l "$APP/Contents/MacOS/Harness" | grep -q "@executable_path/../Frameworks"; then
+  echo "error: Sparkle embed verification failed (framework or @rpath missing)." >&2
+  exit 1
 fi
 
 ICON="$ROOT/Apps/Harness/Resources/Harness.icns"

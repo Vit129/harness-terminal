@@ -1,6 +1,14 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
+// The whole package builds in the Swift 6 language mode (tools-version 6.0), so *complete* strict
+// concurrency checking is already on everywhere. For the two pure, foundational, dependency-free
+// libraries — HarnessCore (models/IPC/commands) and HarnessTerminalEngine (VT engine) — we also
+// treat warnings as errors so a data-race / Sendable / deprecation warning in the layer everything
+// else builds on can never be ignored and rot. Kept off the AppKit/Metal targets for now (they
+// surface framework-deprecation churn we don't want to hard-fail CI on).
+let strictFoundationSettings: [SwiftSetting] = [.unsafeFlags(["-warnings-as-errors"])]
+
 let package = Package(
     name: "Harness",
     platforms: [.macOS(.v15)],
@@ -27,18 +35,22 @@ let package = Package(
     dependencies: [
         // Sparkle: macOS auto-update (the only external dependency, and only for the GUI app —
         // the engine/daemon/CLI stay first-party). Appcast hosted at harnesscli.dev.
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        // Pinned to the audited 2.9.x line (`Package.resolved` locks 2.9.2): a fresh resolve can't
+        // float onto an unaudited future major/minor, while patch-level security fixes still land.
+        .package(url: "https://github.com/sparkle-project/Sparkle", .upToNextMinor(from: "2.9.2")),
     ],
     targets: [
         .target(
             name: "HarnessCore",
-            path: "Packages/HarnessCore/Sources/HarnessCore"
+            path: "Packages/HarnessCore/Sources/HarnessCore",
+            swiftSettings: strictFoundationSettings
         ),
         // Native terminal engine — pure Swift, no external dependencies. Foundation only
         // so it links for headless CLI use and unit tests without a GPU.
         .target(
             name: "HarnessTerminalEngine",
-            path: "Packages/HarnessTerminalEngine/Sources/HarnessTerminalEngine"
+            path: "Packages/HarnessTerminalEngine/Sources/HarnessTerminalEngine",
+            swiftSettings: strictFoundationSettings
         ),
         // Shared copy-mode model — pure Swift over Core (action vocabulary) + the engine
         // (grid types). Both the GUI surface and the compositor drive this one reducer.

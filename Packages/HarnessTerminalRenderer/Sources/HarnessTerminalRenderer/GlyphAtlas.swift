@@ -75,6 +75,14 @@ final class GlyphAtlas {
     private let rasterizer: GlyphRasterizer
     private var cache: [GlyphKey: AtlasEntry?] = [:]
     private var shapedCache: [ShapedGlyphKey: AtlasEntry?] = [:]
+    /// Hard ceiling on cached glyph entries (rasterized + shaped). The texture itself bounds *inked*
+    /// glyphs — a full atlas triggers `resetPacker` — but a `nil` (no-ink: space, zero-width
+    /// combining mark) entry is cached WITHOUT consuming texture space, so a stream of many distinct
+    /// blank codepoints could grow the dictionaries without ever filling the atlas. When the combined
+    /// count crosses this, fall back to the same full repack the atlas-full path uses (keeps the
+    /// caches and the texture in lockstep — the invariant `resetPacker` documents). Generous enough
+    /// that no real terminal working set reaches it.
+    private let maxCacheEntries = 16384
     private var hits = 0
     private var misses = 0
     private var resets = 0
@@ -138,6 +146,7 @@ final class GlyphAtlas {
         let entry = rasterizer.rasterize(codepoint: key.codepoint, bold: key.bold, italic: key.italic)
             .flatMap(place)
         cache[key] = entry
+        capCachesIfNeeded()
         return entry
     }
 
@@ -151,7 +160,15 @@ final class GlyphAtlas {
         misses += 1
         let entry = rasterizer.rasterize(glyph: glyph, font: font).flatMap(place)
         shapedCache[key] = entry
+        capCachesIfNeeded()
         return entry
+    }
+
+    /// Bound the cache dictionaries: when the combined entry count crosses `maxCacheEntries`, repack
+    /// from scratch (the atlas-full self-heal path). The just-returned entry may show stale UVs for
+    /// at most one frame, then heals on re-rasterization — exactly the `resetPacker` contract.
+    private func capCachesIfNeeded() {
+        if cache.count + shapedCache.count > maxCacheEntries { resetPacker() }
     }
 
     /// Shape a run for ligatures (delegates to the rasterizer's CoreText shaper).

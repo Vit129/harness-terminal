@@ -37,6 +37,36 @@ final class RenderSchedulerTests: XCTestCase {
         XCTAssertEqual(renders(), 0, "nothing dirty → nothing presented")
     }
 
+    func testForceRenderUsesSynchronousRendererWhenProvided() {
+        // The off-main pipeline distinguishes the async present (`render`, used by tick/presentNow)
+        // from a synchronous present (`renderSynchronously`, used only by forceRender so resize /
+        // first-paint land on screen inside the CATransaction). Verify forceRender routes to the
+        // synchronous closure while the cadence paths route to the async one.
+        var asyncCount = 0
+        var syncCount = 0
+        let sched = RenderScheduler(render: { asyncCount += 1 }, renderSynchronously: { syncCount += 1 })
+        sched.start()
+
+        sched.forceRender()
+        XCTAssertEqual(syncCount, 1, "forceRender presents synchronously")
+        XCTAssertEqual(asyncCount, 0, "forceRender must not take the async path")
+
+        sched.markDirty()
+        XCTAssertTrue(sched.tick(), "a dirty tick renders")
+        XCTAssertEqual(asyncCount, 1, "tick presents via the async renderer")
+        XCTAssertEqual(syncCount, 1, "tick must not take the synchronous path")
+    }
+
+    func testForceRenderFallsBackToRenderWhenNoSynchronousRenderer() {
+        // Owners (and most tests) that don't distinguish the two get the async closure for both, so
+        // forceRender still presents exactly once.
+        var count = 0
+        let sched = RenderScheduler(render: { count += 1 })
+        sched.start()
+        sched.forceRender()
+        XCTAssertEqual(count, 1, "forceRender falls back to `render` when no synchronous closure is supplied")
+    }
+
     func testForceRenderBypassesCoalescing() {
         let (sched, renders) = makeScheduler()
         sched.forceRender()
@@ -81,6 +111,93 @@ final class RenderSchedulerTests: XCTestCase {
         let (sched, renders) = makeScheduler(started: false)
         sched.markDirty()
         XCTAssertFalse(sched.tick(), "not in a window → no display-cadence renders")
+        XCTAssertEqual(renders(), 0)
+    }
+
+    // MARK: - presentNow (low-latency echo)
+
+    func testPresentNowFlushesFirstPaintImmediately() {
+        let (sched, renders) = makeScheduler()
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow(), "first dirty paint flushes immediately")
+        XCTAssertEqual(renders(), 1)
+        // It cleared the dirty flag, so the following display tick doesn't double-present.
+        XCTAssertFalse(sched.tick())
+        XCTAssertEqual(renders(), 1)
+    }
+
+    func testPresentNowNoOpWhenClean() {
+        let (sched, renders) = makeScheduler()
+        XCTAssertFalse(sched.presentNow(), "nothing dirty → nothing to flush")
+        XCTAssertEqual(renders(), 0)
+    }
+
+    func testPresentNowSuppressedSecondTimeWithinInterval() {
+        // First byte flushes; subsequent bytes in the same interval coalesce (no per-chunk present).
+        let (sched, renders) = makeScheduler()
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow())
+        sched.markDirty() // more output arrives before the next tick
+        XCTAssertFalse(sched.presentNow(), "already presented this interval → coalesce, don't re-present")
+        XCTAssertEqual(renders(), 1)
+        // The coalesced paint lands at the tick.
+        XCTAssertTrue(sched.tick())
+        XCTAssertEqual(renders(), 2)
+    }
+
+    func testPresentNowReopensAfterIdleTick() {
+        // After the burst drains, an idle tick ends the interval and reopens immediate presents.
+        let (sched, renders) = makeScheduler()
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow())          // interval 1: immediate
+        XCTAssertFalse(sched.tick(), "nothing left to draw → idle tick")
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow(), "new interval after the idle tick → immediate again")
+        XCTAssertEqual(renders(), 2)
+    }
+
+    func testPresentNowStaysCoalescedAcrossBusyTicks() {
+        // A sustained burst: every tick has work, so presentedThisInterval never resets and the
+        // immediate path stays suppressed — one present per tick, not per chunk.
+        let (sched, renders) = makeScheduler()
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow())          // 1 (first paint)
+        for _ in 0 ..< 5 {
+            sched.markDirty()                       // output keeps streaming
+            XCTAssertFalse(sched.presentNow(), "burst stays coalesced")
+            XCTAssertTrue(sched.tick())             // one present per interval
+        }
+        XCTAssertEqual(renders(), 6, "1 immediate + 5 tick presents — never per-chunk")
+    }
+
+    func testLinkPauseReopensImmediatePresentAfterBurstEndsOnTick() {
+        // Two chunks land in one interval: the first flushes immediately, the second coalesces into
+        // the tick. That presenting tick leaves the gate closed — but when the view pauses the link
+        // (nothing left to draw) it calls linkDidPause, which must reopen the immediate path so the
+        // *next* keystroke after the gap is not delayed a frame.
+        let (sched, renders) = makeScheduler()
+        sched.markDirty(); XCTAssertTrue(sched.presentNow())   // 1: immediate
+        sched.markDirty(); XCTAssertFalse(sched.presentNow())  // coalesced into the tick
+        XCTAssertTrue(sched.tick())                            // 2: presenting tick, gate stays set
+        XCTAssertFalse(sched.hasPendingWork)
+        sched.linkDidPause()                                   // the view pauses the link
+        sched.markDirty()
+        XCTAssertTrue(sched.presentNow(), "first paint after the link paused is immediate")
+        XCTAssertEqual(renders(), 3)
+    }
+
+    func testPresentNowRespectsSynchronizedHold() {
+        let (sched, renders) = makeScheduler()
+        sched.setSynchronized(true)
+        sched.markDirty()
+        XCTAssertFalse(sched.presentNow(), "2026 hold suppresses the immediate present too")
+        XCTAssertEqual(renders(), 0)
+    }
+
+    func testPresentNowInertWhenNotStarted() {
+        let (sched, renders) = makeScheduler(started: false)
+        sched.markDirty()
+        XCTAssertFalse(sched.presentNow(), "not in a window → no presents")
         XCTAssertEqual(renders(), 0)
     }
 

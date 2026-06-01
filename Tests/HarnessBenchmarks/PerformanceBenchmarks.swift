@@ -404,6 +404,44 @@ final class PerformanceBenchmarks: XCTestCase {
         }
     }
 
+    /// Change A: the PTY output path used to be `JSONEncoder` over `IPCReply(.data(...))`, which
+    /// base64-encodes the bytes (+33% wire size) and spends JSON/base64 CPU both directions. The
+    /// binary frame carries raw bytes with a 13-byte header. This benchmark prints the encode+decode
+    /// time AND the wire size for both, so the win is a concrete number (CPU ratio + byte ratio).
+    func testDataFrameEncodeVsJSONBase64Output() throws {
+        try skipUnlessEnabled()
+        // A typical busy-output read (post-Change-E PTY reads are up to 64 KiB).
+        let payload = Data((0 ..< (64 * 1024)).map { UInt8($0 & 0xFF) })
+        let sequence: UInt64 = 0xDEAD_BEEF
+
+        let jsonNanos = timedNanos {
+            guard let framed = try? IPCCodec.encode(IPCReply(response: .data(payload, sequence: sequence)))
+            else { return XCTFail("json encode") }
+            var buf = framed
+            _ = try? IPCCodec.decodeReply(from: &buf)
+        }
+        let binaryNanos = timedNanos {
+            guard let framed = try? IPCCodec.encodeOutputFrame(payload, sequence: sequence)
+            else { return XCTFail("binary encode") }
+            var buf = framed
+            _ = try? IPCCodec.decodeReplyOrData(from: &buf)
+        }
+        let jsonWire = (try? IPCCodec.encode(IPCReply(response: .data(payload, sequence: sequence))))?.count ?? 0
+        let binaryWire = (try? IPCCodec.encodeOutputFrame(payload, sequence: sequence))?.count ?? 0
+
+        printBenchmark("data_frame_json_base64", nanos: jsonNanos, fields: [
+            ("payload", "\(payload.count)"), ("wire", "\(jsonWire)"),
+        ])
+        printBenchmark("data_frame_binary", nanos: binaryNanos, fields: [
+            ("payload", "\(payload.count)"), ("wire", "\(binaryWire)"),
+            ("cpu_vs_json", String(format: "%.2fx", Double(jsonNanos) / Double(max(binaryNanos, 1)))),
+            ("wire_vs_json", String(format: "%.2fx", Double(jsonWire) / Double(max(binaryWire, 1)))),
+        ])
+        // Guardrails (not perf gates): the binary frame must be smaller and no slower than JSON.
+        XCTAssertLessThan(binaryWire, jsonWire, "binary frame must be smaller on the wire than JSON+base64")
+        XCTAssertLessThanOrEqual(binaryWire, payload.count + 64, "binary frame is raw bytes + a tiny header")
+    }
+
     // MARK: - Compositor frame build (split layout → diffed ANSI)
 
     func testCompositorFrameBuildFourPanes() throws {
