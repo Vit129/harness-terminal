@@ -17,7 +17,7 @@ set -euo pipefail
 #     APPLE_ID=you@example.com APPLE_TEAM_ID=<team-id> APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 #
 # Optional (all default sensibly — no personal values are hardcoded):
-#   TAG=v1.0.3                               # release tag; defaults to v<CFBundleShortVersionString>
+#   TAG=v1.0.4                               # release tag; defaults to v<CFBundleShortVersionString>
 #   REPO=<owner/name>                        # GitHub repo; defaults to the checkout's `gh` context
 #   SIGNING_IDENTITY="Developer ID Application: …"  # defaults to the identity that signed Harness.app
 #   DEPLOY_WEBSITE=1 WEBSITE_DIR=~/Code/harness-website   # copy appcast.xml into public/ and `vercel --prod`
