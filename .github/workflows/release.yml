@@ -229,6 +229,9 @@ jobs:
           DOWNLOAD_URL_PREFIX="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" \
           make finalize
 
+      - name: Smoke test final DMG
+        run: Scripts/smoke-dmg.sh Harness.dmg
+
       - name: Upload appcast to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

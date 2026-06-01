@@ -1,4 +1,4 @@
-.PHONY: build bench preview preview-stop preview-clean release package dmg sign appcast finalize hotfix-release icon clean
+.PHONY: build bench preview preview-stop preview-clean release package dmg smoke-dmg sign appcast finalize hotfix-release icon clean
 
 build:
 	swift build
@@ -31,6 +31,9 @@ package: release
 # if Harness.app is missing, so run `make release` first.
 dmg:
 	./Scripts/create-dmg.sh
+
+smoke-dmg:
+	./Scripts/smoke-dmg.sh
 
 sign:
 	./Scripts/sign-and-notarize.sh
