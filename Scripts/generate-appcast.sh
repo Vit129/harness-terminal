@@ -3,15 +3,22 @@ set -euo pipefail
 # Generate / refresh the Sparkle appcast for harnesscli.dev.
 #
 # Sparkle's `generate_appcast` scans a directory of release archives (.dmg / .zip), EdDSA-signs
-# each with the private key in your login keychain — the counterpart of SUPublicEDKey in
-# Info.plist (public: 3LBPx8Uv5L5ptqRqdCWovmUIPLxcDEPnivy8cOpIlH8=) — and writes appcast.xml
-# into that same directory, embedding the signature + version of each build.
+# each with the private key that matches SUPublicEDKey in Info.plist (public:
+# 3LBPx8Uv5L5ptqRqdCWovmUIPLxcDEPnivy8cOpIlH8=), and writes appcast.xml into that same
+# directory, embedding the signature + version of each build.
 #
 # Usage:  ./Scripts/generate-appcast.sh [archives-dir]
 #   archives-dir defaults to ./dist  (drop the signed, notarized Harness.dmg there first).
 #
-# Publish: upload the resulting appcast.xml AND the archive(s) to https://harnesscli.dev/
-# so the app's SUFeedURL (https://harnesscli.dev/appcast.xml) resolves to real downloads.
+# Optional:
+#   SPARKLE_EDDSA_PRIVATE_KEY_FILE=/path/to/private-key
+#     Use Sparkle's --ed-key-file mode instead of the login keychain. This is preferred for
+#     headless CI runners where keychain access prompts are not possible.
+#   DOWNLOAD_URL_PREFIX=https://github.com/<owner>/<repo>/releases/download/<tag>/
+#     Override where Sparkle downloads archives from.
+#
+# Publish: upload the resulting appcast.xml to https://harnesscli.dev/appcast.xml and ensure
+# the enclosure URLs written by DOWNLOAD_URL_PREFIX resolve to the matching archive(s).
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ARCHIVES="${1:-$ROOT/dist}"
@@ -43,7 +50,15 @@ fi
 echo "Using:    $GEN"
 echo "Scanning: $ARCHIVES"
 echo "URLs:     ${DOWNLOAD_URL_PREFIX}<archive>"
-"$GEN" --download-url-prefix "$DOWNLOAD_URL_PREFIX" "$ARCHIVES"
+GEN_ARGS=(--download-url-prefix "$DOWNLOAD_URL_PREFIX")
+if [[ -n "${SPARKLE_EDDSA_PRIVATE_KEY_FILE:-}" ]]; then
+  [[ -f "$SPARKLE_EDDSA_PRIVATE_KEY_FILE" ]] || {
+    echo "Sparkle private key file not found: $SPARKLE_EDDSA_PRIVATE_KEY_FILE" >&2
+    exit 1
+  }
+  GEN_ARGS+=(--ed-key-file "$SPARKLE_EDDSA_PRIVATE_KEY_FILE")
+fi
+"$GEN" "${GEN_ARGS[@]}" "$ARCHIVES"
 echo ""
 echo "Wrote $ARCHIVES/appcast.xml"
-echo "Next: upload appcast.xml + the archive(s) to https://harnesscli.dev/"
+echo "Next: upload appcast.xml to https://harnesscli.dev/appcast.xml and keep the archive URLs live."

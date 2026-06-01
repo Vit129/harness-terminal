@@ -5,8 +5,14 @@ set -euo pipefail
 # Required:
 #   SIGNING_IDENTITY  — e.g. "Developer ID Application: Your Name (TEAMID)"
 #
-# Notarization (required for distribution — omit ONLY with --sign-only / SIGN_ONLY=1):
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (app-specific password)
+# Notarization (required for distribution — omit ONLY with --sign-only / SIGN_ONLY=1).
+# Provide ONE of:
+#   App Store Connect API key (recommended for CI):
+#     ASC_ISSUER_ID=<issuer-uuid>
+#     ASC_KEY_ID=<key-id>
+#     ASC_KEY=/path/to/AuthKey_<key-id>.p8   # defaults to ~/Downloads/AuthKey_<key-id>.p8
+#   …or an Apple ID app-specific password:
+#     APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD
 #
 # Usage: make sign   or   ./Scripts/sign-and-notarize.sh [--sign-only]
 #   --sign-only / SIGN_ONLY=1 : sign locally and skip notarization without failing.
@@ -60,23 +66,36 @@ codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 echo "Verifying signatures..."
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-if [[ -z "${APPLE_ID:-}" || -z "${APPLE_TEAM_ID:-}" || -z "${APPLE_APP_PASSWORD:-}" ]]; then
+NOTARY_AUTH=()
+if [[ -n "${ASC_ISSUER_ID:-}" ]]; then
+  KEY_ID="${ASC_KEY_ID:?Set ASC_KEY_ID to your App Store Connect API key id when using ASC_ISSUER_ID}"
+  KEY="${ASC_KEY:-$HOME/Downloads/AuthKey_${KEY_ID}.p8}"
+  [[ -f "$KEY" ]] || { echo "API key not found: $KEY" >&2; exit 1; }
+  NOTARY_AUTH=(--key "$KEY" --key-id "$KEY_ID" --issuer "$ASC_ISSUER_ID")
+  echo "Notarizing with App Store Connect API key $KEY_ID (issuer $ASC_ISSUER_ID)."
+elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
+  NOTARY_AUTH=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+  echo "Notarizing with Apple ID $APPLE_ID (team $APPLE_TEAM_ID)."
+else
   if [[ "$SIGN_ONLY" == "1" ]]; then
     echo "Signed only (notarization skipped via --sign-only / ad-hoc identity)."
     exit 0
   fi
-  echo "ERROR: notarization credentials missing (APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD)." >&2
-  echo "       A distributed build MUST be notarized. Re-run with --sign-only to sign without notarizing." >&2
+  cat >&2 <<'MSG'
+ERROR: notarization credentials missing. A distributed build MUST be notarized.
+Set EITHER:
+  ASC_ISSUER_ID=<issuer-uuid> ASC_KEY_ID=<key-id> [ASC_KEY=/path/to/AuthKey.p8]
+or:
+  APPLE_ID=<email> APPLE_TEAM_ID=<team-id> APPLE_APP_PASSWORD=<app-specific-password>
+
+Re-run with --sign-only only for local, non-distributed builds.
+MSG
   exit 1
 fi
 
 ZIP="$ROOT/Harness-notarize.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
-xcrun notarytool submit "$ZIP" \
-  --apple-id "$APPLE_ID" \
-  --team-id "$APPLE_TEAM_ID" \
-  --password "$APPLE_APP_PASSWORD" \
-  --wait
+xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait
 xcrun stapler staple "$APP"
 # Re-verify after stapling so a corrupt ticket can't slip through.
 codesign --verify --deep --strict --verbose=2 "$APP"
