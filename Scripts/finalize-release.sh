@@ -2,8 +2,8 @@
 set -euo pipefail
 # Finalize a Harness release: notarize the (already Developer-ID-signed) DMG, staple it,
 # re-upload to the GitHub release, generate the Sparkle appcast, and (optionally) deploy it to
-# the website. This is the one step that needs an Apple credential and a Sparkle keychain key —
-# secrets that intentionally live with the human, not in the repo or CI image.
+# the website. This is the one step that needs an Apple credential and a Sparkle signing key —
+# secrets that intentionally live with the human or a protected CI environment, not the repo.
 #
 # Prereq: ./Scripts/build-release.sh && SIGNING_IDENTITY=… ./Scripts/sign-and-notarize.sh && \
 #         ./Scripts/create-dmg.sh   (or `make dmg` + `make sign`) so Harness.app + Harness.dmg exist.
@@ -17,9 +17,13 @@ set -euo pipefail
 #     APPLE_ID=you@example.com APPLE_TEAM_ID=<team-id> APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 #
 # Optional (all default sensibly — no personal values are hardcoded):
-#   TAG=v1.0.4                               # release tag; defaults to v<CFBundleShortVersionString>
+#   TAG=vX.Y.Z                               # release tag; defaults to v<CFBundleShortVersionString>
 #   REPO=<owner/name>                        # GitHub repo; defaults to the checkout's `gh` context
 #   SIGNING_IDENTITY="Developer ID Application: …"  # defaults to the identity that signed Harness.app
+#   DOWNLOAD_URL_PREFIX=https://github.com/<owner>/<repo>/releases/download/<tag>/
+#                                             # appcast enclosure URL prefix
+#   SPARKLE_EDDSA_PRIVATE_KEY_FILE=/path/to/private-key
+#                                             # use Sparkle's --ed-key-file mode instead of keychain
 #   DEPLOY_WEBSITE=1 WEBSITE_DIR=~/Code/harness-website   # copy appcast.xml into public/ and `vercel --prod`
 #
 # Usage:  ASC_ISSUER_ID=<uuid> ASC_KEY_ID=<key-id> ./Scripts/finalize-release.sh
@@ -94,7 +98,11 @@ xcrun stapler validate "$DMG" && echo "    DMG ticket stapled + valid."
 echo "==> Re-uploading the notarized DMG to GitHub release $TAG…"
 gh release upload "$TAG" "$DMG" --clobber --repo "$REPO"
 
-echo "==> Generating the Sparkle appcast (a keychain 'Allow' prompt may appear — approve it)…"
+if [[ -n "${SPARKLE_EDDSA_PRIVATE_KEY_FILE:-}" ]]; then
+  echo "==> Generating the Sparkle appcast with SPARKLE_EDDSA_PRIVATE_KEY_FILE…"
+else
+  echo "==> Generating the Sparkle appcast (a keychain 'Allow' prompt may appear — approve it)…"
+fi
 mkdir -p "$ROOT/dist"
 cp "$DMG" "$ROOT/dist/Harness.dmg"
 "$ROOT/Scripts/generate-appcast.sh" "$ROOT/dist"
@@ -113,6 +121,7 @@ if [[ "${DEPLOY_WEBSITE:-0}" == "1" ]]; then
 else
   echo "==> appcast at dist/appcast.xml. Deploy it: copy to the website's public/appcast.xml and \`vercel --prod\`,"
   echo "    or re-run with DEPLOY_WEBSITE=1. SUFeedURL (https://harnesscli.dev/appcast.xml) then resolves."
+  echo "    Ensure DOWNLOAD_URL_PREFIX (${DOWNLOAD_URL_PREFIX:-https://harnesscli.dev/}) points at the live DMG."
 fi
 
 echo "Done. Notarized DMG on release $TAG; appcast generated."

@@ -161,6 +161,7 @@ xcodebuild -project Harness.xcodeproj -scheme Harness -configuration Debug \
 - [Experience modes](docs/MODES.md) — Plain / Persistent / Full / Agent
 - [Sessions & panes guide](docs/MULTIPLEXER_GUIDE.md) — prefix, panes, sessions, copy mode, attach from anywhere
 - [tmux-style capabilities PDF](docs/HARNESS_TMUX_CAPABILITIES.pdf) — printable setup, shortcuts, commands, attach, copy mode, and troubleshooting
+- [Release runbook](docs/RELEASE.md) — signed/notarized DMG, GitHub Actions release workflow, and Sparkle appcast publishing
 - [Migration](docs/MIGRATION.md) — bringing your config and habits across
 - [Keybindings](docs/KEYBINDINGS.md) · [Commands](docs/COMMANDS.md) · [Shell integration](docs/shell-integration/README.md) · [Agent hooks](docs/agent-hooks/README.md)
 - [Third-party notices](docs/THIRD-PARTY-NOTICES.md)
