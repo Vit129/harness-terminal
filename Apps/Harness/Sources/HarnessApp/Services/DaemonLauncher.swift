@@ -38,7 +38,22 @@ final class DaemonLauncher: @unchecked Sendable {
     /// Synchronous variant for non-main callers/tests. Never call from the main thread.
     @discardableResult
     func ensureRunningBlocking() -> Bool {
-        if daemonResponds(timeout: 0.4) { return true }
+        if let stats = daemonStats(timeout: 0.4) {
+            if bundledDaemonIsNewer(than: stats) {
+                restartStaleDaemon(pid: stats.pid)
+                if pollUntilFreshDaemon(replacingPID: stats.pid, timeoutSeconds: 3) { return true }
+            } else {
+                return true
+            }
+        } else if daemonResponds(timeout: 0.2) {
+            // A daemon old enough to not understand `daemonStats` may still
+            // answer `ping`, which is not enough for newer app/CLI features.
+            // Restart it through the installed LaunchAgent and wait for a
+            // daemon that can report stats before declaring startup ready.
+            let stalePID = daemonPIDFromFile()
+            restartStaleDaemon(pid: stalePID)
+            if pollUntilFreshDaemon(replacingPID: stalePID, timeoutSeconds: 3) { return true }
+        }
 
         // Spawn-first: get a daemon on the socket right now. In release we also
         // (re)install the LaunchAgent so the daemon survives app quit, but we do
@@ -63,6 +78,31 @@ final class DaemonLauncher: @unchecked Sendable {
         return false
     }
 
+    private func daemonStats(timeout: TimeInterval = 0.5) -> DaemonStats? {
+        guard let response = try? DaemonClient().request(.daemonStats, timeout: timeout),
+              case let .daemonStats(stats) = response
+        else { return nil }
+        return stats
+    }
+
+    private func bundledDaemonIsNewer(than stats: DaemonStats) -> Bool {
+        guard let executable = daemonExecutableURL(),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: executable.path),
+              let modifiedAt = attributes[.modificationDate] as? Date
+        else { return false }
+        let daemonStartedAt = Date().addingTimeInterval(-stats.uptimeSeconds)
+        return modifiedAt > daemonStartedAt.addingTimeInterval(1)
+    }
+
+    private func restartStaleDaemon(pid: Int32?) {
+        _ = installLaunchAgentIfPossible()
+        LaunchAgentInstaller.relaunch()
+        if let pid {
+            _ = kill(pid, SIGTERM)
+        }
+        fallbackProcess = nil
+    }
+
     private func pollUntilResponding(timeoutSeconds: Double) -> Bool {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
@@ -70,6 +110,26 @@ final class DaemonLauncher: @unchecked Sendable {
             usleep(100_000)
         }
         return false
+    }
+
+    private func pollUntilFreshDaemon(replacingPID oldPID: Int32?, timeoutSeconds: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            if let stats = daemonStats(timeout: 0.3),
+               oldPID.map({ stats.pid != $0 }) ?? true,
+               !bundledDaemonIsNewer(than: stats) {
+                return true
+            }
+            usleep(100_000)
+        }
+        return false
+    }
+
+    private func daemonPIDFromFile() -> Int32? {
+        guard let raw = try? String(contentsOf: HarnessPaths.daemonPIDURL, encoding: .utf8) else {
+            return nil
+        }
+        return Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func installLaunchAgentIfPossible() -> Bool {

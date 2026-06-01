@@ -119,4 +119,54 @@ final class AgentSessionSummaryTests: XCTestCase {
         XCTAssertTrue(activeTab.rootPane.allSurfaceIDs().map(\.uuidString).contains(agents[0].surfaceID))
         XCTAssertFalse(agents[0].waiting)
     }
+
+    func testListAgentsUsesTitleFallbackWhenProcessDetectionMisses() {
+        var editor = SessionEditor()
+        let tab = editor.snapshot.activeWorkspace!.sessions[0].tabs[0]
+        let surface = tab.rootPane.allSurfaceIDs().first!
+        editor.updateTabTitle(surfaceID: surface, title: "Claude Code")
+        let titleUpdatedAt = editor.snapshot.savedAt
+
+        let agents = editor.listAgents()
+        XCTAssertEqual(agents.count, 1)
+        XCTAssertEqual(agents[0].kind, .claudeCode)
+        XCTAssertEqual(agents[0].activity, .idle)
+        XCTAssertFalse(agents[0].waiting)
+        XCTAssertEqual(agents[0].surfaceID, surface.uuidString)
+        XCTAssertEqual(agents[0].lastActivityAt, titleUpdatedAt)
+    }
+
+    func testListAgentsTitleFallbackMarksWaitingTabsAwaiting() {
+        var editor = SessionEditor()
+        let ws = editor.snapshot.activeWorkspace!.id
+        let tab = editor.snapshot.activeWorkspace!.sessions[0].tabs[0]
+        let surface = tab.rootPane.allSurfaceIDs().first!
+        editor.updateTabTitle(surfaceID: surface, title: "Codex")
+        editor.setTabStatus(workspaceID: ws, tabID: tab.id, status: .waiting, notificationText: "Approve?")
+        let waitingUpdatedAt = editor.snapshot.savedAt
+
+        let agents = editor.listAgents()
+        XCTAssertEqual(agents.count, 1)
+        XCTAssertEqual(agents[0].kind, .codex)
+        XCTAssertEqual(agents[0].activity, .awaiting)
+        XCTAssertTrue(agents[0].waiting)
+        XCTAssertEqual(agents[0].notificationText, "Approve?")
+        XCTAssertEqual(agents[0].lastActivityAt, waitingUpdatedAt)
+    }
+
+    func testDetectedAgentBeatsTitleFallback() {
+        var editor = SessionEditor()
+        let tab = editor.snapshot.activeWorkspace!.sessions[0].tabs[0]
+        let surface = tab.rootPane.allSurfaceIDs().first!
+        editor.updateTabTitle(surfaceID: surface, title: "Claude Code")
+        editor.setAgent(
+            AgentSnapshot(kind: .codex, executable: "/bin/codex", pid: 7, activity: .working),
+            forSurfaceKey: surface.uuidString
+        )
+
+        let agents = editor.listAgents()
+        XCTAssertEqual(agents.count, 1)
+        XCTAssertEqual(agents[0].kind, .codex)
+        XCTAssertEqual(agents[0].activity, .working)
+    }
 }

@@ -2,8 +2,8 @@ import AppKit
 import HarnessCore
 
 /// Sidebar header bell. Shows a small red badge with the count of tabs in
-/// `waiting` state. Click jumps to the first waiting tab (same path as the
-/// `Cmd+Shift+U` shortcut). Updates live from `NotificationBus.snapshotChanged`.
+/// `waiting` state. Click opens the notifications dropdown; `Cmd+Shift+U`
+/// jumps straight to the first waiting tab. Updates live from `NotificationBus.snapshotChanged`.
 @MainActor
 final class NotificationBellButton: NSControl {
     private let iconView = NSImageView()

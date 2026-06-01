@@ -71,9 +71,8 @@ final class AgentInboxPanelView: NSView {
             stack.translatesAutoresizingMaskIntoConstraints = false
             for agent in agents {
                 let row = AgentInboxRowView(agent: agent)
-                row.onClick = { [onSelect, weak self] in
+                row.onClick = { [onSelect] in
                     onSelect(agent)
-                    self?.window?.close()
                 }
                 stack.addArrangedSubview(row)
             }

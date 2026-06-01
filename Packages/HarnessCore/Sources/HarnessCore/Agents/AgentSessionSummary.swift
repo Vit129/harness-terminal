@@ -4,6 +4,8 @@ import Foundation
 /// workspace/session/tab/pane it lives in. Built by `SessionEditor.listAgents()`
 /// from the agent state the daemon already maintains (`Tab.agent`, kept fresh by
 /// `AgentScanner`, and `Tab.status == .waiting`, set by the notification path).
+/// If process-tree detection cannot see a wrapped agent, `SessionEditor` may use
+/// the same title-based inference as the GUI tab strip.
 ///
 /// This is the wire shape returned by the `list-agents` daemon request and
 /// rendered (text + JSON) by `AgentListFormatter`. Keep the stored field names

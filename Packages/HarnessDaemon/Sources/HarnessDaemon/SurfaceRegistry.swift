@@ -1177,9 +1177,46 @@ public final class SurfaceRegistry: @unchecked Sendable {
             "HARNESS": HarnessPaths.socketURL.path,
             "HARNESS_SOCK": HarnessPaths.socketURL.path,
         ]
+        if let cli = Self.harnessCLIExecutableURL() {
+            env["HARNESS_CLI"] = cli.path
+        }
         let session = sessionID(forSurfaceKey: surfaceKey)
         for (key, value) in environmentStore.resolved(sessionID: session) { env[key] = value }
+        env["PATH"] = Self.pathWithHarnessTools(env["PATH"] ?? ProcessInfo.processInfo.environment["PATH"])
         return env
+    }
+
+    private static func harnessCLIExecutableURL() -> URL? {
+        let fm = FileManager.default
+        var candidates: [URL] = []
+        if let executable = Bundle.main.executableURL {
+            candidates.append(executable.deletingLastPathComponent().appendingPathComponent("harness-cli"))
+        }
+        candidates.append(HarnessPaths.applicationSupport.appendingPathComponent("bin").appendingPathComponent("harness-cli"))
+        candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/harness-cli"))
+        candidates.append(URL(fileURLWithPath: "/usr/local/bin/harness-cli"))
+        return candidates.first { fm.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func pathWithHarnessTools(_ inheritedPath: String?) -> String {
+        var dirs: [String] = [
+            HarnessPaths.applicationSupport.appendingPathComponent("bin").path,
+        ]
+        if let cli = harnessCLIExecutableURL() {
+            dirs.append(cli.deletingLastPathComponent().path)
+        }
+        let basePath = inheritedPath?.isEmpty == false ? inheritedPath! : "/usr/bin:/bin:/usr/sbin:/sbin"
+        dirs += basePath
+            .split(separator: ":")
+            .map(String.init)
+
+        var seen: Set<String> = []
+        let unique = dirs.filter { dir in
+            guard !dir.isEmpty, !seen.contains(dir) else { return false }
+            seen.insert(dir)
+            return true
+        }
+        return unique.joined(separator: ":")
     }
 
     private func sessionID(forSurfaceKey surfaceKey: String) -> String? {

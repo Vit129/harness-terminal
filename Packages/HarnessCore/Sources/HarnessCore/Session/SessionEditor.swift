@@ -815,8 +815,10 @@ public struct SessionEditor: Sendable {
 
     /// One row per running agent — a flattened view of every tab carrying a
     /// detected agent (`Tab.agent`), with its workspace/session/tab/pane context,
-    /// state, and the `.waiting` "needs you" signal. Mirrors `listSurfaces()`;
-    /// reads the agent state the daemon already maintains (no detection here).
+    /// state, and the `.waiting` "needs you" signal. When process-tree detection
+    /// cannot see an agent but the tab title clearly names one, use the same title
+    /// fallback as the GUI tab strip so wrapped/renamed agent processes still appear.
+    /// Mirrors `listSurfaces()`.
     /// The surface/pane reported is the tab's active pane (falling back to its
     /// first leaf), i.e. the one a caller would address.
     public func listAgents() -> [AgentSessionSummary] {
@@ -824,7 +826,20 @@ public struct SessionEditor: Sendable {
         for workspace in snapshot.workspaces {
             for session in workspace.sessions {
                 for tab in session.tabs {
-                    guard let agent = tab.agent else { continue }
+                    let agent: AgentSnapshot
+                    if let detected = tab.agent {
+                        agent = detected
+                    } else if let inferredKind = AgentTitleInference.kind(from: tab.title) {
+                        agent = AgentSnapshot(
+                            kind: inferredKind,
+                            executable: "",
+                            pid: 0,
+                            activity: tab.status == .waiting ? .awaiting : .idle,
+                            lastActivityAt: snapshot.savedAt
+                        )
+                    } else {
+                        continue
+                    }
                     let leaves = tab.rootPane.allLeaves()
                     let activeLeaf = tab.activePaneID.flatMap { active in leaves.first { $0.id == active } }
                     let leaf = activeLeaf ?? leaves.first

@@ -177,7 +177,7 @@ final class SessionCoordinator: NSObject {
                     terminalHosts.host(for: surfaceID)?.showsWaitingRing = true
                     if NSApp.isActive, surfaceID == activeSurfaceID { continue }
                     pushedNotificationKeys.insert(key)
-                    let agentLabel = tab.agent?.kind.displayName ?? "Harness"
+                    let agentLabel = effectiveAgentKind(for: tab)?.displayName ?? "Harness"
                     let title = "\(agentLabel) · \(tab.title.isEmpty ? "Terminal" : tab.title)"
                     deliverAgentAlert(title: title, body: text)
                 }
@@ -254,6 +254,10 @@ final class SessionCoordinator: NSObject {
         } else if wantChime {
             NSSound(named: "Glass")?.play()
         }
+    }
+
+    private func effectiveAgentKind(for tab: Tab) -> AgentKind? {
+        tab.agent?.kind ?? AgentTitleInference.kind(from: tab.title)
     }
 
     private func updateDockBadge(from snapshot: SessionSnapshot) {
@@ -1084,7 +1088,7 @@ final class SessionCoordinator: NSObject {
                         tabID: tab.id,
                         tabTitle: tab.title.isEmpty ? (session.name.isEmpty ? "Terminal" : session.name) : tab.title,
                         surfaceID: surfaceID,
-                        agentKind: tab.agent?.kind,
+                        agentKind: effectiveAgentKind(for: tab),
                         body: tab.notificationText ?? "Needs attention"
                     ))
                 }
@@ -1346,6 +1350,31 @@ enum DesktopNotifier {
     }
 
     static func show(title: String, body: String, withSound: Bool = true) {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = ForegroundPresenter.shared
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                add(title: title, body: body, withSound: withSound)
+            case .notDetermined:
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+                    if granted {
+                        add(title: title, body: body, withSound: withSound)
+                    } else if withSound {
+                        DispatchQueue.main.async { NSSound(named: "Glass")?.play() }
+                    }
+                }
+            case .denied:
+                if withSound {
+                    DispatchQueue.main.async { NSSound(named: "Glass")?.play() }
+                }
+            @unknown default:
+                add(title: title, body: body, withSound: withSound)
+            }
+        }
+    }
+
+    private static func add(title: String, body: String, withSound: Bool) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -1355,7 +1384,11 @@ enum DesktopNotifier {
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                fputs("Harness notification delivery failed: \(error)\n", stderr)
+            }
+        }
     }
 
     /// The current system authorization status, on the main actor — drives the Settings

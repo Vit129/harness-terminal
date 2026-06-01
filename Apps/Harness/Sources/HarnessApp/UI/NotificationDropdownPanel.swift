@@ -69,9 +69,8 @@ final class NotificationDropdownPanelView: NSView {
             stack.translatesAutoresizingMaskIntoConstraints = false
             for entry in entries {
                 let row = NotificationRowView(entry: entry)
-                row.onClick = { [onSelect, weak self] in
+                row.onClick = { [onSelect] in
                     onSelect(entry)
-                    self?.window?.close()
                 }
                 stack.addArrangedSubview(row)
             }
@@ -128,7 +127,6 @@ final class NotificationDropdownPanelView: NSView {
 
     @objc private func clearAllClicked() {
         onClearAll()
-        window?.close()
     }
 }
 
