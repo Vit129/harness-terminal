@@ -1,4 +1,4 @@
-.PHONY: build bench preview preview-stop preview-clean release package dmg sign appcast finalize icon clean
+.PHONY: build bench preview preview-stop preview-clean release package dmg sign appcast finalize hotfix-release icon clean
 
 build:
 	swift build
@@ -44,6 +44,9 @@ appcast:
 # APPLE_APP_PASSWORD) and one keychain Allow for the Sparkle key. See Scripts/finalize-release.sh.
 finalize:
 	./Scripts/finalize-release.sh
+
+hotfix-release:
+	./Scripts/release-hotfix.sh
 
 clean:
 	swift package clean
