@@ -16,12 +16,15 @@ public final class SessionStore: @unchecked Sendable {
             else {
                 return SessionSnapshot() // absent → fresh install
             }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            if let snapshot = try? decoder.decode(SessionSnapshot.self, from: data) {
-                return snapshot
-            }
-            if let snapshot = try? JSONDecoder().decode(SessionSnapshot.self, from: data) {
+            // We write ISO-8601 dates (`writeSnapshot`), so that decoder is the primary path. The
+            // plain-decoder fallback exists ONLY for a hypothetical legacy layout.json that stored
+            // `savedAt` as a numeric timestamp (the default deferred-to-date strategy): try it before
+            // declaring the file corrupt so an old install never loses its sessions on upgrade.
+            let isoDecoder = JSONDecoder()
+            isoDecoder.dateDecodingStrategy = .iso8601
+            if let snapshot = (try? isoDecoder.decode(SessionSnapshot.self, from: data))
+                ?? (try? JSONDecoder().decode(SessionSnapshot.self, from: data))
+            {
                 return snapshot
             }
             // Present but unreadable: preserve it for recovery instead of silently starting

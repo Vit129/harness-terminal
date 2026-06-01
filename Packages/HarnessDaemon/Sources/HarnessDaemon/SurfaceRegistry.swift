@@ -62,6 +62,12 @@ public final class SurfaceRegistry: @unchecked Sendable {
         monitorTimer = timer
     }
 
+    /// Stop the periodic activity/silence/bell monitor timer (orderly daemon shutdown / tests).
+    public func stopMonitoring() {
+        monitorTimer?.cancel()
+        monitorTimer = nil
+    }
+
     /// Record output for a surface — runs on the PTY read thread, so it must stay cheap
     /// (no `lock`, no snapshot walk): just flag output / bell and stamp the time.
     private func noteSurfaceOutput(surfaceKey: String, data: Data) {
@@ -559,8 +565,11 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // Socket-layer blocking primitive, owned by DaemonServer (intercepted before
             // the registry so it never blocks this lock); stub keeps the switch exhaustive.
             return .error("wait-for must be handled by DaemonServer")
-        case let .cancelSubscription(surfaceID):
-            sessions[surfaceID]?.cancelSubscription()
+        case .cancelSubscription:
+            // Per-client cancel is owned by DaemonServer (it knows which connection asked and
+            // releases only that client's token). Reaching here means a caller bypassed the server
+            // — do nothing rather than wiping EVERY subscriber on the surface (the old global
+            // `cancelSubscription(token: nil)` dropped other clients' streams too).
             return .ok
         case let .replayScrollback(surfaceID, fromSequence):
             guard let session = sessions[surfaceID] else { return .text("") }
@@ -1123,10 +1132,40 @@ public final class SurfaceRegistry: @unchecked Sendable {
 
     /// Active `pipe-pane` taps: a surface's live output is tee'd to a spawned
     /// shell command's stdin until toggled off (or the surface closes).
-    private struct PanePipe {
+    /// @unchecked Sendable: `backlog` is guarded by `backlogLock`; `token` is only assigned under
+    /// the registry `lock` (in `startPipe`, before the process can fire `terminationHandler`); the
+    /// rest are immutable.
+    private final class PanePipe: @unchecked Sendable {
         let process: Process
         let stdin: FileHandle
-        let token: UUID
+        var token: UUID?
+        /// Tee writes run here so a stalled consumer (full pipe buffer ⇒ blocking write) can't
+        /// stall the surface's shared `deliveryQueue` and starve the GUI/attach subscribers.
+        private let writerQueue = DispatchQueue(label: "com.robert.harness.pipe-pane.write")
+        private let backlogLock = NSLock()
+        private var backlog = 0
+        private let maxBacklog = 4 * 1024 * 1024
+
+        init(process: Process, stdin: FileHandle) {
+            self.process = process
+            self.stdin = stdin
+        }
+
+        /// Tee `data` to the piped command, bounded: past the backlog cap we drop — a tee is
+        /// best-effort and must never accumulate without limit behind a stuck consumer.
+        func feed(_ data: Data) {
+            backlogLock.lock()
+            if backlog + data.count > maxBacklog { backlogLock.unlock(); return }
+            backlog += data.count
+            backlogLock.unlock()
+            let stdin = self.stdin
+            let count = data.count
+            writerQueue.async { [weak self] in
+                _ = try? stdin.write(contentsOf: data) // broken pipe (consumer exited) just drops
+                guard let self else { return }
+                self.backlogLock.lock(); self.backlog -= count; self.backlogLock.unlock()
+            }
+        }
     }
     private var pipes: [String: PanePipe] = [:]
 
@@ -1138,26 +1177,40 @@ public final class SurfaceRegistry: @unchecked Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", shellCommand]
-        let stdin = Pipe()
-        process.standardInput = stdin
+        let stdinPipe = Pipe()
+        process.standardInput = stdinPipe
         process.environment = ProcessInfo.processInfo.environment
-        guard (try? process.run()) != nil else {
+        let pipe = PanePipe(process: process, stdin: stdinPipe.fileHandleForWriting)
+        // Subscribe + register BEFORE run() so the token is set before a fast-exiting command can
+        // fire `terminationHandler` (which must cancel exactly this token, never the global set).
+        let token = session.subscribe { [weak pipe] data, _ in pipe?.feed(data) }
+        pipe.token = token
+        pipes[surfaceID] = pipe
+        // Auto-tear-down when the piped command exits on its own (e.g. `head -1`); otherwise the
+        // subscriber + map entry leak until the surface closes. Scoped by object identity + token
+        // so it never wipes a replacement pipe or every subscriber. Runs off-lock on a background
+        // queue, so it takes the registry lock itself.
+        process.terminationHandler = { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            if let existing = self.pipes[surfaceID], existing === pipe {
+                if let token = existing.token { self.sessions[surfaceID]?.cancelSubscription(token: token) }
+                try? existing.stdin.close()
+                self.pipes.removeValue(forKey: surfaceID)
+            }
+            self.lock.unlock()
+        }
+        if (try? process.run()) == nil {
             // Never log the command itself — a pipe target can carry tokens/paths the user
             // would not want in daemon stderr. The surface id is enough to diagnose.
             fputs("HarnessDaemon: pipe-pane failed to launch for surface \(surfaceID)\n", stderr)
-            return
+            stopPipe(surfaceID: surfaceID)
         }
-        let writer = stdin.fileHandleForWriting
-        let token = session.subscribe { data, _ in
-            // Best-effort: a broken pipe (consumer exited) just drops bytes.
-            _ = try? writer.write(contentsOf: data)
-        }
-        pipes[surfaceID] = PanePipe(process: process, stdin: writer, token: token)
     }
 
     private func stopPipe(surfaceID: String) {
         guard let pipe = pipes.removeValue(forKey: surfaceID) else { return }
-        sessions[surfaceID]?.cancelSubscription(token: pipe.token)
+        if let token = pipe.token { sessions[surfaceID]?.cancelSubscription(token: token) }
         try? pipe.stdin.close()
         if pipe.process.isRunning { pipe.process.terminate() }
     }

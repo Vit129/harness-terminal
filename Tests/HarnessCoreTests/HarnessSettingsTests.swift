@@ -128,20 +128,29 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertFalse(decoded.notificationSoundEnabled)
     }
 
-    func testOffMainParserFramePipelineDefaultsOffAndRoundTrips() throws {
-        XCTAssertFalse(HarnessSettings().offMainParserFramePipeline)
+    func testOffMainParserFramePipelineDefaultsOnAndRoundTrips() throws {
+        // Now the production default: parse + frame build run off the main thread.
+        XCTAssertTrue(HarnessSettings().offMainParserFramePipeline)
 
+        // A legacy settings.json with no key gets the fast path on upgrade.
         let legacy = Data("""
         { "fontSize": 14, "customBackgroundHex": "#000000" }
         """.utf8)
         let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
-        XCTAssertFalse(migrated.offMainParserFramePipeline)
+        XCTAssertTrue(migrated.offMainParserFramePipeline, "absent key defaults to on")
+
+        // An explicitly stored `false` is honored as an opt-out.
+        let optedOut = Data("""
+        { "fontSize": 14, "offMainParserFramePipeline": false }
+        """.utf8)
+        let decodedOptOut = try JSONDecoder().decode(HarnessSettings.self, from: optedOut)
+        XCTAssertFalse(decodedOptOut.offMainParserFramePipeline, "explicit false is preserved")
 
         var settings = HarnessSettings()
-        settings.offMainParserFramePipeline = true
+        settings.offMainParserFramePipeline = false
         let encoded = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(HarnessSettings.self, from: encoded)
-        XCTAssertTrue(decoded.offMainParserFramePipeline)
+        XCTAssertFalse(decoded.offMainParserFramePipeline)
     }
 
     func testImportedDefaultsKeepFullColorSet() {
@@ -240,6 +249,26 @@ final class HarnessSettingsTests: XCTestCase {
         // Behavior fields are untouched.
         XCTAssertEqual(s.defaultShell, "/opt/homebrew/bin/fish")
         XCTAssertEqual(s.defaultCWD, "/tmp/work")
+    }
+
+    func testCorruptSettingsAreBackedUpNotOverwritten() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            let url = root.appendingPathComponent("settings.json")
+            // A garbage file that exists but can't be decoded: load() must preserve it as `.corrupt`
+            // and return in-memory defaults WITHOUT rewriting the original (which would discard the
+            // user's real settings the moment a partial write or disk glitch produced bad JSON).
+            try Data("{ this is not valid json ".utf8).write(to: url)
+
+            let settings = HarnessSettings.load()
+            XCTAssertEqual(settings.fontSize, HarnessSettings.makeDefaults(imported: nil).fontSize)
+
+            let backup = url.appendingPathExtension("corrupt")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path), "the unreadable file is renamed .corrupt")
+            XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "{ this is not valid json ")
+            // The original path must NOT have been recreated with defaults (no silent overwrite).
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "load() must not rewrite the original over the corrupt file")
+        }
     }
 
     func testFontSizeIsHarnessOwnedNotImported() {

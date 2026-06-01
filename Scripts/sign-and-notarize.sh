@@ -5,16 +5,22 @@ set -euo pipefail
 # Required:
 #   SIGNING_IDENTITY  — e.g. "Developer ID Application: Your Name (TEAMID)"
 #
-# Optional (omit to sign only, skip notarization):
+# Notarization (required for distribution — omit ONLY with --sign-only / SIGN_ONLY=1):
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (app-specific password)
 #
-# Usage: make sign   or   ./Scripts/sign-and-notarize.sh
+# Usage: make sign   or   ./Scripts/sign-and-notarize.sh [--sign-only]
+#   --sign-only / SIGN_ONLY=1 : sign locally and skip notarization without failing.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/Harness.app"
 # Require an explicit identity so a release is never signed with the wrong or
 # ambiguous one. Use SIGNING_IDENTITY=- for an ad-hoc (unsigned) local build.
 IDENTITY="${SIGNING_IDENTITY:?Set SIGNING_IDENTITY to your Developer ID (or '-' for an ad-hoc local build).}"
+
+SIGN_ONLY="${SIGN_ONLY:-0}"
+if [[ "${1:-}" == "--sign-only" ]]; then SIGN_ONLY=1; fi
+# An ad-hoc identity ('-') can't be notarized, so treat it as an implicit sign-only build.
+if [[ "$IDENTITY" == "-" ]]; then SIGN_ONLY=1; fi
 
 if [[ ! -d "$APP" ]]; then
   echo "Run Scripts/build-release.sh first." >&2
@@ -49,9 +55,19 @@ codesign --force --options runtime --timestamp --sign "$IDENTITY" \
 # Seal the app bundle last (no --deep — nested code is already signed above).
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 
+# Verify the whole bundle (nested helpers + app) before we go any further — a broken nested
+# signature can pass signing yet fail notarization/Gatekeeper later, so catch it here.
+echo "Verifying signatures..."
+codesign --verify --deep --strict --verbose=2 "$APP"
+
 if [[ -z "${APPLE_ID:-}" || -z "${APPLE_TEAM_ID:-}" || -z "${APPLE_APP_PASSWORD:-}" ]]; then
-  echo "Set APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD to notarize."
-  exit 0
+  if [[ "$SIGN_ONLY" == "1" ]]; then
+    echo "Signed only (notarization skipped via --sign-only / ad-hoc identity)."
+    exit 0
+  fi
+  echo "ERROR: notarization credentials missing (APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD)." >&2
+  echo "       A distributed build MUST be notarized. Re-run with --sign-only to sign without notarizing." >&2
+  exit 1
 fi
 
 ZIP="$ROOT/Harness-notarize.zip"
@@ -62,4 +78,7 @@ xcrun notarytool submit "$ZIP" \
   --password "$APPLE_APP_PASSWORD" \
   --wait
 xcrun stapler staple "$APP"
+# Re-verify after stapling so a corrupt ticket can't slip through.
+codesign --verify --deep --strict --verbose=2 "$APP"
+rm -f "$ZIP"
 echo "Notarized and stapled."

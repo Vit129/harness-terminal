@@ -106,6 +106,9 @@ public final class DaemonServer: @unchecked Sendable {
         source.setEventHandler { [weak self] in
             self?.acceptConnection(listenerFD: fd)
         }
+        // Own the listener fd's lifetime: cancelling the source (in `stop()`) closes it, so an
+        // orderly shutdown doesn't leak the listening socket descriptor.
+        source.setCancelHandler { close(fd) }
         source.resume()
         listener = source
         fputs("HarnessDaemon listening at \(HarnessPaths.socketURL.path)\n", stderr)
@@ -170,9 +173,9 @@ public final class DaemonServer: @unchecked Sendable {
         clientBuffers[fd] = data
 
         while true {
-            let envelope: IPCEnvelope?
+            let frame: IPCCodec.DecodedRequestFrame?
             do {
-                envelope = try IPCCodec.decodeRequest(from: &data)
+                frame = try IPCCodec.decodeRequestOrInput(from: &data)
             } catch IPCCodec.FrameError.undecodable {
                 // A well-framed request this build doesn't understand (version skew). The stream
                 // is still in sync, so reply with an error and keep going rather than hanging the
@@ -186,9 +189,15 @@ public final class DaemonServer: @unchecked Sendable {
                 source.cancel()
                 return
             }
-            guard let envelope else { break }
+            guard let frame else { break }
             clientBuffers[fd] = data
-            guard let request = envelope.request else { continue }
+            // Binary input frame on a persistent (subscription) connection: write straight to the
+            // PTY, fire-and-forget — no reply (the echo comes back on the output stream).
+            if case let .input(surfaceID, payload) = frame {
+                _ = registry.handle(.sendData(surfaceID: surfaceID, data: payload))
+                continue
+            }
+            guard case let .request(maybeRequest) = frame, let request = maybeRequest else { continue }
             if case let .subscribeSurfaceOutput(surfaceID, label) = request {
                 handleSubscribe(surfaceID: surfaceID, label: label, fd: fd)
                 continue
@@ -206,6 +215,14 @@ public final class DaemonServer: @unchecked Sendable {
                 // Per-client detach: release only THIS connection's hold (handled at the
                 // server FD layer, like resize/subscribe — never in the registry, which
                 // can't see which client asked).
+                handleDetachSurface(surfaceID: surfaceID, fd: fd)
+                send(.ok, to: fd)
+                continue
+            }
+            if case let .cancelSubscription(surfaceID) = request {
+                // Per-client: release only THIS connection's subscription to the surface (mirrors
+                // detachSurface). Intercepted here, never in the registry — which can't see which
+                // client asked and would otherwise wipe EVERY subscriber on the surface.
                 handleDetachSurface(surfaceID: surfaceID, fd: fd)
                 send(.ok, to: fd)
                 continue
@@ -307,8 +324,40 @@ public final class DaemonServer: @unchecked Sendable {
     private enum WriteOutcome { case complete, wouldBlock, failed }
 
     private func send(_ response: IPCResponse, to fd: Int32) {
-        guard let data = try? IPCCodec.encode(IPCReply(response: response)) else { return }
-        // Append to any pending tail so frames stay in order, then flush what the socket takes.
+        guard let data = try? IPCCodec.encode(IPCReply(response: response)) else {
+            // Encoding a reply should be infallible; if it isn't, the client would hang forever
+            // waiting for bytes that never come. Send a minimal error instead, and if even that
+            // won't encode, drop the connection so the client errors out rather than timing out.
+            if case .error = response {
+                clientSources[fd]?.cancel() // already an error and still unencodable — unrecoverable
+            } else if let fallback = try? IPCCodec.encode(IPCReply(response: .error("internal encode failure"))) {
+                enqueue(fallback, to: fd)
+            } else {
+                clientSources[fd]?.cancel()
+            }
+            return
+        }
+        enqueue(data, to: fd)
+    }
+
+    /// Hot-path PTY output as a raw binary frame (no JSON/base64). Shares the exact buffering,
+    /// backlog cap, and writable-source flush as `send`, so ordering and backpressure are identical.
+    private func sendDataFrame(_ payload: Data, sequence: UInt64, to fd: Int32) {
+        guard let data = try? IPCCodec.encodeOutputFrame(payload, sequence: sequence) else {
+            // A dropped output frame leaves a gap in the client's byte stream (visible terminal
+            // corruption). This should be impossible — a frame is ≤64 KiB, far under the 16 MiB
+            // cap — but if it ever happens, drop the client so it reattaches and replays cleanly
+            // rather than rendering a corrupt buffer.
+            clientSources[fd]?.cancel()
+            return
+        }
+        enqueue(data, to: fd)
+    }
+
+    /// Append framed bytes to `fd`'s pending tail (so frames stay in order), enforce the backlog
+    /// cap, and flush what the non-blocking socket takes now. The single owner of `writeBuffers`
+    /// growth — both JSON replies and binary frames go through here.
+    private func enqueue(_ data: Data, to fd: Int32) {
         if var pending = writeBuffers[fd] {
             pending.append(data)
             writeBuffers[fd] = pending
@@ -382,7 +431,7 @@ public final class DaemonServer: @unchecked Sendable {
             server.queue.async { [weak server] in
                 guard let server else { return }
                 server.registry.metrics.recordOutputNotification()
-                server.send(.data(data, sequence: sequence), to: fd)
+                server.sendDataFrame(data, sequence: sequence, to: fd)
             }
         }) else {
             send(.error("Surface not found"), to: fd)
@@ -479,8 +528,12 @@ public final class DaemonServer: @unchecked Sendable {
     /// Lets a server shut down cleanly (used by integration tests and for an orderly
     /// daemon teardown).
     public func stop() {
+        // Stop the background timers first (they have their own queues), then tear down the
+        // socket layer. Otherwise a scan/monitor tick could fire against a half-stopped server.
+        AgentScanner.shared.stop()
+        registry.stopMonitoring()
         queue.sync {
-            listener?.cancel()
+            listener?.cancel() // cancel handler closes the listener fd
             listener = nil
             for (fd, source) in clientSources {
                 cancelSubscriptions(for: fd)

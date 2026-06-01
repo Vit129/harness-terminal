@@ -67,6 +67,14 @@ public final class RealPty: @unchecked Sendable {
     /// each chunk to its own queue with a write-backlog cap and drops a stuck client — so this
     /// queue can't grow without bound.
     private let deliveryQueue = DispatchQueue(label: "com.robert.harness.realpty.deliver")
+    /// Blocking PTY-master `write()`s run here, never on the caller's thread. `SurfaceRegistry`
+    /// dispatches input (`sendData`) while holding the registry lock on the daemon's serial IPC
+    /// queue; a blocking write to a flow-controlled (C-s) or full PTY buffer there would wedge the
+    /// WHOLE daemon (every other surface's IPC blocks on the lock). Offloading to this serial queue
+    /// keeps the blast radius to this one surface's input — which matches terminal flow-control
+    /// semantics — while the daemon keeps serving everyone else. Serial ⇒ keystrokes stay ordered;
+    /// no userspace buffering ⇒ no dropped input.
+    private let writeQueue = DispatchQueue(label: "com.robert.harness.realpty.write")
 
     public var onOutput: ((Data) -> Void)?
     public var onExit: (() -> Void)?
@@ -174,20 +182,25 @@ public final class RealPty: @unchecked Sendable {
     }
 
     public func write(_ data: Data) {
-        lifecycleLock.lock()
-        let fd = master
-        lifecycleLock.unlock()
-        guard fd >= 0 else { return }
-        data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
-            guard let base = buffer.baseAddress else { return }
-            var written = 0
-            while written < buffer.count {
-                let result = Darwin.write(fd, base.advanced(by: written), buffer.count - written)
-                if result < 0 {
-                    if errno == EINTR { continue }
-                    break
+        guard !data.isEmpty else { return }
+        // Off the caller's thread (see `writeQueue`): the daemon must never block on a full PTY.
+        writeQueue.async { [weak self] in
+            guard let self else { return }
+            self.lifecycleLock.lock()
+            let fd = self.master
+            self.lifecycleLock.unlock()
+            guard fd >= 0 else { return }
+            data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+                guard let base = buffer.baseAddress else { return }
+                var written = 0
+                while written < buffer.count {
+                    let result = Darwin.write(fd, base.advanced(by: written), buffer.count - written)
+                    if result < 0 {
+                        if errno == EINTR { continue }
+                        break
+                    }
+                    written += result
                 }
-                written += result
             }
         }
     }
@@ -250,6 +263,13 @@ public final class RealPty: @unchecked Sendable {
             try restartChild(cwd: cwd, shell: shell, rows: oldRows, cols: oldCols)
         } catch {
             fputs("HarnessDaemon: respawn failed for \(id): \(error)\n", stderr)
+            // The surface now has no live child, no read source, and would never fire `onExit` —
+            // a zombie surface the GUI/attach clients hang attached to. Tear it down + notify
+            // subscribers so `SurfaceRegistry` reaps it exactly like a normal shell exit.
+            lifecycleLock.lock()
+            let gen = generation
+            lifecycleLock.unlock()
+            childEnded(generation: gen)
         }
     }
 
@@ -512,7 +532,10 @@ public final class RealPty: @unchecked Sendable {
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: readQueue)
         source.setEventHandler { [weak self] in
             guard let self else { return }
-            var buffer = [UInt8](repeating: 0, count: 8 * 1024)
+            // 64 KiB (was 8 KiB): a PTY can hold tens of KiB of buffered output, so a burst (cat,
+            // build logs, `yes`) drains in ~8× fewer read() calls — and therefore ~8× fewer IPC
+            // frames/encodes/socket writes downstream. Also coalesces bursts at the kernel level.
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             let n = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
                 Darwin.read(fd, ptr.baseAddress, ptr.count)
             }
@@ -564,7 +587,13 @@ public final class RealPty: @unchecked Sendable {
 
         // Fan out on the delivery queue (off the read loop). `data`/`sequence` are values; capture
         // self weakly so a teardown mid-flight just no-ops. The snapshot is taken at delivery time
-        // so a just-cancelled subscriber drops out; one slow handler can't stall PTY reads.
+        // so a just-cancelled subscriber drops out. Every subscriber handler is non-blocking — the
+        // `DaemonServer` client hands each chunk to its own write-backlog-capped queue, and the
+        // `pipe-pane` tee hands off to its own bounded writer queue — so a backed-up consumer can
+        // neither stall PTY reads nor let this fan-out queue grow without bound. A single serial
+        // fan-out queue is also what guarantees in-order delivery — do not special-case "one
+        // subscriber" to deliver inline on the read loop: a chunk delivered inline could overtake a
+        // prior chunk still queued here when the subscriber count changes, reordering output.
         deliveryQueue.async { [weak self] in
             guard let self else { return }
             self.subscribersLock.lock()

@@ -40,7 +40,7 @@ final class DaemonLauncher: @unchecked Sendable {
     func ensureRunningBlocking() -> Bool {
         if let stats = daemonStats(timeout: 0.4) {
             if bundledDaemonIsNewer(than: stats) {
-                restartStaleDaemon(pid: stats.pid)
+                restartStaleDaemon()
                 if pollUntilFreshDaemon(replacingPID: stats.pid, timeoutSeconds: 3) { return true }
             } else {
                 return true
@@ -51,7 +51,7 @@ final class DaemonLauncher: @unchecked Sendable {
             // Restart it through the installed LaunchAgent and wait for a
             // daemon that can report stats before declaring startup ready.
             let stalePID = daemonPIDFromFile()
-            restartStaleDaemon(pid: stalePID)
+            restartStaleDaemon()
             if pollUntilFreshDaemon(replacingPID: stalePID, timeoutSeconds: 3) { return true }
         }
 
@@ -94,11 +94,23 @@ final class DaemonLauncher: @unchecked Sendable {
         return modifiedAt > daemonStartedAt.addingTimeInterval(1)
     }
 
-    private func restartStaleDaemon(pid: Int32?) {
-        _ = installLaunchAgentIfPossible()
-        LaunchAgentInstaller.relaunch()
-        if let pid {
-            _ = kill(pid, SIGTERM)
+    /// Restart the daemon **exactly once**. `install()` already bootouts-on-change + bootstraps, so a
+    /// changed plist path (daemon moved on disk) starts the fresh daemon itself; only an *unchanged*
+    /// path (the same binary rebuilt in place — the common Xcode dev loop) needs a single
+    /// `relaunch()` kick. The old `install() + relaunch() + kill(pid)` combo fired 2–3 restarts,
+    /// re-running `ensureAllSnapshotSurfaces` each time and widening the window where a pane reconnect
+    /// could subscribe to a momentarily-missing surface and freeze.
+    private func restartStaleDaemon() {
+        guard let executable = daemonExecutableURL(),
+              let report = try? LaunchAgentInstaller.install(daemonPath: executable)
+        else {
+            // No installable LaunchAgent (e.g. daemon binary not found) — best-effort kick.
+            LaunchAgentInstaller.relaunch()
+            fallbackProcess = nil
+            return
+        }
+        if report.wasAlreadyInstalled {
+            LaunchAgentInstaller.relaunch()
         }
         fallbackProcess = nil
     }

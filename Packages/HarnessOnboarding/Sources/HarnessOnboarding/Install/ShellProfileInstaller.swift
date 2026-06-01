@@ -58,7 +58,7 @@ enum ShellProfileInstaller {
         binDirectory: URL = HarnessCLIPaths.binDirectory
     ) throws -> InstallResult {
         let profileURL = home.appendingPathComponent(shell.profilePath)
-        let body = pathLine(for: shell, binDirectory: binDirectory)
+        let body = blockBody(for: shell, binDirectory: binDirectory)
         try FileManager.default.createDirectory(at: profileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         let existing = (try? String(contentsOf: profileURL, encoding: .utf8)) ?? ""
@@ -100,6 +100,23 @@ enum ShellProfileInstaller {
             return "export PATH=\"\(shDoubleQuotedPath(binDirectory.path)):$PATH\""
         case .fish:
             return "set -gx PATH \(fishSingleQuotedPath(binDirectory.path)) $PATH"
+        }
+    }
+
+    /// The full marked-block body. For bash this is the PATH export PLUS a guard that sources
+    /// `.bashrc` — Harness spawns shells as `$SHELL -l`, and a bash LOGIN shell reads `.bash_profile`
+    /// but NOT `.bashrc`, where `ShellIntegration` installs the OSC 133 prompt marks. Without this
+    /// bridge a bash user gets PATH but silently no shell integration. zsh reads `.zshrc` for both
+    /// login and interactive shells and fish reads `config.fish`, so only bash needs it.
+    static func blockBody(for shell: Shell, binDirectory: URL = HarnessCLIPaths.binDirectory) -> String {
+        let path = pathLine(for: shell, binDirectory: binDirectory)
+        switch shell {
+        case .bash:
+            return path + "\n"
+                + "# Source .bashrc in login shells so interactive setup (incl. Harness shell integration) applies\n"
+                + "[ -f ~/.bashrc ] && . ~/.bashrc"
+        case .zsh, .fish:
+            return path
         }
     }
 

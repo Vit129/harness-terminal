@@ -50,11 +50,21 @@ struct HistoryRingBuffer<Element> {
     /// place (e.g. `buffer[i].field = x`), which a plain array's element subscript also allows.
     subscript(index: Int) -> Element {
         get {
-            precondition(index >= 0 && index < count, "HistoryRingBuffer index out of range")
-            return storage[backingIndex(index)]!
+            // An out-of-range index is a logic bug: trap loudly in development (`assert`, stripped in
+            // release) but DON'T crash a shipping build over scrollback indexing. Clamp into range and
+            // return the nearest retained element. The buffer keeps every slot in [head, head+count)
+            // non-nil, so the clamped read never force-unwraps nil. (`count > 0` always holds at the
+            // call sites, which all guard `index < count`; the empty case is genuinely unreachable.)
+            assert(index >= 0 && index < count, "HistoryRingBuffer index out of range")
+            precondition(count > 0, "HistoryRingBuffer subscript on empty buffer")
+            let clamped = Swift.max(0, Swift.min(index, count - 1))
+            return storage[backingIndex(clamped)]!
         }
         set {
-            precondition(index >= 0 && index < count, "HistoryRingBuffer index out of range")
+            // Same contract as the getter: assert in debug, but in release ignore an out-of-range
+            // write rather than trapping — a stale index should never crash the engine thread.
+            assert(index >= 0 && index < count, "HistoryRingBuffer index out of range")
+            guard index >= 0, index < count else { return }
             storage[backingIndex(index)] = newValue
         }
     }

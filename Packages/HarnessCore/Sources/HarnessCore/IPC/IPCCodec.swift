@@ -41,7 +41,14 @@ public enum IPCCodec {
 
     public static func decodeReply(from buffer: inout Data) throws -> IPCReply? {
         guard let payload = try extractPayload(from: &buffer) else { return nil }
-        return try? JSONDecoder().decode(IPCReply.self, from: payload)
+        // The frame de-framed cleanly (length-prefixed) but the payload won't decode — a
+        // malformed/skewed reply. Throw rather than returning nil: the frame is already consumed,
+        // so nil would read as "need more bytes" and hang the caller until it times out.
+        do {
+            return try JSONDecoder().decode(IPCReply.self, from: payload)
+        } catch {
+            throw FrameError.undecodable
+        }
     }
 
     /// Pull one length-prefixed payload off the front of `buffer`. Returns nil when a full
@@ -61,5 +68,157 @@ public enum IPCCodec {
         let payload = Data(buffer.dropFirst(4).prefix(Int(length)))
         buffer.removeFirst(total)
         return payload
+    }
+
+    // MARK: - Binary data frames (hot path: PTY output + keystroke input)
+    //
+    // Output and input byte streams are the only high-frequency payloads. Routing them through
+    // `encode` (JSON) base64-encodes the bytes (+33% size) and spends JSON/base64 CPU on every
+    // chunk in both directions. These binary frames carry the raw bytes with a tiny fixed header
+    // and no base64; JSON stays the format for every control message.
+    //
+    // Disambiguation is the lead byte. A JSON frame starts with the high byte of its 4-byte length
+    // prefix, which for any payload <= `maxPayloadLength` (16 MiB = 0x01000000) is 0x00 or 0x01. The
+    // binary magics 0xF5/0xF6 can never collide with that, so a reader branches on byte 0 with no
+    // version negotiation. (Keep `maxPayloadLength` <= 16 MiB so the JSON length high byte never
+    // reaches a magic value.)
+    static let outputFrameMagic: UInt8 = 0xF5
+    static let inputFrameMagic: UInt8 = 0xF6
+
+    /// Output frame (daemon → subscriber): `[0xF5][len:4 BE][sequence:8 BE][raw bytes]`. No
+    /// surfaceID — an output subscription is single-surface, so the reader already knows it.
+    public static func encodeOutputFrame(_ payload: Data, sequence: UInt64) throws -> Data {
+        let bodyLength = 8 + payload.count
+        guard bodyLength <= maxPayloadLength else { throw FrameError.tooLarge(bodyLength) }
+        var data = Data(capacity: 5 + bodyLength)
+        data.append(outputFrameMagic)
+        appendUInt32BE(UInt32(bodyLength), to: &data)
+        appendUInt64BE(sequence, to: &data)
+        data.append(payload)
+        return data
+    }
+
+    /// Input frame (client → daemon): `[0xF6][len:4 BE][surfaceLen:2 BE][surfaceID UTF-8][raw bytes]`.
+    /// Carries surfaceID so input can ride a persistent (multi-surface-capable) connection.
+    public static func encodeInputFrame(surfaceID: String, payload: Data) throws -> Data {
+        let surfaceBytes = Array(surfaceID.utf8)
+        guard surfaceBytes.count <= 0xFFFF else { throw FrameError.tooLarge(surfaceBytes.count) }
+        let bodyLength = 2 + surfaceBytes.count + payload.count
+        guard bodyLength <= maxPayloadLength else { throw FrameError.tooLarge(bodyLength) }
+        var data = Data(capacity: 5 + bodyLength)
+        data.append(inputFrameMagic)
+        appendUInt32BE(UInt32(bodyLength), to: &data)
+        appendUInt16BE(UInt16(surfaceBytes.count), to: &data)
+        data.append(contentsOf: surfaceBytes)
+        data.append(payload)
+        return data
+    }
+
+    /// One decoded frame on a reply/output stream (a subscription connection).
+    public enum DecodedReplyFrame {
+        case reply(IPCResponse)
+        case output(Data, sequence: UInt64)
+    }
+
+    /// Decode the next reply OR binary output frame off `buffer`. nil = a full frame isn't buffered
+    /// yet. Throws `tooLarge` on an out-of-bounds declared length (unrecoverable — drop the
+    /// connection), matching `decodeReply`.
+    public static func decodeReplyOrData(from buffer: inout Data) throws -> DecodedReplyFrame? {
+        guard let first = buffer.first else { return nil }
+        if first == outputFrameMagic {
+            guard let body = try extractBinaryFrame(from: &buffer) else { return nil }
+            guard body.count >= 8 else { throw FrameError.undecodable }
+            let sequence = readUInt64BE(body, 0)
+            let payload = body.subdata(in: (body.startIndex + 8) ..< body.endIndex)
+            return .output(payload, sequence: sequence)
+        }
+        guard let payload = try extractPayload(from: &buffer) else { return nil }
+        // Same contract as `decodeReply`: a consumed-but-undecodable frame throws (the stream read
+        // loop treats it as fatal and tears down) rather than returning nil and silently dropping
+        // a reply the caller is still waiting on.
+        do {
+            let reply = try JSONDecoder().decode(IPCReply.self, from: payload)
+            return .reply(reply.response)
+        } catch {
+            throw FrameError.undecodable
+        }
+    }
+
+    /// One decoded frame on a request/input stream (the daemon's client connections).
+    public enum DecodedRequestFrame {
+        case request(IPCRequest?)
+        case input(surfaceID: String, payload: Data)
+    }
+
+    /// Decode the next request OR binary input frame off `buffer`. nil = incomplete. Throws
+    /// `undecodable` on a framed-but-unknown JSON request (the stream stays in sync; the caller
+    /// errors and continues) and `tooLarge` on an out-of-bounds length (drop the connection) — the
+    /// same contract as `decodeRequest`.
+    public static func decodeRequestOrInput(from buffer: inout Data) throws -> DecodedRequestFrame? {
+        guard let first = buffer.first else { return nil }
+        if first == inputFrameMagic {
+            guard let body = try extractBinaryFrame(from: &buffer) else { return nil }
+            guard body.count >= 2 else { throw FrameError.undecodable }
+            let surfaceLength = Int(readUInt16BE(body, 0))
+            guard body.count >= 2 + surfaceLength else { throw FrameError.undecodable }
+            let sidStart = body.startIndex + 2
+            let surfaceID = String(decoding: body[sidStart ..< (sidStart + surfaceLength)], as: UTF8.self)
+            let payload = body.subdata(in: (sidStart + surfaceLength) ..< body.endIndex)
+            return .input(surfaceID: surfaceID, payload: payload)
+        }
+        guard let payload = try extractPayload(from: &buffer) else { return nil }
+        do {
+            return .request(try JSONDecoder().decode(IPCEnvelope.self, from: payload).request)
+        } catch {
+            throw FrameError.undecodable
+        }
+    }
+
+    /// Pull one `[magic][len:4 BE][body]` frame's body off the front of `buffer`. Returns nil when
+    /// the full frame isn't buffered yet. The caller must have verified `buffer.first` is a binary
+    /// magic. Throws `tooLarge` on an out-of-bounds declared length (matches `extractPayload`).
+    private static func extractBinaryFrame(from buffer: inout Data) throws -> Data? {
+        guard buffer.count >= 5 else { return nil }
+        let b = buffer.startIndex
+        let length = (UInt32(buffer[b + 1]) << 24)
+            | (UInt32(buffer[b + 2]) << 16)
+            | (UInt32(buffer[b + 3]) << 8)
+            | UInt32(buffer[b + 4])
+        guard length <= UInt32(maxPayloadLength) else { throw FrameError.tooLarge(Int(length)) }
+        let total = 5 + Int(length)
+        guard buffer.count >= total else { return nil }
+        let body = Data(buffer[(b + 5) ..< (b + total)])
+        buffer.removeFirst(total)
+        return body
+    }
+
+    private static func appendUInt16BE(_ value: UInt16, to data: inout Data) {
+        data.append(UInt8(truncatingIfNeeded: value >> 8))
+        data.append(UInt8(truncatingIfNeeded: value))
+    }
+
+    private static func appendUInt32BE(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8(truncatingIfNeeded: value >> 24))
+        data.append(UInt8(truncatingIfNeeded: value >> 16))
+        data.append(UInt8(truncatingIfNeeded: value >> 8))
+        data.append(UInt8(truncatingIfNeeded: value))
+    }
+
+    private static func appendUInt64BE(_ value: UInt64, to data: inout Data) {
+        for shift in stride(from: 56, through: 0, by: -8) {
+            data.append(UInt8(truncatingIfNeeded: value >> UInt64(shift)))
+        }
+    }
+
+    private static func readUInt16BE(_ data: Data, _ offset: Int) -> UInt16 {
+        let i = data.startIndex + offset
+        return (UInt16(data[i]) << 8) | UInt16(data[i + 1])
+    }
+
+    private static func readUInt64BE(_ data: Data, _ offset: Int) -> UInt64 {
+        let i = data.startIndex + offset
+        var value: UInt64 = 0
+        for k in 0 ..< 8 { value = (value << 8) | UInt64(data[i + k]) }
+        return value
     }
 }

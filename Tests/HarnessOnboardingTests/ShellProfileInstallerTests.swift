@@ -34,6 +34,30 @@ final class ShellProfileInstallerTests: XCTestCase {
         )
     }
 
+    func testBashBlockSourcesBashrcSoLoginShellsGetShellIntegration() {
+        // Harness spawns `$SHELL -l`; a bash LOGIN shell reads `.bash_profile` but NOT `.bashrc`,
+        // where the OSC 133 shell integration installs. The bash block must bridge the two or a bash
+        // user silently loses prompt marks / the gutter. zsh + fish read one rc for both, so they
+        // carry only the PATH line.
+        let bin = URL(fileURLWithPath: "/Users/test/Library/Application Support/Harness/bin")
+        let bash = ShellProfileInstaller.blockBody(for: .bash, binDirectory: bin)
+        XCTAssertTrue(bash.contains(ShellProfileInstaller.pathLine(for: .bash, binDirectory: bin)), "keeps the PATH export")
+        XCTAssertTrue(bash.contains("~/.bashrc"), "bridges to .bashrc")
+        XCTAssertTrue(bash.contains(". ~/.bashrc"), "sources it, guarded by an existence test")
+
+        XCTAssertEqual(ShellProfileInstaller.blockBody(for: .zsh, binDirectory: bin), ShellProfileInstaller.pathLine(for: .zsh, binDirectory: bin))
+        XCTAssertEqual(ShellProfileInstaller.blockBody(for: .fish, binDirectory: bin), ShellProfileInstaller.pathLine(for: .fish, binDirectory: bin))
+    }
+
+    func testBashInstallWritesTheBashrcBridgeIntoTheMarkedBlock() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("Library/Application Support/Harness/bin")
+        _ = try ShellProfileInstaller.install(.bash, home: home, binDirectory: bin)
+        let content = read(home.appendingPathComponent(".bash_profile"))
+        XCTAssertTrue(content.contains("# >>> Harness CLI PATH >>>"))
+        XCTAssertTrue(content.contains(". ~/.bashrc"), "the installed bash block sources .bashrc")
+    }
+
     func testInstallAppendsOneMarkedBlockAndIsIdempotent() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("Library/Application Support/Harness/bin")

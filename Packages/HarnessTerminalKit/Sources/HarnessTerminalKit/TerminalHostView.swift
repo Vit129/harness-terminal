@@ -29,6 +29,17 @@ public final class TerminalHostView: NSView {
     private var isActiveBorder = false
     private var cachedSettings: HarnessSettings?
     private var cachedThemeName: String
+    /// Spawn parameters, kept so the surface can be re-ensured on reconnect after a daemon restart
+    /// (the respawned daemon recreates it from layout.json, but we re-send these in case it must).
+    private let cachedCwd: String?
+    private let cachedShell: String
+    /// True while the pane is intentionally released (`detachFromDaemonSurface`) so the output
+    /// stream ending does NOT trigger an auto-reconnect — the user/coordinator asked for the detach.
+    private var intentionallyDetached = false
+    /// Backoff counter for `scheduleDaemonReconnect`, reset to 0 on a successful (re)connect.
+    private var reconnectAttempts = 0
+    /// Off-main probe queue for reconnect so a still-restarting daemon never blocks the main thread.
+    private let reconnectQueue = DispatchQueue(label: "com.robert.harness.reconnect")
     /// Theme-derived indicator colors. This package can't reach the app's palette,
     /// so the app pushes them via `applyBorderColors`. Default until the first push.
     public var activeBorderColor: NSColor = .systemBlue
@@ -128,6 +139,8 @@ public final class TerminalHostView: NSView {
         self.cachedThemeName = themeName
         self.cachedSettings = settings
         let shell = settings?.defaultShell ?? ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        self.cachedShell = shell
+        self.cachedCwd = workingDirectory
         let surfaceEnv = harnessSurfaceEnv ?? surfaceID.uuidString
         let io = SurfaceIO(surfaceID: surfaceEnv)
         self.io = io
@@ -140,13 +153,16 @@ public final class TerminalHostView: NSView {
             vivid: settings?.vividColors ?? false,
             colorRendering: settings?.colorRendering,
             colorGamut: settings?.colorGamut ?? .auto,
-            offMainParserFramePipeline: settings?.offMainParserFramePipeline ?? false
+            offMainParserFramePipeline: settings?.offMainParserFramePipeline ?? true
         )
         self.nativeView = nativeView
         super.init(frame: .zero)
         ensureDaemonSurface(cwd: workingDirectory, shell: shell, settings: settings)
         configureNative(nativeView, io: io, inputGate: inputGate)
         startDaemonOutput()
+        // If the very first subscribe didn't take (daemon mid-restart at creation), don't leave the
+        // pane dead — retry on the same backoff that recovers a later drop.
+        if outputSubscription == nil { scheduleDaemonReconnect() }
     }
 
     @available(*, unavailable)
@@ -410,8 +426,10 @@ public final class TerminalHostView: NSView {
     /// session stays alive for `reattachToDaemonSurface()` (or another client) to re-grab.
     public func detachFromDaemonSurface() {
         guard outputSubscription != nil else { return }   // already detached — keep one overlay
+        intentionallyDetached = true // suppress auto-reconnect: this detach is deliberate
         outputSubscription?.cancel()
         outputSubscription = nil
+        io.attach(subscription: nil) // fall back to the per-call client while detached
         showDetachedOverlay()
     }
 
@@ -419,8 +437,10 @@ public final class TerminalHostView: NSView {
     /// scrollback so the pane catches up. No-op if still attached.
     public func reattachToDaemonSurface() {
         guard outputSubscription == nil else { return }
+        intentionallyDetached = false
+        reconnectAttempts = 0
         hideDetachedOverlay()
-        startDaemonOutput()
+        startDaemonOutput(resetBeforeReplay: true)
     }
 
     /// Drop a dimmed "released — click to re-grab" affordance over the frozen pane. Topmost so it
@@ -456,22 +476,34 @@ public final class TerminalHostView: NSView {
         inputGate.setSiblings(surfaceIDStrings)
     }
 
-    private func ensureDaemonSurface(cwd: String?, shell: String, settings: HarnessSettings?) {
+    /// Returns true iff the daemon acknowledged the surface (`.ok`). Reconnect gates resubscribe on
+    /// this so it never subscribes to a surface the (still-restarting) daemon hasn't recreated yet.
+    @discardableResult
+    private func ensureDaemonSurface(cwd: String?, shell: String, settings: HarnessSettings?) -> Bool {
         do {
-            _ = try daemonClient.request(.ensureSurface(
+            if case .ok = try daemonClient.request(.ensureSurface(
                 surfaceID: surfaceID.uuidString,
                 cwd: cwd ?? FileManager.default.homeDirectoryForCurrentUser.path,
                 shell: shell,
                 rows: 24,
                 cols: 80,
                 scrollbackBytes: (settings?.scrollbackLines ?? 10_000) * 160
-            ))
+            )) {
+                return true
+            }
         } catch {
             fputs("Harness: ensureSurface failed for \(surfaceID.uuidString): \(error)\n", stderr)
         }
+        return false
     }
 
-    private func startDaemonOutput() {
+    private func startDaemonOutput(resetBeforeReplay: Bool = false) {
+        // Reconnect/reattach: reset the emulator (RIS) first so the replayed scrollback replaces
+        // stale pre-restart content instead of stacking on it (which shows a doubled prompt). On the
+        // first connect the emulator is empty, so RIS would be a no-op — keep it off that path.
+        if resetBeforeReplay {
+            nativeView.receive("\u{1b}c")
+        }
         do {
             if case let .text(text) = try daemonClient.request(.replayScrollback(
                 surfaceID: surfaceID.uuidString,
@@ -485,14 +517,132 @@ public final class TerminalHostView: NSView {
         do {
             outputSubscription = try daemonClient.subscribeSurfaceOutput(
                 surfaceID: surfaceID.uuidString,
-                label: "Harness.app"
-            ) { [weak self] data, _ in
-                Task { @MainActor in
-                    self?.nativeView.receive(data)
-                }
-            }
+                label: "Harness.app",
+                onData: makeOutputDataHandler(),
+                onEnd: makeOutputEndHandler()
+            )
+            // Ride this persistent full-duplex connection for input (fire-and-forget), replacing
+            // the per-keystroke socket connect + blocking round trip. `attach` also re-asserts the
+            // last grid size, so a surface respawned at the daemon's placeholder size is corrected.
+            io.attach(subscription: outputSubscription)
         } catch {
             fputs("Harness: output subscription failed for \(surfaceID.uuidString): \(error)\n", stderr)
+        }
+    }
+
+    /// Output-stream data handler, shared by the initial connect and the off-main reconnect. Feeds
+    /// the emulator on the main thread IN ORDER: the subscription read loop is serial (frames decode
+    /// in the daemon's byte order) and `DispatchQueue.main.async` is strict FIFO, so byte order is
+    /// preserved end to end. An unstructured `Task { @MainActor in }` is NOT order-preserving — under
+    /// fast/bursty output (the binary transport makes decode far faster, so chunks arrive
+    /// back-to-back) two tasks could run on the main actor out of order, feeding a TUI's
+    /// cursor-positioned redraws to the emulator scrambled (overlapping, interleaved text).
+    private func makeOutputDataHandler() -> @Sendable (Data, UInt64) -> Void {
+        { [weak self] data, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.nativeView.receive(data) }
+            }
+        }
+    }
+
+    /// Output-stream end handler, shared by the initial connect and the off-main reconnect. If we
+    /// didn't ask for the stream to end (the daemon restarted/crashed and launchd respawned it — or,
+    /// in dev, a newer build replaced it on launch), the pane would otherwise be stuck on a dead
+    /// socket: no output, and input writing to a dead fd. Drop to the per-call input fallback
+    /// immediately, then reconnect.
+    private func makeOutputEndHandler() -> @Sendable () -> Void {
+        { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.outputSubscription = nil
+                    self.io.attach(subscription: nil)
+                    if !self.intentionallyDetached { self.scheduleDaemonReconnect() }
+                }
+            }
+        }
+    }
+
+    /// Recover a surface whose output stream dropped unexpectedly (daemon restart/crash). Probe the
+    /// daemon off-main so a still-restarting one never blocks the UI; once it answers, re-ensure the
+    /// surface (idempotent — the respawned daemon already recreated it from layout.json) and
+    /// resubscribe with a clean replay. Bounded backoff covers the restart window; after that, fall
+    /// back to the manual "click to re-grab" affordance. No-op once intentionally detached.
+    private func scheduleDaemonReconnect() {
+        guard !intentionallyDetached, outputSubscription == nil else { return }
+        guard reconnectAttempts < 60 else {
+            showDetachedOverlay() // ~50s of retries elapsed; let the user re-grab manually
+            return
+        }
+        let attempt = reconnectAttempts
+        reconnectAttempts += 1
+        let delay = min(0.1 * Double(attempt + 1), 1.0)
+        // Capture main-actor state so the whole probe + (re)attach handshake — ping, ensureSurface,
+        // replayScrollback, and subscribe — runs OFF main. A still-restarting daemon answers slowly
+        // (or its socket blocks), so doing these synchronous round trips on main froze the UI for the
+        // duration of every retry. Only the view touches (RIS reset, replay receive, subscription
+        // assignment, `io.attach`) hop back to main.
+        let client = daemonClient
+        let sid = surfaceID.uuidString
+        let cwd = cachedCwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let shell = cachedShell
+        let scrollbackBytes = (cachedSettings?.scrollbackLines ?? 10_000) * 160
+        let onData = makeOutputDataHandler()
+        let onEnd = makeOutputEndHandler()
+        // The view touches are built on main as `@Sendable` closures capturing `[weak self]`, so the
+        // off-main worker never captures the (non-Sendable, @MainActor) `self` itself — it only calls
+        // these to hop back. `onReplay`: reset stale content (RIS) + replay history; `onAttached`:
+        // commit the new subscription (or, on nil, reschedule the backoff).
+        let onReplay: @Sendable (String) -> Void = { [weak self] text in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, !self.intentionallyDetached, self.outputSubscription == nil else { return }
+                    self.nativeView.receive("\u{1b}c")
+                    if !text.isEmpty { self.nativeView.receive(text) }
+                }
+            }
+        }
+        let onAttached: @Sendable (DaemonSubscription?) -> Void = { [weak self] subscription in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, !self.intentionallyDetached, self.outputSubscription == nil else {
+                        subscription?.cancel() // raced an intentional detach / another attach — drop it
+                        return
+                    }
+                    if let subscription {
+                        self.outputSubscription = subscription
+                        // Ride this persistent full-duplex connection for input; `attach` re-asserts
+                        // the last grid size, correcting a surface respawned at the placeholder size.
+                        self.io.attach(subscription: subscription)
+                        self.reconnectAttempts = 0
+                        self.hideDetachedOverlay()
+                    } else {
+                        self.scheduleDaemonReconnect() // daemon not back / subscribe failed — retry
+                    }
+                }
+            }
+        }
+        reconnectQueue.asyncAfter(deadline: .now() + delay) {
+            // Ping first: a still-restarting daemon answers nothing, so bail to a retry rather than
+            // block. Then re-ensure the surface (idempotent — the respawned daemon already recreated
+            // it from layout.json); subscribing while the surface is still missing would be rejected
+            // and bounce straight back here.
+            guard case .pong? = try? client.request(.ping, timeout: 0.5) else { onAttached(nil); return }
+            guard case .ok? = try? client.request(.ensureSurface(
+                surfaceID: sid, cwd: cwd, shell: shell, rows: 24, cols: 80, scrollbackBytes: scrollbackBytes
+            )) else { onAttached(nil); return }
+            var replayText = ""
+            if case let .text(text)? = try? client.request(.replayScrollback(surfaceID: sid, fromSequence: nil)) {
+                replayText = text
+            }
+            // Reset + replay on main BEFORE the live stream starts: this main hop is queued before the
+            // subscribe below, and `onData` only ever hops to main AFTER the subscribe — so FIFO
+            // guarantees the replayed history lands before any live byte.
+            onReplay(replayText)
+            let subscription = try? client.subscribeSurfaceOutput(
+                surfaceID: sid, label: "Harness.app", onData: onData, onEnd: onEnd
+            )
+            onAttached(subscription)
         }
     }
 
@@ -564,16 +714,54 @@ private final class SurfaceIO: @unchecked Sendable {
     private let client = DaemonClient()
     private let queue = DispatchQueue(label: "com.robert.harness.terminal-io")
     private let surfaceID: String
+    private let lock = NSLock()
+    /// The live full-duplex output subscription, once `startDaemonOutput` wires it. Input rides this
+    /// connection (`sendInput`, fire-and-forget) instead of the per-keystroke connect + blocking
+    /// `.ok` round trip of `DaemonClient.request(.sendData:)`. Guarded by `lock` (set on main during
+    /// (re)attach, read on `queue`).
+    private var subscription: DaemonSubscription?
+    /// Last grid size sent, re-asserted on (re)attach so a surface a restarted daemon respawned at
+    /// its placeholder size is corrected without waiting for the next layout pass. Guarded by `lock`.
+    private var lastRows: UInt16 = 0
+    private var lastCols: UInt16 = 0
 
     init(surfaceID: String) { self.surfaceID = surfaceID }
 
+    /// Point input at the live subscription (or `nil` to fall back to the per-call client, e.g. when
+    /// the pane is detached). Covers both first attach and re-grab.
+    func attach(subscription: DaemonSubscription?) {
+        lock.lock()
+        self.subscription = subscription
+        let rows = lastRows, cols = lastCols
+        lock.unlock()
+        // Re-assert the grid size on attach: a surface respawned by a restarted daemon comes up at
+        // the daemon's placeholder size until a client resize vote arrives.
+        if subscription != nil, rows > 0, cols > 0 {
+            queue.async { [client, surfaceID] in
+                _ = try? client.request(.resizeSurface(surfaceID: surfaceID, rows: rows, cols: cols))
+            }
+        }
+    }
+
+    private var currentSubscription: DaemonSubscription? {
+        lock.lock(); defer { lock.unlock() }; return subscription
+    }
+
     func send(_ data: Data) {
-        queue.async { [client, surfaceID] in
-            _ = try? client.request(.sendData(surfaceID: surfaceID, data: data))
+        // Stay on `queue` so keystrokes are ordered and off the main thread (matching the old
+        // path); the write itself is now one frame on the persistent fd with no socket setup or
+        // reply wait. Before the subscription exists (first keystrokes), fall back to the client.
+        queue.async { [weak self, client, surfaceID] in
+            if let sub = self?.currentSubscription {
+                sub.sendInput(data, surfaceID: surfaceID)
+            } else {
+                _ = try? client.request(.sendData(surfaceID: surfaceID, data: data))
+            }
         }
     }
 
     func resize(rows: UInt16, cols: UInt16) {
+        lock.lock(); lastRows = rows; lastCols = cols; lock.unlock()
         queue.async { [client, surfaceID] in
             _ = try? client.request(.resizeSurface(surfaceID: surfaceID, rows: rows, cols: cols))
         }

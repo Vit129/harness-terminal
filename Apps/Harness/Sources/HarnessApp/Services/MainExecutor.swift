@@ -19,12 +19,29 @@ final class MainExecutor: CommandExecutor {
         if Thread.isMainThread {
             try MainActor.assumeIsolated { try self.dispatch(command) }
         } else {
+            // Off-main callers must NOT be holding the main thread when they call this (it would
+            // deadlock on `main.sync`). In practice every caller — prefix keymap, command prompt,
+            // menus, hook-branch completions — runs on a background queue that is not blocking
+            // main, or is already on main (the branch above). Keep this invariant if adding callers.
             var resultError: Error?
             DispatchQueue.main.sync {
                 do { try MainActor.assumeIsolated { try self.dispatch(command) } }
                 catch { resultError = error }
             }
             if let resultError { throw resultError }
+        }
+    }
+
+    /// Run a command for the fire-and-forget paths (hook branches, confirm-before, menu items,
+    /// sourced config) that previously swallowed the throw with `try?`. Surfaces any failure as a
+    /// transient toast so a mistyped binding/command isn't a silent no-op. `nonisolated` so it's
+    /// callable from any closure context; the toast hops to the main actor.
+    nonisolated func executeSurfacingErrors(_ command: Command) {
+        do {
+            try execute(command)
+        } catch {
+            let message = "error: \(error)"
+            DispatchQueue.main.async { MainActor.assumeIsolated { DisplayMessage.show(message) } }
         }
     }
 
@@ -142,7 +159,7 @@ final class MainExecutor: CommandExecutor {
             RunShell.runConditional(condition) { success in
                 let branch = success ? then : otherwise
                 guard let branch else { return }
-                try? MainExecutor.shared.execute(branch)
+                MainExecutor.shared.executeSurfacingErrors(branch)
             }
         case .bindKey(let table, let spec, let inner, let repeatable):
             try KeybindingsService.shared.bind(table: KeyTableID(rawValue: table), specRaw: spec, command: inner, repeatable: repeatable)
@@ -198,7 +215,7 @@ final class MainExecutor: CommandExecutor {
         case .commandPrompt(let prompts, let template):
             CommandPromptController.shared.presentTemplate(prompts: prompts, template: template)
         case .confirmBefore(let prompt, let inner):
-            Phase67UI.confirmBefore(prompt: prompt) { try? MainExecutor.shared.execute(inner) }
+            Phase67UI.confirmBefore(prompt: prompt) { MainExecutor.shared.executeSurfacingErrors(inner) }
         case .choose(let scope):
             Phase67UI.presentChoose(scope: scope, coordinator: coordinator)
         case .pipePane(let shellCommand):
@@ -291,7 +308,9 @@ final class MainExecutor: CommandExecutor {
         for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
-            try? executeSource(line)
+            // Surface a bad line instead of silently skipping it, but keep sourcing the rest.
+            do { try executeSource(line) }
+            catch { DisplayMessage.show("source: \(line): \(error)") }
         }
     }
 
@@ -461,7 +480,13 @@ enum RunShell {
             let out = Pipe()
             process.standardOutput = out
             process.standardError = Pipe()
-            guard (try? process.run()) != nil else { return }
+            do {
+                try process.run()
+            } catch {
+                // A launch failure (bad shell path) is rare but otherwise invisible — surface it.
+                DispatchQueue.main.async { MainActor.assumeIsolated { DisplayMessage.show("run-shell failed: \(error.localizedDescription)") } }
+                return
+            }
             let data = captureToBuffer ? out.fileHandleForReading.readDataToEndOfFile() : Data()
             process.waitUntilExit()
             if captureToBuffer, !data.isEmpty {

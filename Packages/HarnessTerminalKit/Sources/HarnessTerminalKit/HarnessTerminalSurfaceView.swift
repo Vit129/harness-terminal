@@ -83,6 +83,31 @@ private final class SurfaceEmulatorState: @unchecked Sendable {
     let emulator: TerminalEmulator
     let queue: DispatchQueue
     var lastPlainFrame: TerminalFrame?
+    /// The `renderGeneration` the cached `lastPlainFrame` was built against. The worker refuses to
+    /// reuse a frame from a different generation, so a resize/theme/detach that bumps the generation
+    /// (and resets the emulator/grid) can never diff new damage against a frame built for the old
+    /// grid — which would show torn/stale rows. Belt-and-suspenders alongside `resetPlainFrame()`.
+    var lastPlainFrameGeneration: UInt64 = 0
+
+    /// Latest-wins coalescing for async frame builds. Every `renderNowOffMain()` claims a token; a
+    /// build whose token is no longer the latest (a newer build is already queued behind it on this
+    /// serial queue) skips itself. The superseding build still sees all accumulated damage (the
+    /// skipped build never called `consumeDamage`), so no rows are lost — a burst of marks coalesces
+    /// to one build instead of N stale ones. Guarded by `tokenLock` because it's claimed on main and
+    /// checked on the worker.
+    private let tokenLock = NSLock()
+    private var latestFrameToken: UInt64 = 0
+
+    func claimFrameToken() -> UInt64 {
+        tokenLock.lock(); defer { tokenLock.unlock() }
+        latestFrameToken &+= 1
+        return latestFrameToken
+    }
+
+    func isLatestFrameToken(_ token: UInt64) -> Bool {
+        tokenLock.lock(); defer { tokenLock.unlock() }
+        return token == latestFrameToken
+    }
 
     init(columns: Int, rows: Int) {
         self.emulator = TerminalEmulator(cols: columns, rows: rows)
@@ -189,7 +214,7 @@ public final class HarnessTerminalSurfaceView: NSView {
     private var frameBuildConfiguration: SurfaceFrameBuildConfiguration
     private var colorRendering: TerminalColorRenderingMode
     private var colorGamut: TerminalColorGamut
-    private var offMainParserFramePipelineEnabled = false
+    private var offMainParserFramePipelineEnabled = true // production default; always set from init
     private var renderGeneration: UInt64 = 0
     private var fontFamily: String
     private var fontSize: CGFloat
@@ -250,7 +275,10 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Coalesces renders to display cadence: `scheduleRender` marks dirty and wakes the link, which
     /// presents at most one frame per tick (resize/first paint/2026-timeout force immediately). Wired
     /// to `renderNow` in `init`.
-    private lazy var scheduler = RenderScheduler(render: { [weak self] in self?.renderNow() })
+    private lazy var scheduler = RenderScheduler(
+        render: { [weak self] in self?.renderNow() },
+        renderSynchronously: { [weak self] in self?.renderNowSynchronous() }
+    )
     /// Main-thread display-cadence source (macOS 14+ `NSView.displayLink(target:selector:)`). Created
     /// when the view enters a window, paused while idle, invalidated on detach. nil when not in a
     /// window. Named `renderLink` so it doesn't shadow the `NSView.displayLink(...)` factory.
@@ -289,7 +317,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         vivid: Bool = false,
         colorRendering: TerminalColorRenderingMode? = nil,
         colorGamut: TerminalColorGamut = .auto,
-        offMainParserFramePipeline: Bool = false
+        offMainParserFramePipeline: Bool = true
     ) {
         let theme = HarnessThemeCatalog.theme(named: themeName)
             ?? HarnessThemeCatalog.theme(named: ThemeManager.defaultThemeName)!
@@ -376,6 +404,9 @@ public final class HarnessTerminalSurfaceView: NSView {
             // Releasing 2026 marks dirty; the batched frame presents atomically at the next tick.
             scheduler.setSynchronized(false)
             wakeDisplayLink()
+            // Low-latency echo: present this chunk now instead of waiting up to a full display
+            // interval. Coalesced to one paint per interval during a burst by the scheduler.
+            scheduler.presentNow()
         }
     }
 
@@ -399,6 +430,10 @@ public final class HarnessTerminalSurfaceView: NSView {
                     self.syncTimeout?.cancel(); self.syncTimeout = nil
                     self.scheduler.setSynchronized(false)
                     self.wakeDisplayLink()
+                    // Low-latency echo (off-main): kick the frame build now rather than at the next
+                    // tick. renderNowOffMain builds on the emulator queue and presents on main; the
+                    // renderGeneration guard drops any stale build so there's no double present.
+                    self.scheduler.presentNow()
                 }
             }
         }
@@ -463,7 +498,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         textRendering: TerminalTextRenderingMode? = nil,
         ligatures: Bool,
         promptGutter: Bool = false,
-        offMainParserFramePipeline: Bool = false
+        offMainParserFramePipeline: Bool = true
     ) {
         emulatorSync { $0.maxScrollbackLines = scrollbackLines }
         if offMainParserFramePipelineEnabled && !offMainParserFramePipeline {
@@ -576,6 +611,17 @@ public final class HarnessTerminalSurfaceView: NSView {
         metalLayer.pixelFormat = TerminalMetalRenderer.pixelFormat
         metalLayer.framebufferOnly = true
         metalLayer.isOpaque = true
+        // Double-buffer (default is 3): triple-buffering adds up to one extra frame of swap latency,
+        // which matters for keystroke echo. 2 still lets the next frame render while the current one
+        // scans out. Kept in lockstep with the renderer's `maxFramesInFlight` (also 2) so the in-flight
+        // semaphore and the drawable pool advertise the same depth — a deeper semaphore would just
+        // block on `nextDrawable()` anyway. Keep `allowsNextDrawableTimeout` on (the default): both
+        // render paths run `nextDrawable()` on the main thread/queue, so disabling the timeout would
+        // let a fully occluded window or a stalled GPU block the main thread indefinitely (frozen
+        // input + UI). With the timeout, a stall returns nil after ~1s; both paths re-arm the scheduler
+        // on nil so the next display tick simply retries — nothing is lost, and main never wedges.
+        metalLayer.maximumDrawableCount = 2
+        metalLayer.allowsNextDrawableTimeout = true
         // Pin the grid to the top-left so any sub-cell remainder from flooring rows/cols
         // parks at the bottom-right instead of being centered into a hairline seam at the
         // top edge during live resize.
@@ -847,7 +893,10 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// nothing left to draw so a quiet terminal doesn't wake the CPU every refresh.
     @objc private func displayTick() {
         scheduler.tick()
-        if !scheduler.hasPendingWork { renderLink?.isPaused = true }
+        if !scheduler.hasPendingWork {
+            renderLink?.isPaused = true
+            scheduler.linkDidPause() // reopen the immediate-present path for the next arrival
+        }
     }
 
     private func renderNow() {
@@ -855,7 +904,8 @@ public final class HarnessTerminalSurfaceView: NSView {
             renderNowOffMain()
             return
         }
-        guard let renderer, let drawable = metalLayer.nextDrawable() else { return }
+        guard let renderer else { return }
+        guard let drawable = metalLayer.nextDrawable() else { scheduler.markDirty(); return }
         let emulator = emulatorState.emulator
         // Copy mode owns the whole surface while active (its own scroll offset + overlay).
         if renderCopyMode(renderer: renderer, drawable: drawable) { lastPlainFrame = nil; return }
@@ -909,13 +959,26 @@ public final class HarnessTerminalSurfaceView: NSView {
             frameBuildNanos: frameBuildNanos
         )
         if didPresent { onRenderStats?(renderer.stats) }
+        else { scheduleRender() } // transient encode/present failure — retry next tick
         StartupMetrics.shared.mark(.firstDrawablePresented) // idempotent: only the first present counts
         // Retain only a plain frame for row reuse; a selection/scrollback/preedit frame would
         // poison the cache with overlay-baked cells, so drop it. (`plain` already excludes IME.)
         lastPlainFrame = plain ? frame : nil
     }
 
-    private func renderNowOffMain() {
+    /// Force path (resize / first-paint / 2026-timeout): present in the SAME runloop turn so the
+    /// frame is on screen before the caller's `CATransaction` commits. The on-main pipeline already
+    /// renders synchronously; the off-main pipeline must build-and-present inline rather than via its
+    /// normal async hop (which would flash a stale grid stretched to the new bounds).
+    private func renderNowSynchronous() {
+        if offMainParserFramePipelineEnabled {
+            renderNowOffMain(synchronous: true)
+        } else {
+            renderNow()
+        }
+    }
+
+    private func renderNowOffMain(synchronous: Bool = false) {
         guard renderer != nil else { return }
         let generation = renderGeneration
         let state = emulatorState
@@ -933,11 +996,11 @@ public final class HarnessTerminalSurfaceView: NSView {
         let fg = canvasForeground
         let bg = canvasBackground
         let opacity = canvasOpacity
-        let origin = (originOffsetX, originOffsetY)
-        let gamma = glyphGamma
-        let ligatures = ligaturesEnabled
 
-        state.async { emulator in
+        // The frame build, identical for the async (coalesced) and synchronous (forced) paths. Pure
+        // over the captured value snapshot + the emulator; the only mutation is `state`'s plain-frame
+        // cache, which is always touched on the serial queue (sync runs there; async dispatches there).
+        let build: @Sendable (TerminalEmulator) -> SurfaceFrameBuildResult = { emulator in
             let builder = config.makeBuilder()
             let frameBuildStart = DispatchTime.now().uptimeNanoseconds
             var frame: TerminalFrame
@@ -971,9 +1034,12 @@ public final class HarnessTerminalSurfaceView: NSView {
                 let damage = emulator.consumeDamage()
                 let plain = requestedScrollOffset == 0 && selection == nil && preedit.isEmpty
                 if plain {
+                    // Only reuse a cached frame built for THIS generation — a stale-generation frame
+                    // describes the old grid and would tear when diffed against fresh damage.
+                    let reuse = state.lastPlainFrameGeneration == generation ? state.lastPlainFrame : nil
                     frame = builder.build(grid, region: nil,
                                           imageProvider: { emulator.image(for: $0) },
-                                          reusing: state.lastPlainFrame, damage: damage)
+                                          reusing: reuse, damage: damage)
                     renderDamage = damage
                 } else {
                     frame = builder.build(grid, selection: selection,
@@ -993,35 +1059,57 @@ public final class HarnessTerminalSurfaceView: NSView {
                     frame.cursor.visible = false
                 }
                 state.lastPlainFrame = plain ? frame : nil
+                state.lastPlainFrameGeneration = generation
             }
-            let result = SurfaceFrameBuildResult(
+            return SurfaceFrameBuildResult(
                 generation: generation,
                 frame: frame,
                 damage: renderDamage,
                 frameBuildNanos: DispatchTime.now().uptimeNanoseconds &- frameBuildStart,
                 clearColor: builder.renderColor(bg, alpha: opacity)
             )
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.renderGeneration == result.generation,
-                      self.window != nil,
-                      let renderer = self.renderer,
-                      let drawable = self.metalLayer.nextDrawable()
-                else { return }
-                let didPresent = renderer.present(
-                    result.frame,
-                    to: drawable,
-                    clearColor: result.clearColor,
-                    origin: origin,
-                    gamma: gamma,
-                    ligatures: ligatures,
-                    damage: result.damage,
-                    frameBuildNanos: result.frameBuildNanos
-                )
-                if didPresent { self.onRenderStats?(renderer.stats) }
-                StartupMetrics.shared.mark(.firstDrawablePresented)
+        }
+
+        if synchronous {
+            // Block until the worker builds this frame, then present inline (we're on main inside the
+            // caller's CATransaction). `state.sync` queues behind any in-flight build, preserving order.
+            let result = state.sync { build($0) }
+            presentBuiltFrame(result)
+        } else {
+            let token = state.claimFrameToken()
+            state.async { emulator in
+                // Latest-wins coalescing: if a newer build is already queued behind this one, skip —
+                // it will consume the damage this one would have (no rows lost), so a burst of marks
+                // collapses to a single build instead of N stale frames.
+                guard state.isLatestFrameToken(token) else { return }
+                let result = build(emulator)
+                DispatchQueue.main.async { [weak self] in self?.presentBuiltFrame(result) }
             }
         }
+    }
+
+    /// Present an already-built off-main frame (main thread). A stale generation / no window / no
+    /// renderer is an intentional drop; a nil drawable or a failed present is transient, so re-arm the
+    /// scheduler (and wake the link) to retry on the next tick rather than leaving a frame unshown.
+    private func presentBuiltFrame(_ result: SurfaceFrameBuildResult) {
+        guard renderGeneration == result.generation, window != nil, let renderer else { return }
+        guard let drawable = metalLayer.nextDrawable() else { scheduleRender(); return }
+        let didPresent = renderer.present(
+            result.frame,
+            to: drawable,
+            clearColor: result.clearColor,
+            origin: (originOffsetX, originOffsetY),
+            gamma: glyphGamma,
+            ligatures: ligaturesEnabled,
+            damage: result.damage,
+            frameBuildNanos: result.frameBuildNanos
+        )
+        if didPresent {
+            onRenderStats?(renderer.stats)
+        } else {
+            scheduleRender() // transient encode/present failure — retry next tick
+        }
+        StartupMetrics.shared.mark(.firstDrawablePresented)
     }
 
     // MARK: - Cursor blink

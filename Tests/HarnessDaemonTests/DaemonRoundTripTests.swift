@@ -107,6 +107,47 @@ final class DaemonRoundTripTests: XCTestCase {
         wait(for: [streamed], timeout: 8)
     }
 
+    /// Change B: subscribing to a surface that does not exist must NOT hang forever. The daemon
+    /// rejects it with `.error("Surface not found")` and leaves the fd open, so the read loop has
+    /// to treat that `.error` as fatal and fire `onEnd` — otherwise a GUI reconnect (or CLI attach)
+    /// would block on a dead socket and the pane would freeze silently.
+    func testSubscribeToMissingSurfaceEndsPromptly() throws {
+        let client = DaemonClient()
+        let ended = expectation(description: "onEnd fires for a rejected subscription")
+        let subscription = try client.subscribeSurfaceOutput(
+            surfaceID: UUID().uuidString, // never created — the daemon rejects the subscribe
+            onData: { _, _ in },
+            onEnd: { ended.fulfill() }
+        )
+        defer { subscription.cancel() }
+        wait(for: [ended], timeout: 5)
+    }
+
+    /// Change A/B: input written as a binary frame on the persistent full-duplex subscription
+    /// connection (`sendInput`, fire-and-forget — no `.ok` reply) reaches the PTY, and its echo
+    /// streams back on that same connection as a binary output frame.
+    func testInputFrameOnSubscriptionConnectionReachesPTY() throws {
+        let client = DaemonClient()
+        guard case let .surfaces(surfaces) = try client.request(.listSurfaces), let target = surfaces.first else {
+            return XCTFail("expected a default surface")
+        }
+        let marker = "HARNESS_INPUT_FRAME_OK"
+        let echoed = expectation(description: "echo of input-frame keystrokes received")
+        echoed.assertForOverFulfill = false
+        let accumulator = OutputAccumulator()
+        let subscription = try client.subscribeSurfaceOutput(surfaceID: target.surfaceID) { data, _ in
+            if accumulator.appendAndContains(String(decoding: data, as: UTF8.self), marker: marker) {
+                echoed.fulfill()
+            }
+        }
+        defer { subscription.cancel() }
+
+        usleep(200_000)
+        // No client.request(.sendData) here — drive input purely over the subscription fd.
+        subscription.sendInput(Data("echo \(marker)\n".utf8), surfaceID: target.surfaceID)
+        wait(for: [echoed], timeout: 8)
+    }
+
     /// Multi-client live mirroring: two independent subscribers on one surface both receive
     /// its output — the foundation that live detach/reattach builds on.
     func testTwoSubscribersBothReceiveOutput() throws {

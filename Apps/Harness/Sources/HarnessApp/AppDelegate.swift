@@ -33,14 +33,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Locate/spawn the daemon off the main thread, then sync from real state.
         DaemonLauncher.shared.ensureRunning { ok in
             if ok { StartupMetrics.shared.mark(.daemonConnected) }
-            SessionCoordinator.shared.syncFromDaemon()
-            if !ok {
+            let synced = SessionCoordinator.shared.syncFromDaemon()
+            if !ok || !synced {
                 SessionCoordinator.shared.noteDaemonError(DaemonClientError.timeout)
             }
             Self.reconcileSessionPersistenceWithModeOnce()
             OnboardingController.presentIfNeeded()
             self.externalOpenReady = true
-            self.drainQueuedExternalOpenURLs()
+            if synced {
+                self.drainQueuedExternalOpenURLs()
+            } else if !self.queuedExternalOpenURLs.isEmpty {
+                // Daemon wasn't hydrated yet: opening a queued URL/.command now would create its tab
+                // against a not-ready daemon and be dropped. Retry the drain on a bounded backoff
+                // until a sync succeeds, instead of losing the open.
+                self.retryQueuedExternalOpenDrain(attempt: 0)
+            }
         }
     }
 
@@ -51,9 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func reconcileSessionPersistenceWithModeOnce() {
         let key = "HarnessModePersistenceReconciledV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
         let keep = SessionCoordinator.shared.settings.experienceMode.persistsSessionsByDefault
-        SessionCoordinator.shared.requestDaemon(.setKeepSessionsOnQuit(keep))
+        // Mark reconciled ONLY after the daemon accepts the default. A launch while the daemon is
+        // still spawning would otherwise burn the one-shot flag without ever applying the mode's
+        // keep-on-quit default — leaving a fresh Plain install wrongly persistent forever.
+        guard SessionCoordinator.shared.requestDaemon(.setKeepSessionsOnQuit(keep)) != nil else { return }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -70,9 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ephemeral sessions (Plain mode, not pinned) are the exception: on a *clean* quit we
         // close them so Plain feels like a normal terminal. This is a clean-quit-only contract
         // — a crash or force-quit leaves everything running (the daemon can't tell a crash from
-        // "keep my work"), and the next clean quit will reap them. The request is synchronous so
-        // it completes before the process exits.
-        _ = SessionCoordinator.shared.requestDaemon(.closeEphemeralSessions)
+        // "keep my work"), and the next clean quit will reap them. Synchronous + longer-timeout +
+        // single retry so a momentarily busy daemon still reaps before the process exits.
+        SessionCoordinator.shared.closeEphemeralSessionsBeforeQuit()
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -103,5 +113,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let urls = queuedExternalOpenURLs
         queuedExternalOpenURLs.removeAll()
         DefaultTerminalOpener.open(urls)
+    }
+
+    /// Bounded retry to drain opens that were queued at launch when the daemon wasn't yet hydrated.
+    /// Re-syncs each tick; once a sync succeeds the queued URLs open against a ready daemon. ~10s cap
+    /// so a permanently-down daemon doesn't retry forever.
+    private func retryQueuedExternalOpenDrain(attempt: Int) {
+        guard !queuedExternalOpenURLs.isEmpty, attempt < 20 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, !self.queuedExternalOpenURLs.isEmpty else { return }
+            if SessionCoordinator.shared.syncFromDaemon() {
+                self.drainQueuedExternalOpenURLs()
+            } else {
+                self.retryQueuedExternalOpenDrain(attempt: attempt + 1)
+            }
+        }
     }
 }

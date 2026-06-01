@@ -13,6 +13,7 @@ public final class AgentScanner: @unchecked Sendable {
 
     public func start(registry: SurfaceRegistry) {
         self.registry = registry
+        timer?.cancel() // idempotent: a second start() must not leak the prior timer
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1.5, repeating: 1.5)
         timer.setEventHandler { [weak self] in
@@ -20,6 +21,12 @@ public final class AgentScanner: @unchecked Sendable {
         }
         timer.resume()
         self.timer = timer
+    }
+
+    /// Stop the periodic scan (orderly daemon shutdown / between tests). Safe to call repeatedly.
+    public func stop() {
+        timer?.cancel()
+        timer = nil
     }
 
     private func scan() {

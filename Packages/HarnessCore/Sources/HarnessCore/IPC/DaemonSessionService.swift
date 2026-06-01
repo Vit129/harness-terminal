@@ -21,7 +21,14 @@ public final class DaemonSessionService: @unchecked Sendable {
 
     @discardableResult
     public func request(_ ipcRequest: IPCRequest) throws -> IPCResponse {
-        let response = try client.request(ipcRequest)
+        try request(ipcRequest, timeout: 2)
+    }
+
+    /// Timeout-tunable variant. Quit-time reaping (`closeEphemeralSessions`) wants a longer window
+    /// than the snappy default so a momentarily busy daemon still confirms before the process exits.
+    @discardableResult
+    public func request(_ ipcRequest: IPCRequest, timeout: TimeInterval) throws -> IPCResponse {
+        let response = try client.request(ipcRequest, timeout: timeout)
         if case let .error(message) = response {
             throw DaemonSessionError.daemonError(message)
         }

@@ -24,10 +24,15 @@ release: icon
 
 package: release
 
-dmg: release
+# Release order: make release -> make sign -> make dmg -> make finalize.
+# dmg/sign/finalize operate on the EXISTING Harness.app so a prior signature is never
+# rebuilt away. (When dmg/sign depended on `release`, running `make dmg` after `make sign`
+# re-created an UNSIGNED Harness.app and shipped an unsigned DMG.) Each script fails clearly
+# if Harness.app is missing, so run `make release` first.
+dmg:
 	./Scripts/create-dmg.sh
 
-sign: release
+sign:
 	./Scripts/sign-and-notarize.sh
 
 # Generate/refresh the Sparkle appcast from signed archives in ./dist (see the script header).
@@ -42,4 +47,4 @@ finalize:
 
 clean:
 	swift package clean
-	rm -rf Harness.app Harness.dmg .dmg-staging .icon-staging.iconset
+	rm -rf Harness.app Harness.dmg Harness-notarize.zip dist .dmg-staging .icon-staging.iconset

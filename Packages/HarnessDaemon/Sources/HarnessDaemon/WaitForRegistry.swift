@@ -18,6 +18,10 @@ final class WaitForRegistry {
     }
     private var channels: [String: Channel] = [:]
 
+    /// Number of channels currently carrying state. Exposed for diagnostics/tests to assert that
+    /// emptied channels are pruned (so the map can't grow without bound).
+    var activeChannelCount: Int { channels.count }
+
     /// `wait-for <channel>`: register the fd; the caller defers its reply until `signal`.
     func wait(channel: String, fd: Int32) {
         channels[channel, default: Channel()].waiters.append(fd)
@@ -28,6 +32,7 @@ final class WaitForRegistry {
     func signal(channel: String) -> [Int32] {
         let woken = channels[channel]?.waiters ?? []
         channels[channel]?.waiters.removeAll()
+        pruneIfEmpty(channel)
         return woken
     }
 
@@ -52,7 +57,17 @@ final class WaitForRegistry {
             return next // stays locked, handed to `next`
         }
         channels[channel]?.lockHolder = nil
+        pruneIfEmpty(channel)
         return nil
+    }
+
+    /// A channel with no holder, no waiters, and no queued lockers carries no state — drop it so a
+    /// script that touches many unique channel names can't grow `channels` without bound.
+    private func pruneIfEmpty(_ channel: String) {
+        guard let c = channels[channel] else { return }
+        if c.lockHolder == nil, c.waiters.isEmpty, c.lockWaiters.isEmpty {
+            channels[channel] = nil
+        }
     }
 
     /// Drop a disconnected client's fd from every channel (called on socket teardown). If the
@@ -74,6 +89,9 @@ final class WaitForRegistry {
                 }
             }
         }
+        // The departing client may have left channels empty (its wait/lock was the only state) —
+        // drop them so a churn of clients × unique channels can't grow the map without bound.
+        channels = channels.filter { !($0.value.lockHolder == nil && $0.value.waiters.isEmpty && $0.value.lockWaiters.isEmpty) }
         return granted
     }
 }

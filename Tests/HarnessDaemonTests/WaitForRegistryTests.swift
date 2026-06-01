@@ -56,4 +56,29 @@ final class WaitForRegistryTests: XCTestCase {
         XCTAssertEqual(r.remove(fd: 1), [], "sole holder disconnect frees the channel, grants no one")
         XCTAssertTrue(r.lock(channel: "m", fd: 2), "channel is free again after the holder vanished")
     }
+
+    func testEmptiedChannelsArePrunedSoTheMapDoesNotGrowUnbounded() {
+        let r = WaitForRegistry()
+        // A script that signals/unlocks many unique channel names must not leak an entry per name.
+        for i in 0 ..< 100 {
+            let ch = "ch-\(i)"
+            r.wait(channel: ch, fd: Int32(i))
+            _ = r.signal(channel: ch)            // wakes + empties the channel
+        }
+        XCTAssertEqual(r.activeChannelCount, 0, "signalled-empty channels are pruned")
+
+        XCTAssertTrue(r.lock(channel: "m", fd: 1))
+        XCTAssertEqual(r.activeChannelCount, 1)
+        XCTAssertNil(r.unlock(channel: "m"))      // releases with no waiters → empty → pruned
+        XCTAssertEqual(r.activeChannelCount, 0, "fully-unlocked channels are pruned")
+    }
+
+    func testRemovePrunesChannelsLeftEmptyByDisconnect() {
+        let r = WaitForRegistry()
+        r.wait(channel: "a", fd: 7)
+        r.wait(channel: "b", fd: 7)
+        XCTAssertEqual(r.activeChannelCount, 2)
+        _ = r.remove(fd: 7)                       // the only waiter on both → both go empty
+        XCTAssertEqual(r.activeChannelCount, 0, "channels emptied by a disconnect are pruned")
+    }
 }

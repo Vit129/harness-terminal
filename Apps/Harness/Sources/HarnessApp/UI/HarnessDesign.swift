@@ -494,6 +494,27 @@ final class HarnessPillButton: NSButton {
     }
 }
 
+@MainActor
+private enum RuntimeGlassEffectView {
+    static func make(cornerRadius: CGFloat) -> NSView? {
+        guard #available(macOS 26.0, *),
+              let glassType = NSClassFromString("NSGlassEffectView") as? NSObject.Type,
+              let glass = glassType.init() as? NSView else {
+            return nil
+        }
+        glass.setValue(NSNumber(value: Double(cornerRadius)), forKey: "cornerRadius")
+        return glass
+    }
+
+    static func isGlass(_ view: NSView) -> Bool {
+        NSStringFromClass(type(of: view)).hasSuffix("NSGlassEffectView")
+    }
+
+    static func setTintColor(_ color: NSColor, on view: NSView) {
+        view.setValue(color, forKey: "tintColor")
+    }
+}
+
 /// Backdrop that blends an NSVisualEffectView with a thin tint overlay so the
 /// chrome feels native (Terminal-style blur) while still respecting the
 /// active theme color. When window opacity is fully opaque, the vibrancy view
@@ -554,9 +575,7 @@ final class ChromeBackdrop: NSView {
     /// - macOS 26+ → `NSGlassEffectView` (real Liquid Glass)
     /// - earlier   → `NSVisualEffectView` with `.underWindowBackground`
     private static func makeBackdrop() -> NSView {
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = 0
+        if let glass = RuntimeGlassEffectView.make(cornerRadius: 0) {
             return glass
         }
         let vibrancy = NSVisualEffectView()
@@ -596,8 +615,8 @@ final class ChromeBackdrop: NSView {
         // shared blurred backdrop show through, matching the terminal exactly. When
         // opaque, the solid tint covers everything, so the material is moot.
         let translucent = opacity < 0.999
-        if #available(macOS 26.0, *), let glass = backdrop as? NSGlassEffectView {
-            glass.isHidden = translucent
+        if RuntimeGlassEffectView.isGlass(backdrop) {
+            backdrop.isHidden = translucent
         } else if let vibrancy = backdrop as? NSVisualEffectView {
             vibrancy.material = material(for: role)
             vibrancy.isHidden = translucent
@@ -676,9 +695,7 @@ final class HarnessOverlayBackground: NSView {
     }
 
     private static func makeBackdrop() -> NSView {
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = HarnessDesign.Radius.overlay
+        if let glass = RuntimeGlassEffectView.make(cornerRadius: HarnessDesign.Radius.overlay) {
             return glass
         }
         let vibrancy = NSVisualEffectView()
@@ -691,9 +708,9 @@ final class HarnessOverlayBackground: NSView {
     func applyTheme() {
         let c = HarnessDesign.chrome
         layer?.borderColor = c.borderStrong.cgColor
-        if #available(macOS 26.0, *), let glass = backdrop as? NSGlassEffectView {
+        if RuntimeGlassEffectView.isGlass(backdrop) {
             // Tint the glass so it reads as an elevated dark surface while keeping blur.
-            glass.tintColor = c.sidebarBackground
+            RuntimeGlassEffectView.setTintColor(c.sidebarBackground, on: backdrop)
             tint.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             tint.layer?.backgroundColor = c.sidebarBackground.withAlphaComponent(0.95).cgColor

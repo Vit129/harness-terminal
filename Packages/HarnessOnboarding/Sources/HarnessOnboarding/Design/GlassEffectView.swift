@@ -18,10 +18,7 @@ struct GlassEffectView: NSViewRepresentable {
         container.wantsLayer = true
 
         let backdrop: NSView
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = cornerRadius
-            glass.tintColor = tint
+        if let glass = RuntimeGlassEffectView.make(cornerRadius: cornerRadius, tintColor: tint) {
             backdrop = glass
         } else {
             let vibrancy = NSVisualEffectView()
@@ -37,7 +34,7 @@ struct GlassEffectView: NSViewRepresentable {
         // dark glass as the 26+ path (and matches the main Harness onboarding panel).
         let overlay = NSView()
         overlay.wantsLayer = true
-        if #available(macOS 26.0, *) {
+        if RuntimeGlassEffectView.isGlass(backdrop) {
             overlay.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
             overlay.layer?.backgroundColor = tint.withAlphaComponent(0.24).cgColor
@@ -74,5 +71,23 @@ extension View {
             GlassEffectView(tint: tint, cornerRadius: cornerRadius)
                 .ignoresSafeArea()
         )
+    }
+}
+
+@MainActor
+private enum RuntimeGlassEffectView {
+    static func make(cornerRadius: CGFloat, tintColor: NSColor) -> NSView? {
+        guard #available(macOS 26.0, *),
+              let glassType = NSClassFromString("NSGlassEffectView") as? NSObject.Type,
+              let glass = glassType.init() as? NSView else {
+            return nil
+        }
+        glass.setValue(NSNumber(value: Double(cornerRadius)), forKey: "cornerRadius")
+        glass.setValue(tintColor, forKey: "tintColor")
+        return glass
+    }
+
+    static func isGlass(_ view: NSView) -> Bool {
+        NSStringFromClass(type(of: view)).hasSuffix("NSGlassEffectView")
     }
 }

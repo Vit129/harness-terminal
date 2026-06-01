@@ -17,12 +17,27 @@ import Foundation
 /// the display link, and AppKit lifecycle all land there), matching the old `scheduleRender` path.
 final class RenderScheduler {
     /// Presents one frame. Set by the owner to its `renderNow`. The scheduler decides *whether* and
-    /// *when* to call it; it never inspects what gets drawn.
+    /// *when* to call it; it never inspects what gets drawn. May present asynchronously (the off-main
+    /// pipeline builds the frame on a worker and presents on the next main hop).
     private let render: () -> Void
+    /// Presents one frame *synchronously* this turn (used only by `forceRender`). On the off-main
+    /// pipeline `render` returns before the frame reaches the screen, which is fine for coalesced
+    /// ticks but wrong for resize/first-paint inside a `CATransaction` — an async hop there shows the
+    /// old grid stretched to the new bounds (the resize flicker). This closure builds + presents
+    /// inline so the forced frame is on screen before the transaction commits. Defaults to `render`
+    /// for owners (and tests) that don't distinguish the two.
+    private let renderSynchronously: () -> Void
 
     /// Pending paint requested since the last present. Coalesces a burst of `markDirty` into one
     /// render at the next `tick`.
     private(set) var needsRender = false
+    /// Whether this display interval has already presented (via `presentNow`, `tick`, or
+    /// `forceRender`). Gates `presentNow` so the *first* paint after idle flushes immediately
+    /// (low-latency echo) while a sustained burst still coalesces to one present per `tick`. Reset
+    /// only by an *idle* `tick` (one that found nothing to draw), which marks the start of a fresh
+    /// interval — during a burst every tick has work, so it stays set and immediate presents stay
+    /// suppressed until the burst drains.
+    private(set) var presentedThisInterval = false
     /// DEC 2026 synchronized output: while true, `tick` holds (no partial frame). `forceRender`
     /// still presents (the timeout safety valve and an explicit force ignore the hold).
     private(set) var synchronized = false
@@ -30,8 +45,9 @@ final class RenderScheduler {
     /// stopped, so a detached view never presents.
     private(set) var isRunning = false
 
-    init(render: @escaping () -> Void) {
+    init(render: @escaping () -> Void, renderSynchronously: (() -> Void)? = nil) {
         self.render = render
+        self.renderSynchronously = renderSynchronously ?? render
     }
 
     /// There is a frame to present and nothing is holding it — the view uses this to keep its
@@ -48,11 +64,34 @@ final class RenderScheduler {
         isRunning = false
         needsRender = false
         synchronized = false
+        presentedThisInterval = false
     }
 
     /// Request a present at the next display tick. Cheap and idempotent — many marks before a tick
     /// still yield a single render.
     func markDirty() { needsRender = true }
+
+    /// Present immediately *this* runloop turn if there's pending paint, nothing is holding it, and
+    /// this interval hasn't already presented — so a keystroke echo paints now instead of waiting up
+    /// to a full display interval for the next `tick`. The caller marks dirty (e.g. via
+    /// `scheduleRender`) before calling this. During a burst the `presentedThisInterval` gate makes
+    /// this a no-op after the first paint, so the flood still coalesces at `tick` cadence (no
+    /// per-chunk present). Returns whether it actually rendered.
+    @discardableResult
+    func presentNow() -> Bool {
+        guard isRunning, needsRender, !synchronized, !presentedThisInterval else { return false }
+        needsRender = false
+        presentedThisInterval = true
+        render()
+        return true
+    }
+
+    /// The display link paused (the view found nothing left to draw and stopped the link). That ends
+    /// the current interval, so reopen the immediate-present path — the next arrival after the idle
+    /// gap flushes right away instead of waiting for the link to wake and tick. Without this, a burst
+    /// that ended on a *presenting* tick would leave the gate closed and delay the next keystroke by
+    /// a frame.
+    func linkDidPause() { presentedThisInterval = false }
 
     /// Set DEC 2026 synchronized-output state. Entering the hold suppresses ticks; leaving it marks
     /// the surface dirty so the batched frame presents at the next tick (matching the old behavior
@@ -66,8 +105,16 @@ final class RenderScheduler {
     /// the dirty flag. Returns whether it actually rendered (for tests / display-link pausing).
     @discardableResult
     func tick() -> Bool {
-        guard hasPendingWork else { return false }
+        guard hasPendingWork else {
+            // Idle tick: nothing to draw. This ends the current interval, so reopen the
+            // immediate-present path for the next arrival after a quiet gap.
+            presentedThisInterval = false
+            return false
+        }
         needsRender = false
+        // The tick is this interval's present; keep `presentedThisInterval` set so a chunk arriving
+        // right after it coalesces into the *next* tick rather than triggering a second present.
+        presentedThisInterval = true
         render()
         return true
     }
@@ -77,6 +124,7 @@ final class RenderScheduler {
     /// (drawn synchronously to stay flicker-free), and the 2026 timeout safety valve.
     func forceRender() {
         needsRender = false
-        render()
+        presentedThisInterval = true // this counts as the interval's present (no immediate double-paint)
+        renderSynchronously()
     }
 }
