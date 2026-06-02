@@ -726,14 +726,20 @@ final class TerminalScreen {
             }
             let rowBase = cursorRow * cols
             if cursorCol < cols - 1 {
-                // Fill distinct columns cursorCol..<endCol on this row (endCol <= cols).
+                // Fill distinct columns cursorCol..<endCol on this row (endCol <= cols) via the
+                // raw buffer to drop the per-store bounds check on this tight inner loop. (Only the
+                // fill is wrapped — `wrapLine`/`scrollUp` above open their own mutable-buffer scope,
+                // so they must stay outside this one to preserve exclusive access.)
                 let endCol = Swift.min(cols, cursorCol + (n - i))
-                var c = cursorCol
-                while c < endCol {
-                    template.codepoint = UInt32(bytes[i])
-                    cells[rowBase + c] = template
-                    i += 1
-                    c += 1
+                cells.withUnsafeMutableBufferPointer { buf in
+                    let base = buf.baseAddress!
+                    var c = cursorCol
+                    while c < endCol {
+                        template.codepoint = UInt32(bytes[i])
+                        base[rowBase + c] = template
+                        i += 1
+                        c += 1
+                    }
                 }
                 // Mirror `advance(by: 1)` for the last byte written.
                 if endCol >= cols {
@@ -761,6 +767,61 @@ final class TerminalScreen {
             // dirty for incremental frame rebuild. (The scalar fallback marks via `writeCell`;
             // `wrapLine`/`scrollUp` already mark the rows they touch.)
             markRowDirty(cursorRow)
+        }
+    }
+
+    /// Write a run of already-decoded printable scalars (ASCII + UTF-8) at the cursor. Byte-for-byte
+    /// equivalent to `print(cp)` for each `cp`, but batched: the cell template (pen + hyperlink, both
+    /// constant across a run with no embedded escapes) is built once, and each row touched is marked
+    /// dirty once instead of per cell. Per-scalar width, zero-width (combining) drop, wide-head +
+    /// `spacerTail`, pending-wrap, autowrap on/off, and the wide-at-right-margin wrap are handled
+    /// exactly as `print` does. `CodepointRunFastPathTests` proves the equivalence (incl. chunk
+    /// splits); only the ASCII charset reaches here (DEC special graphics replays scalar-wise).
+    func printCodepointRun(_ codepoints: UnsafeBufferPointer<UInt32>) {
+        let n = codepoints.count
+        guard n > 0 else { return }
+        var template = makeCell(0, width: .normal)
+        var lastMarkedRow = -1
+        var i = 0
+        while i < n {
+            let scalar = codepoints[i]
+            i += 1
+            let w = CharacterWidth.width(of: scalar)
+            // Zero-width (combining marks etc.): attach to the previous glyph; never advance the
+            // cursor — identical to `print`'s `w == 0` early return.
+            if w == 0 { continue }
+            // A glyph that cannot fit the remaining columns wraps first (mirrors `print`).
+            if pendingWrap {
+                wrapLine()
+            } else if w == 2, cursorCol >= cols - 1, autowrap {
+                wrapLine()
+            }
+            // Defensive bounds guard, matching `writeCell` / `printASCIIRun`.
+            guard cursorRow >= 0, cursorRow < rows else { return }
+            let rowBase = cursorRow * cols
+            let writeRow = cursorRow
+            if w == 2 {
+                template.codepoint = scalar
+                template.width = .wide
+                cells[rowBase + cursorCol] = template
+                if cursorCol + 1 < cols {
+                    template.codepoint = 0
+                    template.width = .spacerTail
+                    cells[rowBase + cursorCol + 1] = template
+                }
+                advance(by: 2)
+            } else {
+                template.codepoint = scalar
+                template.width = .normal
+                cells[rowBase + cursorCol] = template
+                advance(by: 1)
+            }
+            // Mark each row we wrote dirty exactly once (the direct writes above bypass `writeCell`);
+            // the dirty set is identical to the per-cell scalar path, which marks the same rows.
+            if writeRow != lastMarkedRow {
+                markRowDirty(writeRow)
+                lastMarkedRow = writeRow
+            }
         }
     }
 
@@ -1058,6 +1119,18 @@ final class TerminalScreen {
         }
     }
 
+    /// Block-move `count` cells from index `src` to index `dst` in one overlap-safe `memmove`,
+    /// replacing a per-cell shift loop. `TerminalGridCell` is a trivial value type (no refs — the
+    /// layout test enforces it), so `memmove` over an overlapping band is correct; this is the same
+    /// primitive `scrollUp`/`scrollDown` use. `count <= 0` is a no-op.
+    private func moveCells(dst: Int, src: Int, count: Int) {
+        guard count > 0 else { return }
+        cells.withUnsafeMutableBufferPointer { buf in
+            let base = buf.baseAddress!
+            memmove(base + dst, base + src, count * MemoryLayout<TerminalGridCell>.stride)
+        }
+    }
+
     /// ED — erase in display. mode 0: cursor→end, 1: start→cursor, 2/3: all. Cleared full rows
     /// no longer continue a wrapped line, so their soft-wrap flags reset.
     func eraseInDisplay(mode: Int) {
@@ -1109,14 +1182,11 @@ final class TerminalScreen {
     /// ICH — insert `n` blank cells at the cursor, shifting the rest of the line right.
     func insertCharacters(_ n: Int) {
         let count = clamp(n, 1, cols - cursorCol)
-        let blank = erasedCell()
         let rowStart = cursorRow * cols
-        var c = cols - 1
-        while c >= cursorCol + count {
-            cells[rowStart + c] = cells[rowStart + c - count]
-            c -= 1
-        }
-        for c in cursorCol ..< (cursorCol + count) { cells[rowStart + c] = blank }
+        // Shift the surviving tail `[cursorCol, cols - count)` right by `count` in one block move,
+        // then blank the `count` cells opened at the cursor.
+        moveCells(dst: rowStart + cursorCol + count, src: rowStart + cursorCol, count: cols - cursorCol - count)
+        fillCells(rowStart + cursorCol, count, with: erasedCell())
         markRowDirty(cursorRow)
         pendingWrap = false
     }
@@ -1124,14 +1194,11 @@ final class TerminalScreen {
     /// DCH — delete `n` cells at the cursor, shifting the rest of the line left.
     func deleteCharacters(_ n: Int) {
         let count = clamp(n, 1, cols - cursorCol)
-        let blank = erasedCell()
         let rowStart = cursorRow * cols
-        var c = cursorCol
-        while c + count < cols {
-            cells[rowStart + c] = cells[rowStart + c + count]
-            c += 1
-        }
-        while c < cols { cells[rowStart + c] = blank; c += 1 }
+        // Shift the surviving tail `[cursorCol + count, cols)` left by `count` in one block move,
+        // then blank the `count` cells freed at the end of the line.
+        moveCells(dst: rowStart + cursorCol, src: rowStart + cursorCol + count, count: cols - cursorCol - count)
+        fillCells(rowStart + cols - count, count, with: erasedCell())
         markRowDirty(cursorRow)
         pendingWrap = false
     }
@@ -1149,19 +1216,21 @@ final class TerminalScreen {
     func insertLines(_ n: Int) {
         guard cursorRow >= scrollTop, cursorRow <= scrollBottom else { return }
         let count = clamp(n, 1, scrollBottom - cursorRow + 1)
-        let blank = erasedCell()
-        var r = scrollBottom
-        while r >= cursorRow + count {
-            for c in 0 ..< cols { cells[r * cols + c] = cells[(r - count) * cols + c] }
-            rowWrapped[r] = rowWrapped[r - count]
-            rowMarks[r] = rowMarks[r - count]
-            r -= 1
+        let survivors = scrollBottom - cursorRow + 1 - count   // rows pushed down (kept)
+        if survivors > 0 {
+            // Shift the surviving rows `[cursorRow, scrollBottom - count]` down by `count` in one
+            // block move; their parallel wrap/mark flags shift alongside (top-down, dst > src).
+            moveCells(dst: (cursorRow + count) * cols, src: cursorRow * cols, count: survivors * cols)
+            var r = scrollBottom
+            while r >= cursorRow + count {
+                rowWrapped[r] = rowWrapped[r - count]
+                rowMarks[r] = rowMarks[r - count]
+                r -= 1
+            }
         }
-        for r in cursorRow ..< (cursorRow + count) {
-            for c in 0 ..< cols { cells[r * cols + c] = blank }
-            rowWrapped[r] = false
-            rowMarks[r] = nil
-        }
+        // Blank the `count` inserted rows at the cursor in one bulk fill.
+        fillCells(cursorRow * cols, count * cols, with: erasedCell())
+        for r in cursorRow ..< (cursorRow + count) { rowWrapped[r] = false; rowMarks[r] = nil }
         markRowsDirty(cursorRow ... scrollBottom)
         pendingWrap = false
     }
@@ -1170,20 +1239,22 @@ final class TerminalScreen {
     func deleteLines(_ n: Int) {
         guard cursorRow >= scrollTop, cursorRow <= scrollBottom else { return }
         let count = clamp(n, 1, scrollBottom - cursorRow + 1)
-        let blank = erasedCell()
-        var r = cursorRow
-        while r + count <= scrollBottom {
-            for c in 0 ..< cols { cells[r * cols + c] = cells[(r + count) * cols + c] }
-            rowWrapped[r] = rowWrapped[r + count]
-            rowMarks[r] = rowMarks[r + count]
-            r += 1
+        let survivors = scrollBottom - cursorRow + 1 - count   // rows pulled up (kept)
+        if survivors > 0 {
+            // Shift the surviving rows `[cursorRow + count, scrollBottom]` up by `count` in one
+            // block move; their parallel wrap/mark flags shift alongside (bottom-up, dst < src).
+            moveCells(dst: cursorRow * cols, src: (cursorRow + count) * cols, count: survivors * cols)
+            var r = cursorRow
+            while r + count <= scrollBottom {
+                rowWrapped[r] = rowWrapped[r + count]
+                rowMarks[r] = rowMarks[r + count]
+                r += 1
+            }
         }
-        while r <= scrollBottom {
-            for c in 0 ..< cols { cells[r * cols + c] = blank }
-            rowWrapped[r] = false
-            rowMarks[r] = nil
-            r += 1
-        }
+        // Blank the `count` rows freed at the bottom of the region in one bulk fill.
+        let blankTop = scrollBottom - count + 1
+        fillCells(blankTop * cols, count * cols, with: erasedCell())
+        for r in blankTop ... scrollBottom { rowWrapped[r] = false; rowMarks[r] = nil }
         markRowsDirty(cursorRow ... scrollBottom)
         pendingWrap = false
     }
