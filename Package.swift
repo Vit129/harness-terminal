@@ -137,6 +137,9 @@ let package = Package(
         .library(name: "HarnessCopyMode", targets: ["HarnessCopyMode"]),
         // Native theme catalog + the shareable `.harnesstheme` document format. Pure Swift.
         .library(name: "HarnessTheme", targets: ["HarnessTheme"]),
+        // C portability shim exposed as a product so the generated Xcode project can import the
+        // same first-party module that SwiftPM targets use internally.
+        .library(name: "CHarnessSys", targets: ["CHarnessSys"]),
         .executable(name: "HarnessDaemon", targets: ["HarnessDaemon"]),
         .executable(name: "harness-cli", targets: ["HarnessCLI"]),
     ] + platformProducts,

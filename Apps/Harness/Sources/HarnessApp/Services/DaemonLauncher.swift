@@ -6,15 +6,20 @@ import HarnessCore
 /// owned by launchd (installed by `LaunchAgentInstaller`) in release builds so it
 /// survives `Harness.app` quitting, logout, and reboot. The launcher's job is to
 /// *find* a running daemon and, if none, start one — fast and without freezing the
-/// UI.
+/// UI. Release builds prefer launchd first so the daemon is supervised from the
+/// start; debug builds and launchd failures fall back to a directly-spawned child.
 ///
 /// **Startup must never block the main thread.** `ensureRunning(then:)` runs the
-/// whole discover→spawn→poll dance on a background queue and calls back on the
+/// whole discover→install→poll dance on a background queue and calls back on the
 /// main thread once the daemon answers (or gives up). The strategy is
-/// *spawn-first*: if a quick ping fails we immediately spawn the bundled daemon
-/// rather than waiting on launchd, because a stale LaunchAgent (e.g. a DerivedData
-/// path from a previous Xcode build that no longer exists) would otherwise make us
-/// poll for seconds for a daemon that can never come up.
+/// *launchd-first in release*: if a quick ping fails we install/bootstrap the
+/// LaunchAgent and let launchd bring the daemon up, so it is launchd-owned and
+/// supervised from the start. Installing first also rewrites a stale LaunchAgent
+/// path (e.g. a DerivedData path from a previous Xcode build that no longer
+/// exists) instead of running a directly-spawned daemon *underneath* a launchd
+/// service that then retries every throttle interval. A directly-spawned child is
+/// the fallback only when launchd cannot bring one up — and is the normal path in
+/// DEBUG, which skips the LaunchAgent entirely.
 ///
 /// @unchecked Sendable: launch/poll state is confined to the serial `queue`.
 final class DaemonLauncher: @unchecked Sendable {
@@ -55,20 +60,16 @@ final class DaemonLauncher: @unchecked Sendable {
             if pollUntilFreshDaemon(replacingPID: stalePID, timeoutSeconds: 3) { return true }
         }
 
-        // Spawn-first: get a daemon on the socket right now. In release we also
-        // (re)install the LaunchAgent so the daemon survives app quit, but we do
-        // not *wait* on launchd — the spawned process serves this session.
-        spawnFallbackProcess()
-        if pollUntilResponding(timeoutSeconds: 3) {
-            #if !DEBUG
-            _ = installLaunchAgentIfPossible()
-            #endif
-            return true
-        }
-        // Last resort: maybe a (valid) LaunchAgent can bring one up.
+        // In release, install the corrected LaunchAgent before falling back. This
+        // fixes stale DerivedData/App bundle paths and avoids running a fallback
+        // daemon underneath a launchd service that then retries every throttle
+        // interval.
         #if !DEBUG
-        if installLaunchAgentIfPossible(), pollUntilResponding(timeoutSeconds: 2) { return true }
+        if installLaunchAgentIfPossible(), pollUntilResponding(timeoutSeconds: 4) { return true }
         #endif
+
+        spawnFallbackProcess()
+        if pollUntilResponding(timeoutSeconds: 3) { return true }
         return false
     }
 

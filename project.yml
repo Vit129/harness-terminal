@@ -77,6 +77,8 @@ targets:
         product: HarnessCore
       - package: Harness
         product: HarnessTerminalEngine
+      - package: Harness
+        product: CHarnessSys
     settings:
       SWIFT_VERSION: "6.0"
       MACOSX_DEPLOYMENT_TARGET: "15.0"
@@ -85,6 +87,7 @@ targets:
       # warning about HarnessDaemonCore-Swift.h.
       SWIFT_INSTALL_OBJC_HEADER: NO
       DEFINES_MODULE: NO
+      OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -fmodule-map-file=$(GENERATED_MODULEMAP_DIR)/CHarnessSys.modulemap"
   HarnessDaemon:
     type: tool
     platform: macOS
@@ -96,6 +99,8 @@ targets:
         product: HarnessCore
       - package: Harness
         product: HarnessTerminalEngine
+      - package: Harness
+        product: CHarnessSys
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.robert.harness.daemon
       PRODUCT_NAME: HarnessDaemon
@@ -115,11 +120,14 @@ targets:
         product: HarnessTerminalKit
       - package: Harness
         product: HarnessTheme
+      - package: Harness
+        product: CHarnessSys
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.robert.harness.cli
       PRODUCT_NAME: harness-cli
       SWIFT_VERSION: "6.0"
       MACOSX_DEPLOYMENT_TARGET: "15.0"
+      OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -fmodule-map-file=$(GENERATED_MODULEMAP_DIR)/CHarnessSys.modulemap"
   HarnessCoreTests:
     type: bundle.unit-test
     platform: macOS
@@ -144,6 +152,8 @@ targets:
         product: HarnessCore
       - package: Harness
         product: HarnessTerminalEngine
+      - package: Harness
+        product: CHarnessSys
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.robert.harness.HarnessDaemonTests
       GENERATE_INFOPLIST_FILE: YES
