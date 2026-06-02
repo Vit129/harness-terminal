@@ -1,12 +1,21 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 
 /// Synchronous IPC client. @unchecked Sendable: stateless between calls (each request
 /// opens and closes its own socket) and all calls funnel through the serial `queue`.
 public final class DaemonClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.robert.harness.daemon-client")
+    /// Where this client connects. Defaults to the local daemon's control socket, so every existing
+    /// `DaemonClient()` call is unchanged; a remote client passes the local end of an SSH tunnel.
+    private let endpoint: Endpoint
 
-    public init() {}
+    public init(endpoint: Endpoint = .localControlSocket) {
+        self.endpoint = endpoint
+    }
 
     public func request(_ ipcRequest: IPCRequest, timeout: TimeInterval = 2) throws -> IPCResponse {
         try queue.sync {
@@ -83,37 +92,12 @@ public final class DaemonClient: @unchecked Sendable {
     }
 
     private func connectSocket() throws -> Int32 {
-        // Validate before opening the fd so an over-long path can't leak a socket — and so a deep
-        // HARNESS_HOME fails clearly instead of `strncpy`-truncating to the wrong socket.
-        let path = try HarnessPaths.validatedSocketPath()
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw DaemonClientError.connectionFailed }
-
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        path.withCString { cstr in
-            withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-                let dest = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
-                strncpy(dest, cstr, 104)
-            }
-        }
-        // connect() can be interrupted by a signal (EINTR). For a blocking AF_UNIX stream socket
-        // the connect completes synchronously, so retry on EINTR rather than spuriously failing.
-        var connected: Int32 = -1
-        repeat {
-            connected = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-                }
-            }
-        } while connected != 0 && errno == EINTR
-        guard connected == 0 else {
-            close(fd)
-            throw DaemonClientError.connectionFailed
-        }
-        var noSigPipe: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-        return fd
+        // Establishing the byte stream is the only transport-specific step; the framing and read
+        // loop are endpoint-agnostic. `EndpointConnector` handles validation + connect for the
+        // local socket and (via an SSH tunnel) a remote one. Let its specific error propagate
+        // (e.g. `.pathTooLong` with the offending path) instead of flattening it to a generic
+        // `connectionFailed` — that detail is what tells a user how to fix it.
+        try EndpointConnector.connect(endpoint)
     }
 
     private func writeAll(_ data: Data, to fd: Int32) throws {
@@ -235,7 +219,7 @@ public final class DaemonSubscription: @unchecked Sendable {
         // shutdown — paired with the read loop setting `finished` under the same lock
         // before it closes — guarantees `fd` is still open here, so we never shutdown a
         // descriptor the loop already closed and the OS may have recycled.
-        shutdown(fd, SHUT_RDWR)
+        shutdown(fd, Int32(SHUT_RDWR)) // SHUT_RDWR is `Int` on Glibc, `Int32` on Darwin
     }
 
     /// Output-stream convenience: forwards `.data` frames to `onData`.

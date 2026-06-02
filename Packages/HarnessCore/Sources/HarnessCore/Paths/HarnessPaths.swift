@@ -15,25 +15,68 @@ public enum HarnessPaths {
 
     public static var applicationSupport: URL {
         if let overrideRoot { return overrideRoot }
+        #if os(Linux)
+        // Headless/Linux daemon: follow the XDG base-dir spec rather than ~/Library.
+        let env = ProcessInfo.processInfo.environment
+        if let xdg = env["XDG_DATA_HOME"], !xdg.isEmpty {
+            return URL(fileURLWithPath: (xdg as NSString).expandingTildeInPath, isDirectory: true)
+                .appendingPathComponent("harness", isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/harness", isDirectory: true)
+        #else
         // Fall back to ~/Library/Application Support if the lookup ever returns empty
         // (it shouldn't on macOS) rather than force-unwrapping and crashing at launch.
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return base.appendingPathComponent("Harness", isDirectory: true)
+        #endif
+    }
+
+    /// Directory the control socket lives in. On Darwin this is the application-support root, so the
+    /// socket path is unchanged. On Linux a short `$XDG_RUNTIME_DIR` is preferred when available so
+    /// the path comfortably fits `sockaddr_un.sun_path` (a deep `~/.local/share` could overflow it).
+    /// A `HARNESS_HOME` override always wins, so tests keep the socket inside their temp root.
+    public static var runtimeDirectory: URL {
+        #if os(Linux)
+        if overrideRoot == nil,
+           let xdg = ProcessInfo.processInfo.environment["XDG_RUNTIME_DIR"], !xdg.isEmpty
+        {
+            return URL(fileURLWithPath: xdg, isDirectory: true)
+                .appendingPathComponent("harness", isDirectory: true)
+        }
+        #endif
+        return applicationSupport
     }
 
     public static var sessionsDirectory: URL {
         applicationSupport.appendingPathComponent("sessions", isDirectory: true)
     }
 
-    public static var socketURL: URL {
-        applicationSupport.appendingPathComponent("harness.sock")
+    /// Per-surface persisted scrollback lives here (one `<surfaceID>.scroll` file each).
+    /// Kept under `sessions/` so it ships in the same owner-only (0o700) tree as the layout.
+    public static var scrollbackDirectory: URL {
+        sessionsDirectory.appendingPathComponent("scrollback", isDirectory: true)
     }
 
-    /// Max bytes for a Unix-domain `sockaddr_un.sun_path` on Darwin (104, including the trailing
-    /// NUL). A path at or over this silently truncates in `strncpy`, making `connect`/`bind` target
-    /// the wrong socket — so callers validate against it instead.
+    /// The persisted-scrollback file for a surface. Surface IDs are UUID strings, so they're
+    /// safe as a path component; the `.scroll` extension namespaces them within the directory.
+    public static func scrollbackFileURL(forSurfaceID surfaceID: String) -> URL {
+        scrollbackDirectory.appendingPathComponent("\(surfaceID).scroll")
+    }
+
+    public static var socketURL: URL {
+        runtimeDirectory.appendingPathComponent("harness.sock")
+    }
+
+    /// Max bytes for a Unix-domain `sockaddr_un.sun_path` (including the trailing NUL): 104 on
+    /// Darwin, 108 on Linux. A path at or over this silently truncates, making `connect`/`bind`
+    /// target the wrong socket — so callers validate against it instead.
+    #if os(Linux)
+    public static let maxSocketPathLength = 108
+    #else
     public static let maxSocketPathLength = 104
+    #endif
 
     /// The control-socket filesystem path, validated to fit `sun_path`. Throws when `HARNESS_HOME`
     /// (or a deep app-support root) pushes it past the limit, so the daemon/client fail with a
@@ -48,6 +91,39 @@ public enum HarnessPaths {
 
     public static var snapshotURL: URL {
         sessionsDirectory.appendingPathComponent("layout.json")
+    }
+
+    /// Saved remote-host configs for the GUI/CLI to connect to daemons on other machines.
+    public static var remoteHostsURL: URL {
+        sessionsDirectory.appendingPathComponent("remote-hosts.json")
+    }
+
+    /// Local sockets that SSH forwards to remote daemons (one per connected host). Kept short and
+    /// under the runtime dir so the forwarded path comfortably fits `sockaddr_un.sun_path`.
+    public static var tunnelsDirectory: URL {
+        runtimeDirectory.appendingPathComponent("tunnels", isDirectory: true)
+    }
+
+    public static func tunnelSocketURL(forHost name: String) -> URL {
+        // A readable, filesystem-safe prefix (bounded so `sun_path` doesn't overflow) disambiguated
+        // by a deterministic hash of the *full* name — so distinct hosts that sanitize to the same
+        // text (e.g. "dev.box" vs "dev-box") never share a socket path and clobber each other.
+        let safe = String(
+            name.unicodeScalars
+                .map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }
+                .prefix(32))
+        return tunnelsDirectory.appendingPathComponent("\(safe)-\(fnv1aHex(name)).sock")
+    }
+
+    /// Deterministic 32-bit FNV-1a hash as 8 hex chars. `Hasher` is per-process seeded, so it can't
+    /// produce a stable on-disk name across daemon runs; this can.
+    private static func fnv1aHex(_ string: String) -> String {
+        var hash: UInt32 = 0x811c_9dc5
+        for byte in string.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x0100_0193
+        }
+        return String(format: "%08x", hash)
     }
 
     public static var settingsURL: URL {
@@ -99,7 +175,15 @@ public enum HarnessPaths {
         try FileManager.default.createDirectory(
             at: sessionsDirectory, withIntermediateDirectories: true, attributes: ownerOnly)
         try FileManager.default.createDirectory(
+            at: scrollbackDirectory, withIntermediateDirectories: true, attributes: ownerOnly)
+        try FileManager.default.createDirectory(
             at: logsDirectory, withIntermediateDirectories: true, attributes: ownerOnly)
+        // On Linux the control socket may live under a separate `$XDG_RUNTIME_DIR`; make sure it
+        // exists (owner-only) too. On Darwin this is the same path as the root, so it's a no-op.
+        if runtimeDirectory.path != applicationSupport.path {
+            try FileManager.default.createDirectory(
+                at: runtimeDirectory, withIntermediateDirectories: true, attributes: ownerOnly)
+        }
         // createDirectory only applies attributes to directories it creates; tighten an
         // existing root that an older build made with the default 0o755 umask.
         try? FileManager.default.setAttributes(ownerOnly, ofItemAtPath: applicationSupport.path)
@@ -124,10 +208,10 @@ public enum HarnessPaths {
                 try FileManager.default.removeItem(at: backup)
             }
             try FileManager.default.moveItem(at: url, to: backup)
-            fputs("\(label): \(url.lastPathComponent) unreadable — backed up to \(backup.lastPathComponent)\n", stderr)
+            fputs("\(label): \(url.lastPathComponent) unreadable — backed up to \(backup.lastPathComponent)\n", harnessStderr)
             return true
         } catch {
-            fputs("\(label): \(url.lastPathComponent) unreadable and could not be backed up: \(error)\n", stderr)
+            fputs("\(label): \(url.lastPathComponent) unreadable and could not be backed up: \(error)\n", harnessStderr)
             return false
         }
     }
@@ -141,7 +225,7 @@ public enum HarnessPaths {
             try data.write(to: url, options: .atomic)
             return true
         } catch {
-            fputs("\(label): failed to write \(url.lastPathComponent): \(error)\n", stderr)
+            fputs("\(label): failed to write \(url.lastPathComponent): \(error)\n", harnessStderr)
             return false
         }
     }

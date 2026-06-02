@@ -1,4 +1,9 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+import CHarnessSys
 import Foundation
 import HarnessCore
 
@@ -28,12 +33,16 @@ public enum AttachClient {
         public init() {}
     }
 
-    public static func run(surfaceID: String, configuration: Configuration = Configuration()) throws -> Int32 {
+    public static func run(
+        surfaceID: String,
+        configuration: Configuration = Configuration(),
+        endpoint: Endpoint = .localControlSocket
+    ) throws -> Int32 {
         guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
-            fputs("harness-cli attach: stdin/stdout must be a TTY\n", stderr)
+            fputs("harness-cli attach: stdin/stdout must be a TTY\n", harnessStderr)
             return 64
         }
-        let client = DaemonClient()
+        let client = DaemonClient(endpoint: endpoint)
 
         // Send the daemon our current size before subscribing so the first
         // repaint matches our viewport.
@@ -58,7 +67,7 @@ public enum AttachClient {
         do {
             try session.run()
         } catch {
-            fputs("\nharness-cli attach: \(error)\n", stderr)
+            fputs("\nharness-cli attach: \(error)\n", harnessStderr)
             return 1
         }
         return 0
@@ -194,7 +203,7 @@ private final class LiveSession: @unchecked Sendable {
         wakeRead = fds[0]
         wakeWrite = fds[1]
         // Non-blocking so a flood of wakes doesn't stall the writer.
-        _ = fcntl(wakeWrite, F_SETFL, fcntl(wakeWrite, F_GETFL) | O_NONBLOCK)
+        _ = harness_set_nonblocking(wakeWrite)
     }
 
     private func shouldExit() -> Bool {
@@ -261,9 +270,10 @@ extension AttachClient {
     }
 
     static func ttySize() -> TTYSize? {
-        var size = winsize()
-        guard ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 else { return nil }
-        return TTYSize(rows: size.ws_row, cols: size.ws_col)
+        var rows: UInt16 = 0
+        var cols: UInt16 = 0
+        guard harness_pty_get_winsize(STDOUT_FILENO, &rows, &cols) == 0 else { return nil }
+        return TTYSize(rows: rows, cols: cols)
     }
 
     static func enterRawMode() -> termios {

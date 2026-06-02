@@ -1,4 +1,9 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+import CHarnessSys
 import Foundation
 import HarnessCore
 
@@ -74,17 +79,18 @@ public final class DaemonServer: @unchecked Sendable {
         // Validate the socket path fits `sun_path` before binding, so a deep HARNESS_HOME fails
         // with a clear message instead of `strncpy`-truncating and binding the wrong socket.
         let socketPath = try HarnessPaths.validatedSocketPath()
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = makeUnixStreamSocket()
         guard fd >= 0 else { throw DaemonError.socketFailed }
-        var noSigPipe: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        setNoSigPipe(fd)
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
+        let sunPathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
         socketPath.withCString { cstr in
             withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
                 let dest = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
-                strncpy(dest, cstr, 104)
+                strncpy(dest, cstr, sunPathCapacity - 1)
+                dest[sunPathCapacity - 1] = 0
             }
         }
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
@@ -108,7 +114,7 @@ public final class DaemonServer: @unchecked Sendable {
         // `SOMAXCONN`, not a small fixed backlog: the daemon serves the GUI plus any number of
         // `harness-cli` clients, and a burst of near-simultaneous connects (e.g. several attach
         // clients reconnecting at once) must not overflow the accept queue and get refused.
-        guard listen(fd, SOMAXCONN) == 0 else {
+        guard listen(fd, Int32(SOMAXCONN)) == 0 else { // SOMAXCONN is `Int` on Glibc
             close(fd)
             throw DaemonError.listenFailed
         }
@@ -122,26 +128,24 @@ public final class DaemonServer: @unchecked Sendable {
         source.setCancelHandler { close(fd) }
         source.resume()
         listener = source
-        fputs("HarnessDaemon listening at \(HarnessPaths.socketURL.path)\n", stderr)
+        fputs("HarnessDaemon listening at \(HarnessPaths.socketURL.path)\n", harnessStderr)
     }
 
     private func acceptConnection(listenerFD: Int32) {
         let clientFD = accept(listenerFD, nil, nil)
         guard clientFD >= 0 else { return }
-        // Defence in depth alongside the 0o600 socket mode: only accept peers running
-        // as our own euid. `getpeereid` reads the credentials the kernel recorded at
-        // connect time, so a process can't spoof them. Reject anything else outright.
-        var peerUID: uid_t = 0
-        var peerGID: gid_t = 0
-        if getpeereid(clientFD, &peerUID, &peerGID) != 0 || peerUID != geteuid() {
+        // Defence in depth alongside the 0o600 socket mode: only accept peers running as our own
+        // euid. The kernel records the peer's credentials at connect time (Darwin `getpeereid`,
+        // Linux `SO_PEERCRED`), so a process can't spoof them. Reject anything else outright. This
+        // applies to the local Unix socket; a future TCP transport authenticates with a token.
+        let peer = harness_peer_uid(clientFD)
+        guard peer >= 0, uid_t(peer) == geteuid() else {
             close(clientFD)
             return
         }
-        var noSigPipe: Int32 = 1
-        setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        setNoSigPipe(clientFD)
         // Non-blocking so a slow/stuck client never blocks `write` on the serial queue.
-        let flags = fcntl(clientFD, F_GETFL, 0)
-        if flags >= 0 { _ = fcntl(clientFD, F_SETFL, flags | O_NONBLOCK) }
+        _ = harness_set_nonblocking(clientFD)
         clientBuffers[clientFD] = Data()
         // Don't auto-register the connection as a client — `DaemonClient.request`
         // opens a fresh socket per call, and bookkeeping every one of those would
@@ -559,6 +563,9 @@ public final class DaemonServer: @unchecked Sendable {
         // socket layer. Otherwise a scan/monitor tick could fire against a half-stopped server.
         AgentScanner.shared.stop()
         registry.stopMonitoring()
+        // Persist any buffered scrollback before tearing down, so a graceful restart replays the
+        // most recent output instead of losing the last debounce window.
+        registry.flushAllScrollback()
         queue.sync {
             listener?.cancel() // cancel handler closes the listener fd
             listener = nil

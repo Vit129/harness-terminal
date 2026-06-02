@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 import HarnessCore
 import HarnessDaemonCore
@@ -11,7 +15,7 @@ import HarnessDaemonCore
 @Sendable
 func daemonLog(_ message: String) {
     let line = "[\(ISO8601DateFormatter().string(from: Date())) pid=\(getpid())] \(message)\n"
-    fputs(line, stderr)
+    fputs(line, harnessStderr)
     let url = HarnessPaths.daemonLogURL
     try? HarnessPaths.ensureDirectories()
     let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
@@ -110,6 +114,11 @@ private func detectStaleInstance() {
 detectStaleInstance()
 writePIDFile()
 daemonLog("HarnessDaemon starting (HARNESS_HOME=\(HarnessPaths.applicationSupport.path))")
+
+// Ignore SIGPIPE process-wide: a PTY master or socket write that races a closing peer would
+// otherwise kill the daemon. macOS additionally sets SO_NOSIGPIPE per socket fd; this covers the
+// PTY masters (which can't use that option) and is the only protection on Linux.
+ignoreSIGPIPE()
 
 let server = DaemonServer()
 nonisolated(unsafe) var hasShutDown = false

@@ -23,6 +23,9 @@ final class SessionCoordinator: NSObject {
     /// working→idle→working mid-task can't spam "stopped" pings.
     private var lastStopNotifyAt: [String: Date] = [:]
     var settings = HarnessSettings.load()
+    /// Which daemon the GUI currently drives: the local one, or a remote daemon over an SSH tunnel.
+    /// New terminal panes are bound to this endpoint, and `daemon` (session/layout IPC) tracks it.
+    private(set) var activeEndpoint: Endpoint = .localControlSocket
     var activeSurfaceID: SurfaceID?
     /// Most-recently-active pane within the current tab, for `select-pane -l`
     /// (last-pane). Updated only on genuine intra-tab pane switches.
@@ -107,6 +110,54 @@ final class SessionCoordinator: NSObject {
 
     /// Hydrate from the daemon's snapshot. Returns whether the fetch succeeded so launch-time callers
     /// can gate work (e.g. draining queued external opens) on a real hydration rather than guessing.
+    // MARK: - Remote daemons
+
+    /// Point the GUI at a saved remote daemon: bring up its SSH tunnel (off-main, it blocks), then
+    /// switch the session service + new panes to that endpoint and rehydrate from it. On failure we
+    /// surface a throttled error and stay on the current daemon.
+    func connectToRemote(named name: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Bringing up the SSH tunnel blocks (spawns ssh + waits for the remote daemon), so it
+            // runs off-main. Carry Sendable values (an endpoint or an error message — not a
+            // non-Sendable Error) back to the main actor.
+            var resolved: Endpoint?
+            var failureMessage: String?
+            do {
+                resolved = try RemoteHostsService.shared.connect(named: name)
+            } catch {
+                failureMessage = "\(error)"
+            }
+            let endpoint = resolved
+            let message = failureMessage
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let endpoint {
+                        self.applyEndpointSwitch(endpoint)
+                    } else {
+                        self.noteDaemonError(DaemonSessionError.daemonError(message ?? "connection failed"))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Tear down the remote tunnel and return the GUI to the local daemon.
+    func disconnectRemote() {
+        RemoteHostsService.shared.disconnect()
+        applyEndpointSwitch(.localControlSocket)
+    }
+
+    /// Repoint everything at `endpoint`: the session-service IPC, future panes, and the live view.
+    /// Existing panes are dropped (they belonged to the old daemon and have different surface IDs on
+    /// the new one) so the next layout pass rebuilds them against the new endpoint.
+    private func applyEndpointSwitch(_ endpoint: Endpoint) {
+        activeEndpoint = endpoint
+        daemon.switchEndpoint(endpoint)
+        terminalHosts.prune(keeping: [])
+        _ = syncFromDaemon()
+    }
+
     @discardableResult
     func syncFromDaemon(metadataOnly: Bool = false) -> Bool {
         let remote: SessionSnapshot
@@ -115,7 +166,7 @@ final class SessionCoordinator: NSObject {
         } catch {
             // Don't silently no-op: a failed hydration leaves the UI showing stale layout/metadata.
             // Log + throttled toast (`noteDaemonError`); the app self-heals on the next sync.
-            fputs("Harness: snapshot fetch failed: \(error)\n", stderr)
+            fputs("Harness: snapshot fetch failed: \(error)\n", harnessStderr)
             noteDaemonError(error)
             return false
         }
@@ -156,7 +207,7 @@ final class SessionCoordinator: NSObject {
             if (try? daemon.request(.closeEphemeralSessions, timeout: 4)) != nil { return }
             if attempt == 0 { Thread.sleep(forTimeInterval: 0.1) } // brief gap before the single retry
         }
-        fputs("Harness: closeEphemeralSessions did not confirm before quit\n", stderr)
+        fputs("Harness: closeEphemeralSessions did not confirm before quit\n", harnessStderr)
     }
 
     private func structureFingerprint(_ snap: SessionSnapshot) -> String {
@@ -1146,7 +1197,8 @@ final class SessionCoordinator: NSObject {
             workingDirectory: cwd,
             harnessSurfaceEnv: surfaceID.uuidString,
             settings: settings,
-            themeName: snapshot.themeName
+            themeName: snapshot.themeName,
+            endpoint: activeEndpoint
         )
         host.hostDelegate = self
         host.applyTheme(named: snapshot.themeName)
@@ -1344,7 +1396,7 @@ final class SessionCoordinator: NSObject {
             // is still spawning at launch) must degrade gracefully. Log always,
             // and surface a non-blocking, throttled toast so the user isn't left
             // wondering — but the app keeps running and self-heals on the next sync.
-            fputs("Harness daemon request failed: \(error)\n", stderr)
+            fputs("Harness daemon request failed: \(error)\n", harnessStderr)
             noteDaemonError(error)
             return nil
         }
@@ -1366,7 +1418,7 @@ final class SessionCoordinator: NSObject {
         do {
             _ = try daemon.request(request)
         } catch {
-            fputs("Harness daemon metadata update failed: \(error)\n", stderr)
+            fputs("Harness daemon metadata update failed: \(error)\n", harnessStderr)
         }
     }
 }
@@ -1478,7 +1530,7 @@ enum DesktopNotifier {
         )
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                fputs("Harness notification delivery failed: \(error)\n", stderr)
+                fputs("Harness notification delivery failed: \(error)\n", harnessStderr)
             }
         }
     }

@@ -41,6 +41,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
             try? store.saveImmediately(editor.snapshot)
         }
         ensureAllSnapshotSurfaces()
+        cleanupOrphanScrollbackFiles()
         // Wire hook execution: bound commands run server-side via the registry's own
         // handlers. `fire` invokes this on `hookQueue` (off-lock), so re-entering
         // `handle` here is safe.
@@ -936,7 +937,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
             }
         }
         do { try process.run() } catch {
-            fputs("HarnessDaemon: run-shell hook failed: \(error)\n", stderr)
+            fputs("HarnessDaemon: run-shell hook failed: \(error)\n", harnessStderr)
         }
     }
 
@@ -972,7 +973,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
         do {
             try store.saveImmediately(editor.snapshot)
         } catch {
-            fputs("HarnessDaemon snapshot save failed: \(error)\n", stderr)
+            fputs("HarnessDaemon snapshot save failed: \(error)\n", harnessStderr)
         }
         NotificationBus.shared.postSnapshotChanged(revision: revision)
         onSnapshotCommitted?(revision)
@@ -1008,7 +1009,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 rows: rows,
                 cols: cols,
                 scrollbackBytes: scrollbackBytes ?? 1024 * 1024,
-                extraEnvironment: extraEnvironment(forSurfaceKey: surfaceID)
+                extraEnvironment: extraEnvironment(forSurfaceKey: surfaceID),
+                scrollbackURL: HarnessPaths.scrollbackFileURL(forSurfaceID: surfaceID)
             )
             session.onExit = { [weak self, weak session] in
                 self?.removeSurfaceIfCurrent(surfaceID: surfaceID, session: session)
@@ -1019,7 +1021,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
             sessions[surfaceID] = session
             return surfaceID
         } catch {
-            fputs("HarnessDaemon surface launch failed for \(surfaceID): \(error)\n", stderr)
+            fputs("HarnessDaemon surface launch failed for \(surfaceID): \(error)\n", harnessStderr)
             return nil
         }
     }
@@ -1032,7 +1034,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
         let fallbacks = [ProcessInfo.processInfo.environment["SHELL"], "/bin/zsh", "/bin/bash", "/bin/sh"]
             .compactMap { $0 }
         for fallback in fallbacks where fm.isExecutableFile(atPath: fallback) {
-            fputs("HarnessDaemon: shell '\(candidate)' is not executable; falling back to '\(fallback)'\n", stderr)
+            fputs("HarnessDaemon: shell '\(candidate)' is not executable; falling back to '\(fallback)'\n", harnessStderr)
             return fallback
         }
         return candidate
@@ -1121,7 +1123,16 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 .flatMap { $0.rootPane.allSurfaceIDs().map(\.uuidString) }
         )
         for surfaceID in surfaceIDs where !stillReferenced.contains(surfaceID) {
-            sessions.removeValue(forKey: surfaceID)?.close()
+            let removed = sessions.removeValue(forKey: surfaceID)
+            // The surface is gone from the layout — synchronously drop its persisted scrollback
+            // before closing, so no late debounced flush can resurrect the file.
+            removed?.deletePersistedScrollback()
+            removed?.close()
+            // Backstop: when a shell exits naturally (remain-on-exit off), `removeSurfaceIfCurrent`
+            // already reaped the RealPty, so `removed` is nil here and the line above is a no-op —
+            // remove the file by path so it doesn't linger until the next restart's orphan sweep.
+            // The RealPty (and its ScrollbackFile) is gone in that case, so this can't be resurrected.
+            try? FileManager.default.removeItem(at: HarnessPaths.scrollbackFileURL(forSurfaceID: surfaceID))
             stopPipe(surfaceID: surfaceID)
             // Drop the output monitor too, else it leaks across tab/session/pane churn.
             monitorLock.lock(); monitors.removeValue(forKey: surfaceID); monitorLock.unlock()
@@ -1203,7 +1214,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
         if (try? process.run()) == nil {
             // Never log the command itself — a pipe target can carry tokens/paths the user
             // would not want in daemon stderr. The surface id is enough to diagnose.
-            fputs("HarnessDaemon: pipe-pane failed to launch for surface \(surfaceID)\n", stderr)
+            fputs("HarnessDaemon: pipe-pane failed to launch for surface \(surfaceID)\n", harnessStderr)
             stopPipe(surfaceID: surfaceID)
         }
     }
@@ -1282,6 +1293,32 @@ public final class SurfaceRegistry: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    /// Synchronously persist every live surface's buffered scrollback. Called on graceful daemon
+    /// shutdown (`DaemonServer.stop`) so the last debounce window of output isn't lost.
+    public func flushAllScrollback() {
+        lock.lock()
+        let live = Array(sessions.values)
+        lock.unlock()
+        for session in live { session.flushScrollback() }
+    }
+
+    /// On startup, delete persisted scrollback files for surfaces no longer in the layout. A clean
+    /// shutdown removes a surface's file via `closeSurfaces`, but a crash can leave files behind for
+    /// surfaces that were closed in-flight; sweep them so the directory doesn't grow without bound.
+    /// Runs in `init` after `ensureAllSnapshotSurfaces`, so `sessions` holds exactly the live set.
+    private func cleanupOrphanScrollbackFiles() {
+        let dir = HarnessPaths.scrollbackDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil) else { return }
+        let live = Set(sessions.keys)
+        for file in files where file.pathExtension == "scroll" {
+            let surfaceID = file.deletingPathExtension().lastPathComponent
+            if !live.contains(surfaceID) {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     private func removeSurfaceIfCurrent(surfaceID: String, session: RealPty?) {

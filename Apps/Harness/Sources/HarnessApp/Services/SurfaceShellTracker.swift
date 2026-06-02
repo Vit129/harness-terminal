@@ -162,7 +162,7 @@ final class SurfaceShellTracker {
         guard bytes == size else { return nil }
         return withUnsafePointer(to: &info.pvi_cdir.vip_path) { ptr -> String in
             ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
-                String(cString: $0)
+                decodeBoundedCString($0, capacity: Int(MAXPATHLEN))
             }
         }
     }
