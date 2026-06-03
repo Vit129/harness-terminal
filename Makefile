@@ -1,4 +1,4 @@
-.PHONY: build bench preview preview-stop preview-clean release package dmg smoke-dmg sign appcast finalize hotfix-release icon clean
+.PHONY: build bench preview preview-stop preview-clean release package dmg smoke-dmg sign appcast finalize hotfix-release icon clean video-skills video-dev video-check video-render video-doctor
 
 build:
 	swift build
@@ -54,3 +54,19 @@ hotfix-release:
 clean:
 	swift package clean
 	rm -rf Harness.app Harness.dmg Harness-notarize.zip dist .dmg-staging .icon-staging.iconset
+
+# HyperFrames marketing video (marketing/video — see marketing/README.md)
+video-skills:
+	cd marketing/video && npx skills add heygen-com/hyperframes -y
+
+video-dev:
+	cd marketing/video && npm run dev
+
+video-check:
+	cd marketing/video && npm run check
+
+video-render:
+	cd marketing/video && npm run render
+
+video-doctor:
+	cd marketing/video && npx hyperframes doctor

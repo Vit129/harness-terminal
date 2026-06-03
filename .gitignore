@@ -26,6 +26,21 @@ Harness-notarize.zip
 .cursor/
 claude.md
 agents.md
+design-system.md
+
+# HyperFrames marketing (skills reinstall via `npx skills add heygen-com/hyperframes -y`)
+marketing/video/.agent/
+marketing/video/.agents/
+marketing/video/.continue/
+marketing/video/.goose/
+marketing/video/.kiro/
+marketing/video/.pi/
+marketing/video/node_modules/
+marketing/video/out/
+marketing/video/renders/
+marketing/video/skills/
+marketing/video/*.mp4
+marketing/video/*.webm
 
 # Release archives (DMG + appcast) — hosted on the site, not committed
 dist/
