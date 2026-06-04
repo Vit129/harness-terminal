@@ -6,6 +6,39 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [1.3.0] - 2026-06-04
+
+The smoothness release: window resizing and scrollback scrolling rebuilt at the presentation
+layer for Ghostty-class feel, plus a first-run font fix.
+
+### Added
+- **Glitchless live resize.** While dragging a window edge, every frame now presents inside
+  the same Core Animation transaction as the window's new frame
+  (`presentsWithTransaction` + commit → wait-until-scheduled → present), so the terminal
+  content stays latched to the edge instead of lagging it by a frame or two.
+- **Scroll-delta rendering.** Scrolling through history now rebuilds only the rows the scroll
+  exposed: the frame builder shifts the previous frame's surviving rows (~7× faster per
+  tick), and the GPU row cache rotates in place — kept rows skip glyph shaping and atlas
+  work entirely.
+- **Present-pipeline instrumentation.** With `HARNESS_FRAME_SIGNPOSTS=1`, the present
+  signpost now logs a rolling p50/p95 breakdown (drawable wait / GPU back-pressure /
+  transaction schedule) plus a genuine frame-drop counter.
+
+### Fixed
+- **Text shimmer while resizing.** Balanced window padding re-centered the grid on every
+  sub-cell layout, shifting the text ±1px per pixel of drag; the origin now anchors for the
+  duration of the drag and re-centers once at release.
+- **Resize lag after release.** The grid reflow + `SIGWINCH` commit now fires the moment the
+  drag ends instead of waiting out the coalescing delay (which still applies to animated
+  resizes like sidebar slides).
+- **Broken letter-spacing on first run.** On machines without the configured font family
+  (e.g. a fresh install without the default Nerd Font), the renderer silently accepted a
+  proportional system font whose advances disagree with the cell grid; it now falls back to
+  Menlo, keeping text monospace-correct. Nerd icon coverage is unchanged.
+- **Stale rows after a dropped frame.** A present that failed transiently (no drawable /
+  encode failure) could leave the renderer's row-reuse cache disagreeing with the screen;
+  the caches now reset on any drop so the retry re-encodes from frame content.
+
 ## [1.2.0] - 2026-06-03
 
 A quality-of-life release aimed at 1:1 parity with the polish of a mainstream GPU terminal:
