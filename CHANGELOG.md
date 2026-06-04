@@ -6,6 +6,34 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [1.3.1] - 2026-06-04
+
+The fluidity release: resize-drag and scrolling re-measured on 120Hz hardware and fixed at the
+root — drag presents now cost ~1.7ms on the main thread (was ~12ms) and trackpad scrolling is
+pixel-smooth.
+
+### Added
+- **Pixel-smooth scrolling.** Trackpad scrolling moves by sub-line fractions instead of whole
+  cells: the fraction renders as a vertex-stage translate over the unchanged GPU row cache (a
+  fraction-only tick re-encodes nothing and uploads nothing), with a real content row revealed
+  at the edge. Line-based features (selection, copy mode, find, prompt jumps, mouse reporting)
+  keep their exact semantics; clicky mouse wheels keep the classic 3-line notch.
+- **Fluidity measurement tooling.** `PREVIEW_SIGNPOSTS=1 make preview` now actually enables the
+  frame signposts (`open` strips the environment, so the flag travels as a launch argument), and
+  `Scripts/measure-fluidity.sh` drives a real resize drag + scroll fling while reporting present
+  p50/p95 breakdowns from the unified log.
+
+### Fixed
+- **Resize-drag lag.** Three compounding causes: every drag tick paid a full GPU re-encode
+  (the repaint now reuses the row cache — zero rows re-encoded on sub-cell ticks); streaming
+  output presented through the synchronized path mid-drag (it now defers to the per-tick
+  repaint and flushes at drag end); and the drawable pool of two blocked the next tick behind
+  the window server for most of a frame (a third drawable is held for the duration of the drag
+  only — keystroke echo latency is untouched). Measured: drag present p50 ~12ms → ~1.7ms,
+  zero dropped frames, with the glitchless edge-latch preserved.
+- **Scroll-while-busy hitches.** Wheel events no longer wait on the parser's queue for the
+  history count; a main-thread mirror keeps the clamp lock-free under heavy output.
+
 ## [1.3.0] - 2026-06-04
 
 The smoothness release: window resizing and scrollback scrolling rebuilt at the presentation
