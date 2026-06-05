@@ -550,6 +550,10 @@ final class HarnessSidebarPanelViewController: NSViewController {
         newSession.target = self
         newSession.action = #selector(addSession)
 
+        let recentProjects = HarnessDesign.softIconButton(symbol: "clock.arrow.circlepath", tooltip: "Recent projects")
+        recentProjects.target = self
+        recentProjects.action = #selector(showRecentProjects(_:))
+
         // No "new workspace" control: the app runs a single workspace for now, and without a
         // switcher a second workspace would strand the user with no way back.
         let palette = HarnessDesign.softIconButton(symbol: "command", tooltip: "Command palette (⌘K)")
@@ -561,6 +565,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
         footer.addSubview(settings)
         footer.addSubview(agentsButton)
+        footer.addSubview(recentProjects)
         footer.addSubview(newSession)
         footer.addSubview(palette)
         view.addSubview(footer)
@@ -579,7 +584,9 @@ final class HarnessSidebarPanelViewController: NSViewController {
             palette.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             newSession.trailingAnchor.constraint(equalTo: palette.leadingAnchor, constant: -2),
             newSession.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            agentsButton.trailingAnchor.constraint(equalTo: newSession.leadingAnchor, constant: -2),
+            recentProjects.trailingAnchor.constraint(equalTo: newSession.leadingAnchor, constant: -2),
+            recentProjects.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            agentsButton.trailingAnchor.constraint(equalTo: recentProjects.leadingAnchor, constant: -2),
             agentsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
         ])
     }
@@ -721,9 +728,49 @@ final class HarnessSidebarPanelViewController: NSViewController {
             guard response == .OK, let url = panel.url else { return }
             DispatchQueue.main.async {
                 guard let self, let id = self.activeWorkspaceID ?? activeWorkspaceID as WorkspaceID? else { return }
+                Self.recordRecentProject(url.path)
                 SessionCoordinator.shared.addSession(to: id, cwd: url.path, name: url.lastPathComponent)
             }
         }
+    }
+
+    // MARK: - Recent Projects
+
+    private static let recentProjectsKey = "RecentProjectPaths"
+    private static let maxRecents = 10
+
+    private static func recentProjects() -> [String] {
+        UserDefaults.standard.stringArray(forKey: recentProjectsKey) ?? []
+    }
+
+    private static func recordRecentProject(_ path: String) {
+        var recents = recentProjects()
+        recents.removeAll { $0 == path }
+        recents.insert(path, at: 0)
+        if recents.count > maxRecents { recents = Array(recents.prefix(maxRecents)) }
+        UserDefaults.standard.set(recents, forKey: recentProjectsKey)
+    }
+
+    @objc private func showRecentProjects(_ sender: NSView) {
+        let menu = NSMenu()
+        let recents = Self.recentProjects()
+        if recents.isEmpty {
+            menu.addItem(NSMenuItem(title: "No recent projects", action: nil, keyEquivalent: ""))
+        } else {
+            for path in recents {
+                let item = NSMenuItem(title: (path as NSString).lastPathComponent, action: #selector(openRecentProject(_:)), keyEquivalent: "")
+                item.target = self
+                item.toolTip = path
+                item.representedObject = path
+                menu.addItem(item)
+            }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
+    }
+
+    @objc private func openRecentProject(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String, let id = activeWorkspaceID else { return }
+        SessionCoordinator.shared.addSession(to: id, cwd: path, name: (path as NSString).lastPathComponent)
     }
 
     @objc private func sessionDoubleClick() {
