@@ -16,6 +16,8 @@ final class GitPanelView: NSView {
     // Commit section
     private let commitField = NSTextField()
     private let commitButton = NSButton(title: "Commit", target: nil, action: nil)
+    private let commitPushButton = NSButton(title: "Commit+Push", target: nil, action: nil)
+    private let commitAmendButton = NSButton(title: "Amend", target: nil, action: nil)
     private let stageAllButton = NSButton(title: "Stage All", target: nil, action: nil)
 
     // Changes & log
@@ -47,7 +49,7 @@ final class GitPanelView: NSView {
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        for btn in [pullButton, pushButton, stageAllButton, commitButton] {
+        for btn in [pullButton, pushButton, stageAllButton, commitButton, commitPushButton, commitAmendButton] {
             btn.bezelStyle = .recessed
             btn.controlSize = .small
             btn.font = .systemFont(ofSize: 11, weight: .medium)
@@ -56,6 +58,8 @@ final class GitPanelView: NSView {
         pushButton.target = self; pushButton.action = #selector(pushAction)
         stageAllButton.target = self; stageAllButton.action = #selector(stageAllAction)
         commitButton.target = self; commitButton.action = #selector(commitAction)
+        commitPushButton.target = self; commitPushButton.action = #selector(commitPushAction)
+        commitAmendButton.target = self; commitAmendButton.action = #selector(commitAmendAction)
 
         actionBar.orientation = .horizontal
         actionBar.spacing = 6
@@ -63,7 +67,7 @@ final class GitPanelView: NSView {
         actionBar.addArrangedSubview(pullButton)
         actionBar.addArrangedSubview(pushButton)
 
-        // Commit message field
+        // Commit message area (larger box)
         commitField.placeholderString = "Commit message…"
         commitField.font = .systemFont(ofSize: 12)
         commitField.isBezeled = true
@@ -71,14 +75,24 @@ final class GitPanelView: NSView {
         commitField.focusRingType = .none
         commitField.usesSingleLineMode = false
         commitField.lineBreakMode = .byWordWrapping
-        commitField.maximumNumberOfLines = 3
+        commitField.maximumNumberOfLines = 6
+        commitField.translatesAutoresizingMaskIntoConstraints = false
+        commitField.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
+
+        let commitButtonRow = NSStackView()
+        commitButtonRow.orientation = .horizontal
+        commitButtonRow.spacing = 6
+        commitButtonRow.addArrangedSubview(stageAllButton)
+        commitButtonRow.addArrangedSubview(commitButton)
+        commitButtonRow.addArrangedSubview(commitPushButton)
+        commitButtonRow.addArrangedSubview(commitAmendButton)
 
         let commitBar = NSStackView()
-        commitBar.orientation = .horizontal
+        commitBar.orientation = .vertical
+        commitBar.alignment = .width
         commitBar.spacing = 6
         commitBar.addArrangedSubview(commitField)
-        commitBar.addArrangedSubview(stageAllButton)
-        commitBar.addArrangedSubview(commitButton)
+        commitBar.addArrangedSubview(commitButtonRow)
 
         // Headers
         for header in [statusHeader, logHeader] {
@@ -164,6 +178,32 @@ final class GitPanelView: NSView {
         guard !message.isEmpty else { return }
         Task {
             _ = await runGit(["commit", "-m", message], in: path)
+            commitField.stringValue = ""
+            await refresh()
+        }
+    }
+
+    @objc private func commitPushAction() {
+        guard let path = currentPath else { return }
+        let message = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return }
+        Task {
+            _ = await runGit(["commit", "-m", message], in: path)
+            _ = await runGit(["push"], in: path)
+            commitField.stringValue = ""
+            await refresh()
+        }
+    }
+
+    @objc private func commitAmendAction() {
+        guard let path = currentPath else { return }
+        let message = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            if message.isEmpty {
+                _ = await runGit(["commit", "--amend", "--no-edit"], in: path)
+            } else {
+                _ = await runGit(["commit", "--amend", "-m", message], in: path)
+            }
             commitField.stringValue = ""
             await refresh()
         }
