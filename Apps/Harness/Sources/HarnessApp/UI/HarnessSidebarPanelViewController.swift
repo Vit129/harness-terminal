@@ -602,6 +602,10 @@ final class HarnessSidebarPanelViewController: NSViewController {
             isProgrammaticSelection = false
             sessionTable.scrollRowToVisible(row)
         }
+
+        if let cwd = snap.activeWorkspace?.activeTab?.cwd {
+            fileTreeView.updateRoot(path: cwd)
+        }
     }
 
     /// Updates session card labels in place (title/cwd/branch/agent) without

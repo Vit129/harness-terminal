@@ -7,7 +7,7 @@ final class WorkspaceFileTreeView: NSView, NSOutlineViewDelegate, NSOutlineViewD
     private let outlineView = NSOutlineView()
     private let scrollView = NSScrollView()
     private var rootItems: [FileTreeItem] = []
-    private let rootPath: String
+    private var rootPath: String
 
     init(rootPath: String? = nil) {
         self.rootPath = rootPath
@@ -15,6 +15,14 @@ final class WorkspaceFileTreeView: NSView, NSOutlineViewDelegate, NSOutlineViewD
             ?? NSHomeDirectory()
         super.init(frame: .zero)
         setupOutlineView()
+        Task { [weak self] in
+            await self?.loadRoot()
+        }
+    }
+
+    func updateRoot(path: String) {
+        guard path != rootPath else { return }
+        rootPath = path
         Task { [weak self] in
             await self?.loadRoot()
         }
