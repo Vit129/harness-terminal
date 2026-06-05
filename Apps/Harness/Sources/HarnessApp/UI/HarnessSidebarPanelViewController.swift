@@ -27,7 +27,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
     private let sectionLabel = NSTextField(labelWithString: "Sessions")
     private let sessionTable = NSTableView()
     private let fileTreeView = WorkspaceFileTreeView()
-    private let gitPlaceholderView = NSView()
+    private let gitPanelView = GitPanelView()
     private let footer = NSView()
     /// Opens the Agent Inbox popover (every running agent, waiting first). Stored so
     /// the popover can anchor to it. Created in `setupFooter`.
@@ -100,7 +100,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
         HarnessDesign.applySidebarChrome(to: view)
         HarnessDesign.makeClear(chromeHeader)
         HarnessDesign.makeClear(workspaceBar)
-        HarnessDesign.makeClear(gitPlaceholderView)
+        HarnessDesign.makeClear(gitPanelView)
         HarnessDesign.makeClear(sectionHeader)
         HarnessDesign.makeClear(footer)
         sectionLabel.textColor = HarnessDesign.chrome.textTertiary
@@ -485,26 +485,12 @@ final class HarnessSidebarPanelViewController: NSViewController {
     }
 
     private func setupGitPlaceholder() {
-        gitPlaceholderView.translatesAutoresizingMaskIntoConstraints = false
-        HarnessDesign.makeClear(gitPlaceholderView)
-
-        let label = NSTextField(labelWithString: "Git History — coming soon")
-        label.font = HarnessDesign.Typography.sidebarLabel
-        label.textColor = HarnessDesign.chrome.textTertiary
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        gitPlaceholderView.addSubview(label)
-        view.addSubview(gitPlaceholderView)
+        view.addSubview(gitPanelView)
         NSLayoutConstraint.activate([
-            gitPlaceholderView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
-            gitPlaceholderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            gitPlaceholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            gitPlaceholderView.bottomAnchor.constraint(equalTo: footer.topAnchor),
-
-            label.leadingAnchor.constraint(equalTo: gitPlaceholderView.leadingAnchor, constant: HarnessDesign.horizontalInset),
-            label.trailingAnchor.constraint(equalTo: gitPlaceholderView.trailingAnchor, constant: -HarnessDesign.horizontalInset),
-            label.centerYAnchor.constraint(equalTo: gitPlaceholderView.centerYAnchor),
+            gitPanelView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            gitPanelView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            gitPanelView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            gitPanelView.bottomAnchor.constraint(equalTo: footer.topAnchor),
         ])
     }
 
@@ -515,7 +501,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
     private func selectSidebarTab(index: Int) {
         sessionScroll?.isHidden = index != 0
         fileTreeView.isHidden = index != 1
-        gitPlaceholderView.isHidden = index != 2
+        gitPanelView.isHidden = index != 2
         switch index {
         case 1:
             sectionLabel.stringValue = "FILES"
@@ -612,6 +598,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
         if let cwd = snap.activeWorkspace?.activeTab?.cwd {
             fileTreeView.updateRoot(path: cwd)
+            gitPanelView.updateRoot(path: cwd)
             let home = NSHomeDirectory()
             if cwd != home, cwd != "/" {
                 Self.recordRecentProject(cwd)
