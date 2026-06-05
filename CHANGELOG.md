@@ -6,6 +6,44 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [1.4.1] - 2026-06-04
+
+The resize-parity release: the live render path stops crossing full-frame value boundaries.
+A width-drag boundary tick now costs the main thread no more than a sub-cell tick, and
+steady-state frames cost O(damage), not O(grid) — the Ghostty `Contents` model.
+
+### Performance
+- **Async re-wrap preview.** (#72) Crossing a cell boundary mid-drag no longer blocks the main
+  thread on the emulator queue for the reflow + full frame build (~3ms per crossing, scaling
+  with grid height): the preview builds asynchronously with latest-wins coalescing and lands on
+  the next hop, while the drag keeps re-presenting the cached frame at full frame rate. Under
+  heavy output the re-wrap now works instead of being skipped. Hardening: previews coalesce in
+  their own token namespace (output bursts during animated resizes — sidebar slides — can no
+  longer cancel them), the debounced grid commit defers while the drag holds (a stationary
+  >60ms hold used to freeze the screen until the next pointer move), and stale previews are
+  dropped at drag end and across pane re-mounts.
+- **Content-keyed row salvage.** (#76) A column-count change used to discard the renderer's
+  whole row cache; rows whose rendered content is unchanged (hashed over every render-affecting
+  field) now re-bind their cached instances across the width change — per crossing, the CPU
+  instance encode drops 1510→338µs and the GPU upload 71KB→13KB; a non-rewrapping width change
+  re-encodes zero rows.
+- **Persistent instance arrays.** (#74) Every frame used to re-flatten all rows' instances into
+  freshly allocated arrays (megabytes of copies per frame on large grids, even for a one-row
+  keystroke). The renderer now owns persistent flat arrays with a per-row segment table and
+  splices only dirty rows in place — clean rows' bytes are never touched, and steady state
+  allocates nothing. Scattered damage (a status row plus the cursor row) uploads two row-sized
+  spans instead of everything between them.
+- **Images no longer disable render caching.** (#75) Any inline image (Sixel / Kitty / iTerm2)
+  forced every frame of that pane to re-encode every row; images draw as a separate quad pass,
+  so image-bearing panes now keep incremental row reuse — typing next to an image re-encodes
+  one row instead of the whole grid.
+
+### Added
+- **Per-boundary render instrumentation.** (#72) `TerminalRenderStats` splits encode time into
+  CPU instance build vs GPU upload; `HARNESS_FRAME_SIGNPOSTS=1` brackets the grid read and
+  frame build on the signpost track; a boundary-crossing benchmark steps a full cell column per
+  tick and attributes each crossing's cost per pipeline stage.
+
 ## [1.4.0] - 2026-06-04
 
 The control release: experience presets unbundle into per-piece overrides, persistence gets
