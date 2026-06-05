@@ -314,32 +314,19 @@ final class GitPanelView: NSView {
         default: color = HarnessDesign.chrome.textSecondary
         }
 
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.wantsLayer = true
-
         let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleStage(_:)))
         check.state = isStaged ? .on : .off
         check.toolTip = file; check.controlSize = .small
-        check.translatesAutoresizingMaskIntoConstraints = false
 
         let name = NSTextField(labelWithString: (file as NSString).lastPathComponent)
         name.font = .systemFont(ofSize: 12)
         name.textColor = color
         name.lineBreakMode = .byTruncatingMiddle
         name.toolTip = file
-        name.translatesAutoresizingMaskIntoConstraints = false
 
-        row.addSubview(check)
-        row.addSubview(name)
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 24),
-            check.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
-            check.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            name.leadingAnchor.constraint(equalTo: check.trailingAnchor, constant: 4),
-            name.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            name.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-        ])
+        let row = NSStackView(views: [check, name])
+        row.orientation = .horizontal; row.spacing = 4
+        row.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
         return row
     }
 
