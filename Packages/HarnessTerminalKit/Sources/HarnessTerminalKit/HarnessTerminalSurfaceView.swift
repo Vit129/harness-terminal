@@ -191,6 +191,8 @@ public final class HarnessTerminalSurfaceView: NSView {
     private static let droppedPathPasteboardTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
         legacyFilenamesPasteboardType,
+        .tiff,
+        .png,
     ]
 
     static func droppedFileURLs(from pasteboard: NSPasteboard) -> [URL] {
@@ -2700,20 +2702,30 @@ public final class HarnessTerminalSurfaceView: NSView {
     }
 
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = Self.droppedFileURLs(from: sender.draggingPasteboard)
-        let text = Self.droppedPathText(for: urls)
-        guard !text.isEmpty else { return false }
-        window?.makeFirstResponder(self)
-        pasteText(text)
-        return true
+        let pasteboard = sender.draggingPasteboard
+        // File URLs (files, folders) → paste shell-quoted paths.
+        let urls = Self.droppedFileURLs(from: pasteboard)
+        if !urls.isEmpty {
+            window?.makeFirstResponder(self)
+            pasteText(Self.droppedPathText(for: urls))
+            return true
+        }
+        // Image drag (browser screenshot, Photos, etc.) → write temp PNG, paste path.
+        if let path = Self.writePastedImage(from: pasteboard) {
+            window?.makeFirstResponder(self)
+            pasteText(Self.shellQuotedPath(path))
+            return true
+        }
+        return false
     }
 
     private func pathDropOperation(for sender: NSDraggingInfo) -> NSDragOperation {
-        guard
-            sender.draggingSourceOperationMask.contains(.copy),
-            !Self.droppedFileURLs(from: sender.draggingPasteboard).isEmpty
-        else { return [] }
-        return .copy
+        // Accept any drag the source allows (we always copy).
+        guard !sender.draggingSourceOperationMask.isEmpty else { return [] }
+        let pasteboard = sender.draggingPasteboard
+        if !Self.droppedFileURLs(from: pasteboard).isEmpty { return .copy }
+        if Self.pngImageData(from: pasteboard) != nil { return .copy }
+        return []
     }
 
     private func pasteText(_ raw: String) {

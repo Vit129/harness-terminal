@@ -59,7 +59,6 @@ final class WorkspaceFileTreeView: NSView, NSOutlineViewDelegate, NSOutlineViewD
         // Drag source
         outlineView.setDraggingSourceOperationMask(.copy, forLocal: true)
         outlineView.setDraggingSourceOperationMask(.copy, forLocal: false)
-        outlineView.registerForDraggedTypes([.fileURL])
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
