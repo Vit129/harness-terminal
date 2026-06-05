@@ -22,9 +22,12 @@ final class HarnessSidebarPanelViewController: NSViewController {
     /// Wraps the search field so it gets the same radius-7 elevated-surface chrome as
     /// the workspace pill and session cards.
     private let searchContainer = NSView()
+    private let sidebarTabs = NSSegmentedControl(labels: ["Sessions", "Files", "Git"], trackingMode: .selectOne, target: nil, action: nil)
     private let sectionHeader = NSView()
     private let sectionLabel = NSTextField(labelWithString: "Sessions")
     private let sessionTable = NSTableView()
+    private let fileTreeView = WorkspaceFileTreeView()
+    private let gitPlaceholderView = NSView()
     private let footer = NSView()
     /// Opens the Agent Inbox popover (every running agent, waiting first). Stored so
     /// the popover can anchor to it. Created in `setupFooter`.
@@ -70,9 +73,13 @@ final class HarnessSidebarPanelViewController: NSViewController {
         setupChromeHeader()
         setupWorkspaceBar()
         setupSearchField()
+        setupSidebarTabs()
         setupSectionHeader()
         setupFooter()
         setupSessionList()
+        setupFileTree()
+        setupGitPlaceholder()
+        selectSidebarTab(index: 0)
         reload()
         applyChromeColors()
 
@@ -93,6 +100,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
         HarnessDesign.applySidebarChrome(to: view)
         HarnessDesign.makeClear(chromeHeader)
         HarnessDesign.makeClear(workspaceBar)
+        HarnessDesign.makeClear(gitPlaceholderView)
         HarnessDesign.makeClear(sectionHeader)
         HarnessDesign.makeClear(footer)
         sectionLabel.textColor = HarnessDesign.chrome.textTertiary
@@ -322,12 +330,27 @@ final class HarnessSidebarPanelViewController: NSViewController {
         view.addSubview(sectionHeader)
 
         NSLayoutConstraint.activate([
-            sectionHeader.topAnchor.constraint(equalTo: workspaceBar.bottomAnchor),
+            sectionHeader.topAnchor.constraint(equalTo: sidebarTabs.bottomAnchor),
             sectionHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             sectionHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             sectionHeader.heightAnchor.constraint(equalToConstant: 24),
             sectionLabel.leadingAnchor.constraint(equalTo: sectionHeader.leadingAnchor, constant: HarnessDesign.horizontalInset),
             sectionLabel.bottomAnchor.constraint(equalTo: sectionHeader.bottomAnchor, constant: -4),
+        ])
+    }
+
+    private func setupSidebarTabs() {
+        sidebarTabs.translatesAutoresizingMaskIntoConstraints = false
+        sidebarTabs.selectedSegment = 0
+        sidebarTabs.target = self
+        sidebarTabs.action = #selector(sidebarTabChanged)
+        sidebarTabs.segmentStyle = .rounded
+        view.addSubview(sidebarTabs)
+        NSLayoutConstraint.activate([
+            sidebarTabs.topAnchor.constraint(equalTo: workspaceBar.bottomAnchor, constant: 6),
+            sidebarTabs.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: HarnessDesign.horizontalInset),
+            sidebarTabs.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -HarnessDesign.horizontalInset),
+            sidebarTabs.heightAnchor.constraint(equalToConstant: 26),
         ])
     }
 
@@ -448,6 +471,59 @@ final class HarnessSidebarPanelViewController: NSViewController {
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: footer.topAnchor),
         ])
+    }
+
+    private func setupFileTree() {
+        fileTreeView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(fileTreeView)
+        NSLayoutConstraint.activate([
+            fileTreeView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            fileTreeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            fileTreeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            fileTreeView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+        ])
+    }
+
+    private func setupGitPlaceholder() {
+        gitPlaceholderView.translatesAutoresizingMaskIntoConstraints = false
+        HarnessDesign.makeClear(gitPlaceholderView)
+
+        let label = NSTextField(labelWithString: "Git History — coming soon")
+        label.font = HarnessDesign.Typography.sidebarLabel
+        label.textColor = HarnessDesign.chrome.textTertiary
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        gitPlaceholderView.addSubview(label)
+        view.addSubview(gitPlaceholderView)
+        NSLayoutConstraint.activate([
+            gitPlaceholderView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            gitPlaceholderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            gitPlaceholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            gitPlaceholderView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+
+            label.leadingAnchor.constraint(equalTo: gitPlaceholderView.leadingAnchor, constant: HarnessDesign.horizontalInset),
+            label.trailingAnchor.constraint(equalTo: gitPlaceholderView.trailingAnchor, constant: -HarnessDesign.horizontalInset),
+            label.centerYAnchor.constraint(equalTo: gitPlaceholderView.centerYAnchor),
+        ])
+    }
+
+    @objc private func sidebarTabChanged() {
+        selectSidebarTab(index: sidebarTabs.selectedSegment)
+    }
+
+    private func selectSidebarTab(index: Int) {
+        sessionScroll?.isHidden = index != 0
+        fileTreeView.isHidden = index != 1
+        gitPlaceholderView.isHidden = index != 2
+        switch index {
+        case 1:
+            sectionLabel.stringValue = "FILES"
+        case 2:
+            sectionLabel.stringValue = "GIT"
+        default:
+            sectionLabel.stringValue = "SESSIONS"
+        }
     }
 
     private func syncSessionColumnWidth() {
@@ -1489,4 +1565,3 @@ final class SessionCardRowView: NSView {
         }
     }
 }
-
