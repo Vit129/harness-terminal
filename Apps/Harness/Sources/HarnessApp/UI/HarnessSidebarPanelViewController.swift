@@ -1250,11 +1250,9 @@ private final class WorkspaceSwitcherRow: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         toolTip = title
 
-        // Ellipsis overflow button: shown on hover or when the row is active, so
-        // the active row gets a clear "more actions" affordance without crowding
-        // every row at rest.
-        let moreConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        moreButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "More")?
+        // Close button: always visible X
+        let moreConfig = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+        moreButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close session")?
             .withSymbolConfiguration(moreConfig)
         moreButton.imagePosition = .imageOnly
         moreButton.bezelStyle = .accessoryBarAction
@@ -1262,8 +1260,8 @@ private final class WorkspaceSwitcherRow: NSView {
         moreButton.translatesAutoresizingMaskIntoConstraints = false
         moreButton.target = self
         moreButton.action = #selector(moreClicked)
-        moreButton.alphaValue = 0
-        moreButton.isHidden = !canDelete
+        moreButton.alphaValue = 1
+        moreButton.isHidden = false
 
         addSubview(icon)
         addSubview(titleLabel)
@@ -1328,13 +1326,7 @@ private final class WorkspaceSwitcherRow: NSView {
         icon.contentTintColor = active ? c.accent : c.textTertiary
         titleLabel.textColor = active || isHovered ? c.textPrimary : c.textSecondary
         moreButton.contentTintColor = c.textSecondary
-        // Ellipsis is visible on the active row at rest and on any row when hovered.
-        // Fade for polish — popping in is jarring next to the count label.
-        let shouldShow = canDelete && (active || isHovered)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.10
-            moreButton.animator().alphaValue = shouldShow ? 1 : 0
-        }
+        // Close button always visible
     }
 }
 
