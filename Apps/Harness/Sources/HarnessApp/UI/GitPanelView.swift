@@ -91,6 +91,10 @@ final class GitPanelView: NSView {
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let branchClick = NSClickGestureRecognizer(target: self, action: #selector(showBranchMenu))
+        branchLabel.addGestureRecognizer(branchClick)
+        branchLabel.isSelectable = false
+
         fetchButton.bezelStyle = .recessed; fetchButton.controlSize = .small
         fetchButton.font = .systemFont(ofSize: 11, weight: .medium)
         fetchButton.target = self; fetchButton.action = #selector(fetchAction)
@@ -191,6 +195,29 @@ final class GitPanelView: NSView {
 
     @objc private func fetchAction() { runAndRefresh(["fetch"]) }
     @objc private func stageAllAction() { runAndRefresh(["add", "-A"]) }
+
+    @objc private func showBranchMenu() {
+        guard let path = currentPath else { return }
+        Task {
+            let output = await runGit(["branch", "--format=%(refname:short)"], in: path)
+            let branches = output.components(separatedBy: "\n").filter { !$0.isEmpty }
+            let current = await runGit(["branch", "--show-current"], in: path)
+            let menu = NSMenu()
+            for branch in branches {
+                let item = NSMenuItem(title: branch, action: #selector(switchBranch(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = branch
+                if branch == current { item.state = .on }
+                menu.addItem(item)
+            }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: branchLabel.bounds.height), in: branchLabel)
+        }
+    }
+
+    @objc private func switchBranch(_ sender: NSMenuItem) {
+        guard let branch = sender.representedObject as? String else { return }
+        runAndRefresh(["checkout", branch])
+    }
 
     @objc private func commitAction() {
         let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
