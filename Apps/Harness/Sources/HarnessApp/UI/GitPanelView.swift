@@ -52,10 +52,25 @@ final class GitPanelView: NSView {
         tabSelector.segmentStyle = .automatic
         tabSelector.translatesAutoresizingMaskIntoConstraints = false
 
-        // Changes container
+        // Changes container — scrollable list
         changesContainer.translatesAutoresizingMaskIntoConstraints = false
         changesStack.orientation = .vertical; changesStack.alignment = .width; changesStack.spacing = 0
-        setupScrollView(changesScroll, with: changesStack, in: changesContainer)
+        changesStack.translatesAutoresizingMaskIntoConstraints = false
+
+        changesScroll.documentView = changesStack
+        changesScroll.hasVerticalScroller = true
+        changesScroll.drawsBackground = false
+        changesScroll.scrollerStyle = .overlay
+        changesScroll.autohidesScrollers = true
+        changesScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        changesContainer.addSubview(changesScroll)
+        NSLayoutConstraint.activate([
+            changesScroll.topAnchor.constraint(equalTo: changesContainer.topAnchor),
+            changesScroll.leadingAnchor.constraint(equalTo: changesContainer.leadingAnchor),
+            changesScroll.trailingAnchor.constraint(equalTo: changesContainer.trailingAnchor),
+            changesScroll.bottomAnchor.constraint(equalTo: changesContainer.bottomAnchor),
+        ])
 
         // Stage All button bar
         stageAllButton.bezelStyle = .recessed; stageAllButton.controlSize = .small
@@ -251,8 +266,10 @@ final class GitPanelView: NSView {
         guard let path = currentPath, let file = sender.toolTip else { return }
         // After click, .on means user wants to stage, .off means unstage
         let wantsStaged = sender.state == .on
+        NSLog("[GitPanel] toggleStage: file=%@ wantsStaged=%d path=%@", file, wantsStaged ? 1 : 0, path)
         Task {
-            _ = await runGit(wantsStaged ? ["add", file] : ["restore", "--staged", file], in: path)
+            let result = await runGit(wantsStaged ? ["add", file] : ["restore", "--staged", file], in: path)
+            NSLog("[GitPanel] git result: %@", result)
             await refresh()
         }
     }
@@ -404,8 +421,4 @@ final class GitPanelView: NSView {
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        return hit === self ? nil : hit
-    }
 }
