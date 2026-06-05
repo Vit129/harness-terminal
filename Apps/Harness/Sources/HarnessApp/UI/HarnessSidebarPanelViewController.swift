@@ -612,6 +612,10 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
         if let cwd = snap.activeWorkspace?.activeTab?.cwd {
             fileTreeView.updateRoot(path: cwd)
+            let home = NSHomeDirectory()
+            if cwd != home, cwd != "/" {
+                Self.recordRecentProject(cwd)
+            }
         }
     }
 
@@ -770,6 +774,11 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
     @objc private func openRecentProject(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String, let id = activeWorkspaceID else { return }
+        // Switch to existing session if one already has this cwd
+        if let existing = sessions.first(where: { $0.tabs.contains(where: { $0.cwd == path }) }) {
+            SessionCoordinator.shared.selectSession(workspaceID: id, sessionID: existing.id)
+            return
+        }
         SessionCoordinator.shared.addSession(to: id, cwd: path, name: (path as NSString).lastPathComponent)
     }
 
