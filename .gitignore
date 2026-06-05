@@ -44,3 +44,5 @@ marketing/video/*.webm
 
 # Release archives (DMG + appcast) — hosted on the site, not committed
 dist/
+graphify-out/cache/
+graphify-out/GRAPH_TREE.html
