@@ -1,6 +1,6 @@
 # Harness
 
-[![CI](https://github.com/robzilla1738/harness-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/robzilla1738/harness-terminal/actions/workflows/ci.yml)
+[![CI](https://github.com/Vit129/harness-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/Vit129/harness-terminal/actions/workflows/ci.yml)
 
 The native macOS terminal that keeps your sessions running and tells you the moment a coding agent needs you.
 
@@ -10,11 +10,11 @@ One self-contained app. The terminal engine, daemon, and CLI are all first-party
 
 ## Download
 
-**[Download Harness for macOS →](https://github.com/robzilla1738/harness-terminal/releases/latest/download/Harness.dmg)**
+**[Download Harness for macOS →](https://github.com/Vit129/harness-terminal/releases/latest/download/Harness.dmg)**
 
 Open the DMG, drag `Harness.app` to Applications, and launch it normally. The release is signed, notarized, and built for Apple silicon Macs running macOS 15 or later.
 
-Verify the SHA-256 checksum against the value published on the [GitHub release page](https://github.com/robzilla1738/harness-terminal/releases/latest).
+Verify the SHA-256 checksum against the value published on the [GitHub release page](https://github.com/Vit129/harness-terminal/releases/latest).
 
 Prefer to build it yourself? Jump to [Build from source](#build-from-source).
 
