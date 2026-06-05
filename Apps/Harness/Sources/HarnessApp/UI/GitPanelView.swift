@@ -3,27 +3,30 @@ import HarnessCore
 
 @MainActor
 final class GitPanelView: NSView {
-    private let scrollView = NSScrollView()
-    private let stackView = NSStackView()
     private var currentPath: String?
 
-    // Header
-    private let branchLabel = NSTextField(labelWithString: "")
-    private let pullButton = NSButton(title: "Pull", target: nil, action: nil)
-    private let pushButton = NSButton(title: "Push", target: nil, action: nil)
+    // Top tabs: Changes | History
+    private let tabSelector = NSSegmentedControl(labels: ["Changes", "History"], trackingMode: .selectOne, target: nil, action: nil)
+    private let changesContainer = NSView()
+    private let historyContainer = NSView()
 
-    // Commit
-    private let commitField = NSTextField()
-    private let commitButton = NSButton(title: "Commit", target: nil, action: nil)
-    private let commitPushButton = NSButton(title: "Commit+Push", target: nil, action: nil)
-    private let commitAmendButton = NSButton(title: "Amend", target: nil, action: nil)
+    // Changes view
+    private let changesScroll = NSScrollView()
+    private let changesStack = NSStackView()
     private let stageAllButton = NSButton(title: "Stage All", target: nil, action: nil)
 
-    // Sections
-    private let changesHeader = NSTextField(labelWithString: "CHANGES")
-    private let historyHeader = NSTextField(labelWithString: "HISTORY")
-    private let changesStack = NSStackView()
+    // Commit area (bottom of changes)
+    private let commitField = NSTextField()
+    private let commitButton = NSButton(title: "Commit Tracked", target: nil, action: nil)
+
+    // History view
+    private let historyScroll = NSScrollView()
     private let historyStack = NSStackView()
+
+    // Bottom bar: branch + fetch
+    private let bottomBar = NSView()
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let fetchButton = NSButton(title: "Fetch", target: nil, action: nil)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -42,24 +45,23 @@ final class GitPanelView: NSView {
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        // Branch bar
-        branchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
-        branchLabel.textColor = HarnessDesign.chrome.textPrimary
-        branchLabel.lineBreakMode = .byTruncatingTail
+        // Tab selector
+        tabSelector.selectedSegment = 0
+        tabSelector.target = self
+        tabSelector.action = #selector(tabChanged)
+        tabSelector.segmentStyle = .automatic
+        tabSelector.translatesAutoresizingMaskIntoConstraints = false
 
-        for btn in [pullButton, pushButton, stageAllButton, commitButton, commitPushButton, commitAmendButton] {
-            btn.bezelStyle = .recessed; btn.controlSize = .small
-            btn.font = .systemFont(ofSize: 11, weight: .medium)
-        }
-        pullButton.target = self; pullButton.action = #selector(pullAction)
-        pushButton.target = self; pushButton.action = #selector(pushAction)
+        // Changes container
+        changesContainer.translatesAutoresizingMaskIntoConstraints = false
+        changesStack.orientation = .vertical; changesStack.alignment = .width; changesStack.spacing = 0
+        setupScrollView(changesScroll, with: changesStack, in: changesContainer)
+
+        // Stage All button bar
+        stageAllButton.bezelStyle = .recessed; stageAllButton.controlSize = .small
+        stageAllButton.font = .systemFont(ofSize: 11, weight: .medium)
         stageAllButton.target = self; stageAllButton.action = #selector(stageAllAction)
-        commitButton.target = self; commitButton.action = #selector(commitAction)
-        commitPushButton.target = self; commitPushButton.action = #selector(commitPushAction)
-        commitAmendButton.target = self; commitAmendButton.action = #selector(commitAmendAction)
-
-        let branchBar = NSStackView(views: [branchLabel, pullButton, pushButton])
-        branchBar.orientation = .horizontal; branchBar.spacing = 6
+        stageAllButton.translatesAutoresizingMaskIntoConstraints = false
 
         // Commit area
         commitField.placeholderString = "Commit message…"
@@ -68,92 +70,132 @@ final class GitPanelView: NSView {
         commitField.focusRingType = .none
         commitField.usesSingleLineMode = false
         commitField.lineBreakMode = .byWordWrapping
-        commitField.maximumNumberOfLines = 5
+        commitField.maximumNumberOfLines = 4
         commitField.translatesAutoresizingMaskIntoConstraints = false
-        commitField.heightAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
 
-        let btnRow = NSStackView(views: [stageAllButton, commitButton, commitPushButton, commitAmendButton])
-        btnRow.orientation = .horizontal; btnRow.spacing = 4
+        commitButton.bezelStyle = .recessed; commitButton.controlSize = .small
+        commitButton.font = .systemFont(ofSize: 11, weight: .medium)
+        commitButton.target = self; commitButton.action = #selector(commitAction)
+        commitButton.translatesAutoresizingMaskIntoConstraints = false
 
-        // Section headers
-        for h in [changesHeader, historyHeader] {
-            h.font = .systemFont(ofSize: 10, weight: .semibold)
-            h.textColor = HarnessDesign.chrome.textTertiary
-        }
-
-        changesStack.orientation = .vertical; changesStack.alignment = .width; changesStack.spacing = 1
+        // History container
+        historyContainer.translatesAutoresizingMaskIntoConstraints = false
+        historyContainer.isHidden = true
         historyStack.orientation = .vertical; historyStack.alignment = .width; historyStack.spacing = 0
+        setupScrollView(historyScroll, with: historyStack, in: historyContainer)
 
-        // Main stack
-        stackView.orientation = .vertical
-        stackView.alignment = .width
-        stackView.spacing = 8
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        stackView.addArrangedSubview(branchBar)
-        stackView.addArrangedSubview(changesHeader)
-        stackView.addArrangedSubview(changesStack)
-        stackView.addArrangedSubview(commitField)
-        stackView.addArrangedSubview(btnRow)
-        stackView.addArrangedSubview(historyHeader)
-        stackView.addArrangedSubview(historyStack)
+        // Bottom bar
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        branchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        branchLabel.textColor = HarnessDesign.chrome.textSecondary
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        fetchButton.bezelStyle = .recessed; fetchButton.controlSize = .small
+        fetchButton.font = .systemFont(ofSize: 11, weight: .medium)
+        fetchButton.target = self; fetchButton.action = #selector(fetchAction)
+        fetchButton.translatesAutoresizingMaskIntoConstraints = false
+
+        bottomBar.addSubview(branchLabel)
+        bottomBar.addSubview(fetchButton)
+
+        addSubview(tabSelector)
+        addSubview(stageAllButton)
+        addSubview(changesContainer)
+        addSubview(commitField)
+        addSubview(commitButton)
+        addSubview(historyContainer)
+        addSubview(bottomBar)
+
+        NSLayoutConstraint.activate([
+            tabSelector.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            tabSelector.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            tabSelector.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
+            stageAllButton.topAnchor.constraint(equalTo: tabSelector.bottomAnchor, constant: 4),
+            stageAllButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
+            changesContainer.topAnchor.constraint(equalTo: stageAllButton.bottomAnchor, constant: 2),
+            changesContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            changesContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            changesContainer.bottomAnchor.constraint(equalTo: commitField.topAnchor, constant: -6),
+
+            commitField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            commitField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            commitField.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+            commitField.bottomAnchor.constraint(equalTo: commitButton.topAnchor, constant: -4),
+
+            commitButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            commitButton.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -6),
+
+            historyContainer.topAnchor.constraint(equalTo: tabSelector.bottomAnchor, constant: 4),
+            historyContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            historyContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            historyContainer.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -4),
+
+            bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            bottomBar.heightAnchor.constraint(equalToConstant: 22),
+
+            branchLabel.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
+            branchLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: fetchButton.leadingAnchor, constant: -8),
+            fetchButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
+            fetchButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+        ])
+    }
+
+    private func setupScrollView(_ scroll: NSScrollView, with stack: NSStackView, in container: NSView) {
         let doc = FlippedView()
         doc.translatesAutoresizingMaskIntoConstraints = false
-        doc.addSubview(stackView)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(stack)
 
-        scrollView.documentView = doc
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = doc
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(scrollView)
+        container.addSubview(scroll)
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            doc.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            doc.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            doc.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            doc.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-            stackView.topAnchor.constraint(equalTo: doc.topAnchor, constant: 6),
-            stackView.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 10),
-            stackView.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -10),
-            stackView.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -8),
+            scroll.topAnchor.constraint(equalTo: container.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            doc.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.topAnchor.constraint(equalTo: doc.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
         ])
+    }
+
+    // MARK: - Tab switching
+
+    @objc private func tabChanged() {
+        let isHistory = tabSelector.selectedSegment == 1
+        changesContainer.isHidden = isHistory
+        commitField.isHidden = isHistory
+        commitButton.isHidden = isHistory
+        stageAllButton.isHidden = isHistory
+        historyContainer.isHidden = !isHistory
     }
 
     // MARK: - Actions
 
-    @objc private func pullAction() { runAndRefresh(["pull"]) }
-    @objc private func pushAction() { runAndRefresh(["push"]) }
+    @objc private func fetchAction() { runAndRefresh(["fetch"]) }
     @objc private func stageAllAction() { runAndRefresh(["add", "-A"]) }
 
     @objc private func commitAction() {
-        guard let msg = commitMessage() else { return }
-        runAndRefresh(["commit", "-m", msg], clearField: true)
-    }
-
-    @objc private func commitPushAction() {
-        guard let msg = commitMessage() else { return }
-        guard let path = currentPath else { return }
-        Task {
-            _ = await runGit(["commit", "-m", msg], in: path)
-            _ = await runGit(["push"], in: path)
-            commitField.stringValue = ""
-            await refresh()
-        }
-    }
-
-    @objc private func commitAmendAction() {
         let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if msg.isEmpty {
-            runAndRefresh(["commit", "--amend", "--no-edit"])
-        } else {
-            runAndRefresh(["commit", "--amend", "-m", msg], clearField: true)
-        }
+        guard !msg.isEmpty else { return }
+        runAndRefresh(["commit", "-m", msg], clearField: true)
     }
 
     @objc private func toggleStage(_ sender: NSButton) {
@@ -163,11 +205,6 @@ final class GitPanelView: NSView {
             _ = await runGit(isStaged ? ["restore", "--staged", file] : ["add", file], in: path)
             await refresh()
         }
-    }
-
-    private func commitMessage() -> String? {
-        let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return msg.isEmpty ? nil : msg
     }
 
     private func runAndRefresh(_ args: [String], clearField: Bool = false) {
@@ -184,32 +221,35 @@ final class GitPanelView: NSView {
     private func refresh() async {
         guard let path = currentPath else { return }
         let branch = await runGit(["branch", "--show-current"], in: path)
-        let status = await runGit(["status", "--porcelain"], in: path)
-        let log = await runGit(["log", "--format=%H|%an|%ar|%s", "-20"], in: path)
+        let status = await runGit(["diff", "--stat", "--cached", "--numstat"], in: path)
+        let porcelain = await runGit(["status", "--porcelain"], in: path)
+        let log = await runGit(["log", "--format=%H|%an|%ar|%s", "-25"], in: path)
 
         branchLabel.stringValue = "⎇ " + (branch.isEmpty ? "detached" : branch)
 
-        changesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let changeCount = porcelain.components(separatedBy: "\n").filter { !$0.isEmpty }.count
+        tabSelector.setLabel("Changes (\(changeCount))", forSegment: 0)
 
         // Changes
-        if status.isEmpty {
+        changesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if porcelain.isEmpty {
             changesStack.addArrangedSubview(makeLabel("Working tree clean"))
         } else {
-            for line in status.components(separatedBy: "\n").prefix(30) where !line.isEmpty {
-                changesStack.addArrangedSubview(makeStatusRow(line))
+            for line in porcelain.components(separatedBy: "\n").prefix(40) where !line.isEmpty {
+                changesStack.addArrangedSubview(makeChangeRow(line))
             }
         }
 
-        // History (SourceTree-style)
-        for line in log.components(separatedBy: "\n").prefix(20) where !line.isEmpty {
-            historyStack.addArrangedSubview(makeHistoryRow(line))
+        // History
+        historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for line in log.components(separatedBy: "\n").prefix(25) where !line.isEmpty {
+            historyStack.addArrangedSubview(makeHistoryCard(line))
         }
     }
 
     // MARK: - Row builders
 
-    private func makeStatusRow(_ line: String) -> NSView {
+    private func makeChangeRow(_ line: String) -> NSView {
         let xy = line.prefix(2)
         let indexStatus = String(xy.first ?? Character(" "))
         let file = String(line.dropFirst(3))
@@ -221,37 +261,40 @@ final class GitPanelView: NSView {
         case "M": color = .systemOrange
         case "A": color = .systemGreen
         case "D": color = .systemRed
-        case "R": color = .systemBlue
         case "?": color = .systemGreen
         default: color = HarnessDesign.chrome.textSecondary
         }
 
-        let row = NSStackView()
-        row.orientation = .horizontal; row.spacing = 4
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.wantsLayer = true
 
         let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleStage(_:)))
         check.state = isStaged ? .on : .off
         check.toolTip = file; check.controlSize = .small
-
-        let badge = NSTextField(labelWithString: String(xy).trimmingCharacters(in: .whitespaces))
-        badge.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-        badge.textColor = color
-        badge.setContentHuggingPriority(.required, for: .horizontal)
+        check.translatesAutoresizingMaskIntoConstraints = false
 
         let name = NSTextField(labelWithString: (file as NSString).lastPathComponent)
-        name.font = .systemFont(ofSize: 11.5)
-        name.textColor = HarnessDesign.chrome.textSecondary
+        name.font = .systemFont(ofSize: 12)
+        name.textColor = color
         name.lineBreakMode = .byTruncatingMiddle
         name.toolTip = file
+        name.translatesAutoresizingMaskIntoConstraints = false
 
-        row.addArrangedSubview(check)
-        row.addArrangedSubview(badge)
-        row.addArrangedSubview(name)
+        row.addSubview(check)
+        row.addSubview(name)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 24),
+            check.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
+            check.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            name.leadingAnchor.constraint(equalTo: check.trailingAnchor, constant: 4),
+            name.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
+            name.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
         return row
     }
 
-    private func makeHistoryRow(_ line: String) -> NSView {
-        // format: hash|author|relative_time|subject
+    private func makeHistoryCard(_ line: String) -> NSView {
         let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
         guard parts.count >= 4 else { return makeLabel(line) }
         let hash = String(parts[0].prefix(7))
@@ -263,40 +306,41 @@ final class GitPanelView: NSView {
         card.wantsLayer = true
         card.translatesAutoresizingMaskIntoConstraints = false
 
+        // Subject line
         let subjectLabel = NSTextField(labelWithString: subject)
-        subjectLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        subjectLabel.font = .systemFont(ofSize: 12)
         subjectLabel.textColor = HarnessDesign.chrome.textPrimary
         subjectLabel.lineBreakMode = .byTruncatingTail
         subjectLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let metaLabel = NSTextField(labelWithString: "\(author) · \(time) · \(hash)")
-        metaLabel.font = .systemFont(ofSize: 10)
-        metaLabel.textColor = HarnessDesign.chrome.textTertiary
-        metaLabel.lineBreakMode = .byTruncatingTail
-        metaLabel.translatesAutoresizingMaskIntoConstraints = false
+        // Author · time · hash
+        let meta = NSTextField(labelWithString: "\(author) · \(time) · \(hash)")
+        meta.font = .systemFont(ofSize: 10)
+        meta.textColor = HarnessDesign.chrome.textTertiary
+        meta.lineBreakMode = .byTruncatingTail
+        meta.translatesAutoresizingMaskIntoConstraints = false
 
         card.addSubview(subjectLabel)
-        card.addSubview(metaLabel)
+        card.addSubview(meta)
         NSLayoutConstraint.activate([
-            card.heightAnchor.constraint(equalToConstant: 38),
-            subjectLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 4),
-            subjectLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 4),
-            subjectLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -4),
-            metaLabel.topAnchor.constraint(equalTo: subjectLabel.bottomAnchor, constant: 1),
-            metaLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 4),
-            metaLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -4),
+            card.heightAnchor.constraint(equalToConstant: 40),
+            subjectLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 5),
+            subjectLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            subjectLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
+            meta.topAnchor.constraint(equalTo: subjectLabel.bottomAnchor, constant: 1),
+            meta.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10),
+            meta.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
         ])
         return card
     }
 
     private func makeLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 11.5)
-        label.textColor = HarnessDesign.chrome.textTertiary
-        return label
+        let l = NSTextField(labelWithString: text)
+        l.font = .systemFont(ofSize: 11.5); l.textColor = HarnessDesign.chrome.textTertiary
+        return l
     }
 
-    // MARK: - Git runner
+    // MARK: - Git
 
     private func runGit(_ args: [String], in directory: String) async -> String {
         await withCheckedContinuation { continuation in
