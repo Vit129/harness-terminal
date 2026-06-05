@@ -26,7 +26,7 @@ final class GitPanelView: NSView {
     // Bottom bar: branch + fetch
     private let bottomBar = NSView()
     private let branchLabel = NSTextField(labelWithString: "")
-    private let fetchButton = NSButton(title: "Fetch", target: nil, action: nil)
+    private let syncButton = NSButton(title: "Fetch ▾", target: nil, action: nil)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -95,13 +95,13 @@ final class GitPanelView: NSView {
         branchLabel.addGestureRecognizer(branchClick)
         branchLabel.isSelectable = false
 
-        fetchButton.bezelStyle = .recessed; fetchButton.controlSize = .small
-        fetchButton.font = .systemFont(ofSize: 11, weight: .medium)
-        fetchButton.target = self; fetchButton.action = #selector(fetchAction)
-        fetchButton.translatesAutoresizingMaskIntoConstraints = false
+        syncButton.bezelStyle = .recessed; syncButton.controlSize = .small
+        syncButton.font = .systemFont(ofSize: 11, weight: .medium)
+        syncButton.target = self; syncButton.action = #selector(showSyncMenu)
+        syncButton.translatesAutoresizingMaskIntoConstraints = false
 
         bottomBar.addSubview(branchLabel)
-        bottomBar.addSubview(fetchButton)
+        bottomBar.addSubview(syncButton)
 
         addSubview(tabSelector)
         addSubview(stageAllButton)
@@ -144,9 +144,9 @@ final class GitPanelView: NSView {
 
             branchLabel.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
             branchLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: fetchButton.leadingAnchor, constant: -8),
-            fetchButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
-            fetchButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: syncButton.leadingAnchor, constant: -8),
+            syncButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
+            syncButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
         ])
     }
 
@@ -193,7 +193,29 @@ final class GitPanelView: NSView {
 
     // MARK: - Actions
 
-    @objc private func fetchAction() { runAndRefresh(["fetch"]) }
+    @objc private func showSyncMenu() {
+        let menu = NSMenu()
+        let fetch = NSMenuItem(title: "Fetch", action: #selector(doFetch), keyEquivalent: "")
+        fetch.target = self
+        let pull = NSMenuItem(title: "Pull", action: #selector(doPull), keyEquivalent: "")
+        pull.target = self
+        let push = NSMenuItem(title: "Push", action: #selector(doPush), keyEquivalent: "")
+        push.target = self
+        let forcePush = NSMenuItem(title: "Force Push", action: #selector(doForcePush), keyEquivalent: "")
+        forcePush.target = self
+        menu.addItem(fetch)
+        menu.addItem(pull)
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(push)
+        menu.addItem(forcePush)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: syncButton.bounds.height), in: syncButton)
+    }
+
+    @objc private func doFetch() { runAndRefresh(["fetch"]) }
+    @objc private func doPull() { runAndRefresh(["pull"]) }
+    @objc private func doPush() { runAndRefresh(["push"]) }
+    @objc private func doForcePush() { runAndRefresh(["push", "--force-with-lease"]) }
+
     @objc private func stageAllAction() { runAndRefresh(["add", "-A"]) }
 
     @objc private func showBranchMenu() {
