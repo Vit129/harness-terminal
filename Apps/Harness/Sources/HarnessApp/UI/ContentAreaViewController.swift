@@ -147,7 +147,14 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
 
     func reloadTabBar() {
         let snap = SessionCoordinator.shared.snapshot
-        tabBar.reload(tabs: snap.activeWorkspace?.tabs ?? [], activeTabID: snap.activeWorkspace?.activeTabID)
+        guard let workspace = snap.activeWorkspace else { return }
+        // Each session = one tab pill (1 session = 1 project path)
+        let sessionTabs = workspace.sessions.compactMap { session -> Tab? in
+            guard let tab = session.activeTab ?? session.tabs.first else { return nil }
+            return tab
+        }
+        let activeTabID = workspace.activeSession?.activeTab?.id ?? workspace.activeSession?.tabs.first?.id
+        tabBar.reload(tabs: sessionTabs, activeTabID: activeTabID)
         updateTitleStripPath()
     }
 
@@ -161,27 +168,37 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
 
     func refreshTabBarMetadata() {
         let snap = SessionCoordinator.shared.snapshot
-        tabBar.refreshMetadata(tabs: snap.activeWorkspace?.tabs ?? [], activeTabID: snap.activeWorkspace?.activeTabID)
+        guard let workspace = snap.activeWorkspace else { return }
+        let sessionTabs = workspace.sessions.compactMap { session -> Tab? in
+            session.activeTab ?? session.tabs.first
+        }
+        let activeTabID = workspace.activeSession?.activeTab?.id ?? workspace.activeSession?.tabs.first?.id
+        tabBar.refreshMetadata(tabs: sessionTabs, activeTabID: activeTabID)
         updateTitleStripPath()
     }
 
     func tabBarDidSelect(tabID: TabID) {
-        guard let workspaceID = SessionCoordinator.shared.snapshot.activeWorkspaceID else { return }
-        SessionCoordinator.shared.selectTab(workspaceID: workspaceID, tabID: tabID)
+        let coordinator = SessionCoordinator.shared
+        guard let workspaceID = coordinator.snapshot.activeWorkspaceID,
+              let workspace = coordinator.snapshot.activeWorkspace,
+              let session = workspace.sessions.first(where: { $0.tabs.contains(where: { $0.id == tabID }) })
+        else { return }
+        coordinator.selectSession(workspaceID: workspaceID, sessionID: session.id)
     }
 
     func tabBarDidRequestNewTab() {
         guard let workspaceID = SessionCoordinator.shared.snapshot.activeWorkspaceID else { return }
-        SessionCoordinator.shared.addTab(to: workspaceID)
+        SessionCoordinator.shared.addSession(to: workspaceID)
     }
 
     func tabBarDidRequestClose(tabID: TabID) {
         let coordinator = SessionCoordinator.shared
-        guard let workspaceID = coordinator.snapshot.activeWorkspaceID else { return }
-        if coordinator.snapshot.activeWorkspace?.activeTabID != tabID {
-            coordinator.selectTab(workspaceID: workspaceID, tabID: tabID)
-        }
-        coordinator.closeActiveTabWithConfirmation()
+        guard let workspaceID = coordinator.snapshot.activeWorkspaceID,
+              let workspace = coordinator.snapshot.activeWorkspace,
+              let session = workspace.sessions.first(where: { $0.tabs.contains(where: { $0.id == tabID }) })
+        else { return }
+        coordinator.selectSession(workspaceID: workspaceID, sessionID: session.id)
+        coordinator.closeActiveSession()
     }
 
     func tabBarDidReorder(tabID: TabID, toIndex: Int) {

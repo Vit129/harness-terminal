@@ -22,9 +22,12 @@ final class HarnessSidebarPanelViewController: NSViewController {
     /// Wraps the search field so it gets the same radius-7 elevated-surface chrome as
     /// the workspace pill and session cards.
     private let searchContainer = NSView()
+    private let sidebarTabs = NSSegmentedControl(labels: ["Sessions", "Files", "Git"], trackingMode: .selectOne, target: nil, action: nil)
     private let sectionHeader = NSView()
     private let sectionLabel = NSTextField(labelWithString: "Sessions")
     private let sessionTable = NSTableView()
+    private let fileTreeView = WorkspaceFileTreeView()
+    private let gitPanelView = GitPanelView()
     private let footer = NSView()
     /// Opens the Agent Inbox popover (every running agent, waiting first). Stored so
     /// the popover can anchor to it. Created in `setupFooter`.
@@ -70,9 +73,13 @@ final class HarnessSidebarPanelViewController: NSViewController {
         setupChromeHeader()
         setupWorkspaceBar()
         setupSearchField()
+        setupSidebarTabs()
         setupSectionHeader()
         setupFooter()
         setupSessionList()
+        setupFileTree()
+        setupGitPlaceholder()
+        selectSidebarTab(index: 0)
         reload()
         applyChromeColors()
 
@@ -93,6 +100,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
         HarnessDesign.applySidebarChrome(to: view)
         HarnessDesign.makeClear(chromeHeader)
         HarnessDesign.makeClear(workspaceBar)
+        HarnessDesign.makeClear(gitPanelView)
         HarnessDesign.makeClear(sectionHeader)
         HarnessDesign.makeClear(footer)
         sectionLabel.textColor = HarnessDesign.chrome.textTertiary
@@ -322,12 +330,27 @@ final class HarnessSidebarPanelViewController: NSViewController {
         view.addSubview(sectionHeader)
 
         NSLayoutConstraint.activate([
-            sectionHeader.topAnchor.constraint(equalTo: workspaceBar.bottomAnchor),
+            sectionHeader.topAnchor.constraint(equalTo: sidebarTabs.bottomAnchor),
             sectionHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             sectionHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             sectionHeader.heightAnchor.constraint(equalToConstant: 24),
             sectionLabel.leadingAnchor.constraint(equalTo: sectionHeader.leadingAnchor, constant: HarnessDesign.horizontalInset),
             sectionLabel.bottomAnchor.constraint(equalTo: sectionHeader.bottomAnchor, constant: -4),
+        ])
+    }
+
+    private func setupSidebarTabs() {
+        sidebarTabs.translatesAutoresizingMaskIntoConstraints = false
+        sidebarTabs.selectedSegment = 0
+        sidebarTabs.target = self
+        sidebarTabs.action = #selector(sidebarTabChanged)
+        sidebarTabs.segmentStyle = .rounded
+        view.addSubview(sidebarTabs)
+        NSLayoutConstraint.activate([
+            sidebarTabs.topAnchor.constraint(equalTo: workspaceBar.bottomAnchor, constant: 6),
+            sidebarTabs.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: HarnessDesign.horizontalInset),
+            sidebarTabs.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -HarnessDesign.horizontalInset),
+            sidebarTabs.heightAnchor.constraint(equalToConstant: 26),
         ])
     }
 
@@ -450,6 +473,45 @@ final class HarnessSidebarPanelViewController: NSViewController {
         ])
     }
 
+    private func setupFileTree() {
+        fileTreeView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(fileTreeView)
+        NSLayoutConstraint.activate([
+            fileTreeView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            fileTreeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            fileTreeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            fileTreeView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+        ])
+    }
+
+    private func setupGitPlaceholder() {
+        view.addSubview(gitPanelView)
+        NSLayoutConstraint.activate([
+            gitPanelView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            gitPanelView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            gitPanelView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            gitPanelView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+        ])
+    }
+
+    @objc private func sidebarTabChanged() {
+        selectSidebarTab(index: sidebarTabs.selectedSegment)
+    }
+
+    private func selectSidebarTab(index: Int) {
+        sessionScroll?.isHidden = index != 0
+        fileTreeView.isHidden = index != 1
+        gitPanelView.isHidden = index != 2
+        switch index {
+        case 1:
+            sectionLabel.stringValue = "FILES"
+        case 2:
+            sectionLabel.stringValue = "GIT"
+        default:
+            sectionLabel.stringValue = "SESSIONS"
+        }
+    }
+
     private func syncSessionColumnWidth() {
         guard let column = sessionTable.tableColumns.first else { return }
         let width = sessionScroll?.contentView.bounds.width ?? view.bounds.width
@@ -474,6 +536,10 @@ final class HarnessSidebarPanelViewController: NSViewController {
         newSession.target = self
         newSession.action = #selector(addSession)
 
+        let recentProjects = HarnessDesign.softIconButton(symbol: "clock.arrow.circlepath", tooltip: "Recent projects")
+        recentProjects.target = self
+        recentProjects.action = #selector(showRecentProjects(_:))
+
         // No "new workspace" control: the app runs a single workspace for now, and without a
         // switcher a second workspace would strand the user with no way back.
         let palette = HarnessDesign.softIconButton(symbol: "command", tooltip: "Command palette (⌘K)")
@@ -485,6 +551,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
         footer.addSubview(settings)
         footer.addSubview(agentsButton)
+        footer.addSubview(recentProjects)
         footer.addSubview(newSession)
         footer.addSubview(palette)
         view.addSubview(footer)
@@ -503,7 +570,9 @@ final class HarnessSidebarPanelViewController: NSViewController {
             palette.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             newSession.trailingAnchor.constraint(equalTo: palette.leadingAnchor, constant: -2),
             newSession.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
-            agentsButton.trailingAnchor.constraint(equalTo: newSession.leadingAnchor, constant: -2),
+            recentProjects.trailingAnchor.constraint(equalTo: newSession.leadingAnchor, constant: -2),
+            recentProjects.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            agentsButton.trailingAnchor.constraint(equalTo: recentProjects.leadingAnchor, constant: -2),
             agentsButton.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
         ])
     }
@@ -525,6 +594,15 @@ final class HarnessSidebarPanelViewController: NSViewController {
             sessionTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             isProgrammaticSelection = false
             sessionTable.scrollRowToVisible(row)
+        }
+
+        if let cwd = snap.activeWorkspace?.activeTab?.cwd {
+            fileTreeView.updateRoot(path: cwd)
+            gitPanelView.updateRoot(path: cwd)
+            let home = NSHomeDirectory()
+            if cwd != home, cwd != "/" {
+                Self.recordRecentProject(cwd)
+            }
         }
     }
 
@@ -631,7 +709,64 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
     @objc private func addSession() {
         guard let activeWorkspaceID else { return }
-        SessionCoordinator.shared.addSession(to: activeWorkspaceID)
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a project folder"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            DispatchQueue.main.async {
+                guard let self, let id = self.activeWorkspaceID ?? activeWorkspaceID as WorkspaceID? else { return }
+                Self.recordRecentProject(url.path)
+                SessionCoordinator.shared.addSession(to: id, cwd: url.path, name: url.lastPathComponent)
+            }
+        }
+    }
+
+    // MARK: - Recent Projects
+
+    private static let recentProjectsKey = "RecentProjectPaths"
+    private static let maxRecents = 10
+
+    private static func recentProjects() -> [String] {
+        UserDefaults.standard.stringArray(forKey: recentProjectsKey) ?? []
+    }
+
+    private static func recordRecentProject(_ path: String) {
+        var recents = recentProjects()
+        recents.removeAll { $0 == path }
+        recents.insert(path, at: 0)
+        if recents.count > maxRecents { recents = Array(recents.prefix(maxRecents)) }
+        UserDefaults.standard.set(recents, forKey: recentProjectsKey)
+    }
+
+    @objc private func showRecentProjects(_ sender: NSView) {
+        let menu = NSMenu()
+        let recents = Self.recentProjects()
+        if recents.isEmpty {
+            menu.addItem(NSMenuItem(title: "No recent projects", action: nil, keyEquivalent: ""))
+        } else {
+            for path in recents {
+                let item = NSMenuItem(title: (path as NSString).lastPathComponent, action: #selector(openRecentProject(_:)), keyEquivalent: "")
+                item.target = self
+                item.toolTip = path
+                item.representedObject = path
+                menu.addItem(item)
+            }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
+    }
+
+    @objc private func openRecentProject(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String, let id = activeWorkspaceID else { return }
+        // Switch to existing session if one already has this cwd
+        if let existing = sessions.first(where: { $0.tabs.contains(where: { $0.cwd == path }) }) {
+            SessionCoordinator.shared.selectSession(workspaceID: id, sessionID: existing.id)
+            return
+        }
+        SessionCoordinator.shared.addSession(to: id, cwd: path, name: (path as NSString).lastPathComponent)
     }
 
     @objc private func sessionDoubleClick() {
@@ -1495,4 +1630,3 @@ final class SessionCardRowView: NSView {
         }
     }
 }
-
