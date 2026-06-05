@@ -51,7 +51,6 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Inline images that stay put across reflow and scroll into history
 - Drag file-backed folders or images into a pane to insert shell-quoted paths
 - Set Harness as the default terminal for SSH/Telnet/man-page links and `.command` / `.tool` files from Settings > Terminal
-- Automatic, signed background updates (Sparkle + EdDSA)
 - **IDE sidebar** — Files tab (project file tree), Git tab (Zed-style changes/history, stage/commit/push), and session management
 - **Project-aware file tree** — follows active session cwd, right-click to copy path, drag files to terminal
 - **Git workflow** — stage/unstage files, commit, fetch/pull/push, branch switcher — all from the sidebar
@@ -75,11 +74,8 @@ harness-cli theme-preview --theme "Harness Default"
 Install it onto your `PATH`:
 
 ```bash
-# From the app bundle:
-/Applications/Harness.app/Contents/MacOS/harness-cli install
-
-# Or from a source build:
-.build/release/harness-cli install
+# From the built app:
+./Harness.app/Contents/MacOS/harness-cli install
 
 # Then add the printed path to your shell profile:
 export PATH="$HOME/Library/Application Support/Harness/bin:$PATH"
@@ -152,9 +148,7 @@ The command prefix (default `Ctrl-A`) adds the full pane / session keymap on top
 ### Quick install
 
 ```bash
-git clone https://github.com/Vit129/harness-terminal.git harness
-cd harness
-make release
+swift build
 open Harness.app
 ```
 
