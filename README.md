@@ -51,11 +51,49 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Inline images that stay put across reflow and scroll into history
 - Drag file-backed folders or images into a pane to insert shell-quoted paths
 - Set Harness as the default terminal for SSH/Telnet/man-page links and `.command` / `.tool` files from Settings > Terminal
-- **IDE sidebar** — Files tab (project file tree), Git tab (Zed-style changes/history, stage/commit/push), and session management
-- **Project-aware file tree** — follows active session cwd, right-click to copy path, drag files to terminal
-- **Git workflow** — stage/unstage files, commit, fetch/pull/push, branch switcher — all from the sidebar
-- **Session-as-tab** — each tab in the tab bar is a project session; + creates a new session, ✕ closes it
-- **Recent projects** — clock button in sidebar footer shows last 10 projects, switches to existing session on duplicate
+- **IDE sidebar** — Session panel, Files tab, and Git tab toggled with `Cmd+\`
+
+## IDE Sidebar
+
+Toggle the sidebar with `Cmd+\`. It has three panels:
+
+### Session Panel
+
+Each project session appears as a tab in the sidebar tab bar. The session panel gives you:
+
+- **+ button** — opens a new session in the current working directory
+- **✕ button** — closes the session (always visible on hover)
+- **Recent projects** — clock button in the sidebar footer lists the last 10 visited project roots; clicking one switches to an existing session or opens a new one
+- Sessions are daemon-owned, so they survive quitting and relaunching the app
+
+### Files
+
+A project-aware file tree that stays in sync with your active terminal session:
+
+- Automatically roots to the current working directory of the active pane
+- Single-click to open a file; right-click to copy the full path
+- Drag a file or folder into a terminal pane to insert its shell-quoted path
+- Tree updates when you `cd` in the terminal
+
+### Git
+
+A three-tab Git panel covering the full day-to-day workflow without leaving the app:
+
+**Changes tab**
+- Lists every modified, staged, added, and deleted file with colour-coded status (orange = modified, green = added/untracked, red = deleted)
+- Checkbox per file to stage or unstage individually; **Stage All** button to stage everything at once
+- Commit message field + **Commit Tracked** button
+- Branch name at the bottom — click it to switch branches from a menu
+- **Fetch ▾** button — dropdown for Fetch, Pull, Push, Force Push
+
+**History tab**
+- Shows the last 25 commits: subject line, author, relative time, and short hash
+- Scrollable card list, same visual style as the Changes tab
+
+**Worktrees tab**
+- Lists all `git worktree` entries for the current repo: folder name (bold), branch, and short HEAD hash
+- **✕** button on each row to run `git worktree remove` (hidden for the main worktree)
+- **+** button at the top right — prompts for a path and branch name, then runs `git worktree add`
 
 ## harness-cli
 
