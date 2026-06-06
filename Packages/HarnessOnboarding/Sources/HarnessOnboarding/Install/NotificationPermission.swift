@@ -19,30 +19,16 @@ enum NotificationPermission {
     }
 
     /// Current permission, delivered on the main queue.
+    /// Disabled: UNUserNotificationCenter.current() crashes on macOS 26 beta.
     static func current(_ completion: @escaping @MainActor @Sendable (State) -> Void) {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let state = map(settings.authorizationStatus)
-            deliver(state, to: completion)
-        }
+        deliver(.undetermined, to: completion)
     }
 
     /// Prompt when undecided; open System Settings ▸ Notifications when already denied.
+    /// Disabled: UNUserNotificationCenter.current() crashes on macOS 26 beta.
     static func request(_ completion: @escaping @MainActor @Sendable (State) -> Void) {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .denied:
-                Task { @MainActor in
-                    openSystemSettings()
-                    completion(.denied)
-                }
-            case .authorized, .provisional, .ephemeral:
-                deliver(.granted, to: completion)
-            default:
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-                    deliver(granted ? .granted : .denied, to: completion)
-                }
-            }
-        }
+        openSystemSettings()
+        deliver(.undetermined, to: completion)
     }
 
     private static func deliver(_ state: State, to completion: @escaping @MainActor @Sendable (State) -> Void) {
