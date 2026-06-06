@@ -1712,13 +1712,13 @@ private final class SessionGroupHeaderRowView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        disclosureLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        disclosureLabel.font = .systemFont(ofSize: 15, weight: .bold)
         disclosureLabel.textColor = HarnessDesign.chrome.textTertiary
         disclosureLabel.alignment = .center
         disclosureLabel.translatesAutoresizingMaskIntoConstraints = false
         disclosureLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        label.font = HarnessDesign.Typography.sectionLabel
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.alignment = .left
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
