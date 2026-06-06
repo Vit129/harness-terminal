@@ -6,12 +6,13 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
-## [Unreleased]
+## [1.7.0] - 2026-06-06
 
-The production-hardening pass: a full adversarial audit (multi-dimension bug hunt →
-refute-by-default verification → fixes → post-fix review) across the daemon, IPC, terminal
-engine, CLI, settings, and onboarding. Every fix below was verified with a repro or code-trace
-before it was written.
+The production-hardening release: a full adversarial audit (multi-dimension bug hunt →
+refute-by-default verification → fixes → post-fix review → live validation) across the daemon,
+IPC, terminal engine, CLI, settings, and onboarding. Every fix below was verified with a repro
+or code-trace before it was written, and the fix batch itself was adversarially re-reviewed
+(#96–#98 are that review's catches).
 
 ### Fixed
 - **Daemon could refuse to start forever after a force-kill or reboot.** (#93) The stale-instance
