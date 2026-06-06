@@ -59,6 +59,8 @@ private struct NodeRow: View {
                 }
             } label: {
                 rowLabel(systemImage: "folder")
+                    .contentShape(Rectangle())
+                    .onTapGesture { isExpanded.toggle() }
             }
             .onChange(of: isExpanded) { _, expanded in
                 if expanded { Task { await loadChildren() } }
