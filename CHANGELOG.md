@@ -6,11 +6,11 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
-## [Unreleased]
+## [1.6.0] - 2026-06-05
 
-Redraw-efficiency series from the proven-best-practice deep dive (kitty/foot/Alacritty/Windows
-Terminal parity + Apple Metal guidance): overlays no longer disable damage-driven rendering,
-streaming output reuses the scrolled band, and invisible panes stop presenting.
+The redraw-efficiency release, from a proven-best-practice deep dive (kitty/foot/Alacritty/
+Windows Terminal parity + Apple Metal guidance): overlays no longer disable damage-driven
+rendering, streaming output reuses the scrolled band, and invisible panes stop presenting.
 
 ### Changed
 - **Selection, find highlights, and IME composition ride damage-driven rendering.** (#85) Any of
