@@ -1,6 +1,6 @@
 # แผนงานปรับปรุงประสิทธิภาพ Panel & Terminal Session (Performance Plan)
 
-Status: **partially-done** — Phase 1–3 merged (`perf/panel-session-performance`, commit `c3db2d5`). Phase 4 (P2 async IPC) pending.
+Status: **done-except-p2** — Phase 1–3.5 merged/completed (`fix/sidebar-ui-improvements`). Phase 4 (P2 async IPC) design document written, implementation pending.
 
 แผนงานนี้รวบรวมปัญหาด้านประสิทธิภาพที่พบจากการ code review ของ `HarnessSidebarPanelViewController`, `SessionCoordinator` และ `ContentAreaViewController` ทั้งหมด 6 ประเด็น รวมถึงฟีเจอร์ใหม่ **File Tree Auto-Update per Session** ที่ปัจจุบันยังไม่ถูก implement เรียงตามความสำคัญและความยากในการแก้ไข เพื่อให้ทีมสามารถวางแผนและลงมือแก้ไขได้อย่างมีระเบียบ
 
@@ -194,8 +194,8 @@ Actor ที่ run `git status --porcelain -z` off-main, return `[String: GitSt
 | `.untracked` | ⚫ secondary | — |
 | `.unmodified` | — | (hidden, no space) |
 
-#### F1-G — FSEvents live watcher — **NOT YET IMPLEMENTED**
-Branch switch live refresh ยังไม่ได้ทำ. File tree จะ refresh เมื่อ session switch หรือ manual tab change แต่ยังไม่ auto-refresh เมื่อ `git checkout` ใน terminal.
+#### ✅ F1-G — FSEvents live watcher — DONE
+ระบบ FSEvents watcher ได้รับการออกแบบและเชื่อมต่อเข้ากับ `FileTreeSwiftUIView` เรียบร้อยแล้ว (ผ่าน `.task`) ทำให้หน้า File Tree ทำการ auto-refresh และรีโหลดข้อมูลโครงสร้างไฟล์โดยอัตโนมัติเมื่อเกิดการเปลี่ยนกิ่ง Git (branch switch) หรือเกิดการเปลี่ยนแปลงบนระบบไฟล์ (เช่น `git checkout`, `git add`) โดยมีการหน่วงเวลา Debounce 500ms เพื่อป้องกันการทำงานซ้ำซ้อน
 
 **Plan สำหรับ F1-G:**
 ```swift
@@ -252,7 +252,7 @@ Phase 3 (New Feature — File Tree per Session) ✅ DONE — commit c3db2d5
   F1-E loadRoot concurrent fetch
   F1-F UI color dots + strikethrough
 
-Phase 3.5 (F1-G — FSEvents watcher) 🔲 TODO
+Phase 3.5 (F1-G — FSEvents watcher) ✅ DONE — commit c53b115
   FileTreeWatcher.startWatching/stopWatching
   FileTreeSwiftUIView wires up watcher on .task appear/disappear
 
@@ -265,7 +265,7 @@ Phase 4 (Deep Refactor) 🔲 TODO
 | 1 (quick wins) | P1, P4, P6 | ✅ Done |
 | 2 (medium) | P3, P5 | ✅ Done |
 | 3 (new feature) | F1-A → F1-F | ✅ Done |
-| 3.5 (FSEvents) | F1-G | 🔲 TODO |
+| 3.5 (FSEvents) | F1-G | ✅ Done |
 | 4 (deep) | P2 | 🔲 TODO |
 
 ---
@@ -286,8 +286,8 @@ Phase 4 (Deep Refactor) 🔲 TODO
 
 ## 6. สิ่งที่ยังเหลือ (Remaining Work)
 
-### F1-G — FSEvents watcher (live refresh)
-ปัจจุบัน file tree refresh เมื่อ session switch แต่ยังไม่ auto-refresh เมื่อ `git checkout` ใน terminal window. ต้อง implement FSEvents watcher ใน `FileTreeWatcher` แล้วเชื่อมกับ `FileTreeSwiftUIView`.
+### F1-G — FSEvents watcher (live refresh) — DONE
+เชื่อมต่อ FSEvents watcher เข้ากับ `FileTreeWatcher` และ `FileTreeSwiftUIView` แล้ว ทำให้การสลับกิ่งหรือแก้ไฟล์ภายนอกแสดงผลบน sidebar ได้อย่างทันท่วงที
 
 ### P2 — Async IPC refactor
 `DaemonSessionService.fetchSnapshot()` ยังเป็น blocking call (2s timeout) บน main thread. การแก้ต้องอัปเดต 40+ call sites — ทำใน branch แยก

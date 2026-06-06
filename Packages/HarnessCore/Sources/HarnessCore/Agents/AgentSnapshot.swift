@@ -15,6 +15,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
     case aider
     case gemini
     case goose
+    case antigravity
     case generic
 
     public var displayName: String {
@@ -30,6 +31,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
         case .aider: return "Aider"
         case .gemini: return "Gemini"
         case .goose: return "Goose"
+        case .antigravity: return "Antigravity"
         case .generic: return "Agent"
         }
     }
@@ -48,6 +50,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
         case .aider: return "AI"
         case .gemini: return "GM"
         case .goose: return "GS"
+        case .antigravity: return "AV"
         case .generic: return "AG"
         }
     }
@@ -66,6 +69,7 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
         case .aider: return "6ee7b7"
         case .gemini: return "8ab4f8"
         case .goose: return "f4b400"
+        case .antigravity: return "a855f7"
         case .generic: return "9aa0a6"
         }
     }
@@ -94,6 +98,8 @@ public enum AgentTitleInference {
         // ASCII punctuation, unicode glyphs like ✱✶✻★, and emoji.
         guard let start = lower.firstIndex(where: { $0.isLetter || $0.isNumber }) else { return nil }
         let trimmed = String(lower[start...])
+
+        if matches(trimmed, head: "agy") { return .antigravity }
 
         // Exact / prefixed match against the full displayName ("Claude Code", "Cursor Agent").
         for kind in AgentKind.allCases where kind != .generic {

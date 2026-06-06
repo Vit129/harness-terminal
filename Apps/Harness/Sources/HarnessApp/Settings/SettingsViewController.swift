@@ -145,7 +145,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     ]
     private static let agentColorKinds: [AgentKind] = [
         .codex, .claudeCode, .cursor, .grok, .pi, .hermes,
-        .openClaw, .openCode, .aider, .gemini, .goose,
+        .openClaw, .openCode, .aider, .gemini, .goose, .antigravity,
     ]
 
     deinit {
