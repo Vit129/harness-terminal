@@ -54,7 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // notification post. macOS only shows the system prompt the first time
         // and silently denies after; doing it eagerly means notifications can
         // start arriving as soon as the first agent transitions to `waiting`.
-        DesktopNotifier.requestAuthorizationIfNeeded()
+        // Defer slightly: UNUserNotificationCenter.current() crashes during its
+        // dispatch_once init on macOS 26 when called synchronously at launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DesktopNotifier.requestAuthorizationIfNeeded()
+        }
 
         // Locate/spawn the daemon off the main thread, then sync from real state.
         DaemonLauncher.shared.ensureRunning { ok in
