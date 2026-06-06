@@ -83,6 +83,9 @@ public enum CLICommandCatalog {
         .init("record", "Record a surface's output to a JSON Lines file"),
         .init("replay", "Replay a recorded session to this terminal"),
         .init("control-mode", "tmux control protocol over stdio", aliases: ["-CC"]),
+        .init("kill-server", "Stop the daemon gracefully (launchd restarts it)"),
+        .init("start-server", "Ensure the daemon is running"),
+        .init("show-messages", "Recent display-message log"),
         // Buffers
         .init("set-buffer", "Set a paste buffer"),
         .init("list-buffers", "List paste buffers", json: true),

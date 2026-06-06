@@ -207,10 +207,18 @@ public enum CommandIPCTranslator {
         case let .unbindHook(id):
             return .requests([.unbindHook(id: id)])
 
+        case let .respawnWindow(keepHistory):
+            // Every pane in the focused (or `-t`-resolved) window, one respawn each.
+            guard let tab = target.tab else { return .unresolved }
+            let surfaces = tab.rootPane.allSurfaceIDs().map(\.uuidString)
+            guard !surfaces.isEmpty else { return .unresolved }
+            return .requests(surfaces.map { .respawnPane(surfaceID: $0, keepHistory: keepHistory) })
+
         // Show verbs produce OUTPUT — each front-end queries the daemon and renders
         // through its own surface (GUI message, compositor status flash, control-mode
         // lines). The daemon's hook executor logs them as no-ops.
-        case .showOptions, .showEnvironment, .listBuffers, .showBuffer, .showHooks:
+        case .showOptions, .showEnvironment, .listBuffers, .showBuffer, .showHooks,
+             .showMessages, .refreshClient:
             return .clientLocal(command)
 
         case let .findWindow(pattern, name, content, title):

@@ -210,6 +210,27 @@ final class CommandIPCTranslatorTests: XCTestCase {
         else { return XCTFail("unknown group target must be unresolved") }
     }
 
+    /// respawn-window fans out to one respawnPane per pane in the window.
+    func testRespawnWindowFansOutToEveryPane() throws {
+        let (target, _, _) = try makeTarget(splitOnce: true)
+        guard case let .requests(reqs) = CommandIPCTranslator.translate(
+            .respawnWindow(keepHistory: false), target: target)
+        else { return XCTFail("expected requests") }
+        XCTAssertEqual(reqs.count, 2, "one respawn per pane")
+        for request in reqs {
+            guard case let .respawnPane(_, keepHistory) = request else {
+                return XCTFail("expected respawnPane, got \(request)")
+            }
+            XCTAssertFalse(keepHistory)
+        }
+        // The display verbs are client-local.
+        for command: Command in [.refreshClient, .showMessages] {
+            guard case .clientLocal = CommandIPCTranslator.translate(command, target: target) else {
+                return XCTFail("\(command.shortDescription) must be clientLocal")
+            }
+        }
+    }
+
     func testTargetedHonorsBaseIndex() throws {
         var editor = SessionEditor()
         let ws = try XCTUnwrap(editor.snapshot.activeWorkspace)

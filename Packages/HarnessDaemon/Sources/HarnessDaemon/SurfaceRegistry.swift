@@ -13,6 +13,10 @@ public final class SurfaceRegistry: @unchecked Sendable {
     public let environmentStore = EnvironmentStore()
     public let hookRegistry = HookRegistry()
     private let persistedDefaultShell: String?
+    /// tmux `show-messages`: recent rendered display-message lines (most recent last),
+    /// capped so a chatty hook can't grow the daemon. Guarded by `lock` like the editor.
+    private var messageLog: [String] = []
+    private static let messageLogCap = 50
     /// Opt-in lock/output instrumentation (off unless `HARNESS_DAEMON_METRICS=1`),
     /// surfaced via the `SIGUSR1` stats log. `DaemonServer` records output
     /// notifications and backlog through this same instance.
@@ -833,12 +837,16 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 HookEntry(id: $0.id, event: $0.event.rawValue, commandSource: $0.command.shortDescription, condition: $0.conditionFormat)
             }
             return .hooks(entries)
+        case .showMessages:
+            return .text(messageLog.joined(separator: "\n"))
         case let .displayMessage(format):
             // Render via FormatString using whatever context the daemon can
             // build right now (active workspace/tab from snapshot). UI clients
             // observe the notification bus and decide how to surface it.
             let context = buildFormatContext()
             let text = FormatString.evaluate(format, context: context)
+            messageLog.append("[\(ISO8601DateFormatter().string(from: Date()))] \(text)")
+            if messageLog.count > Self.messageLogCap { messageLog.removeFirst(messageLog.count - Self.messageLogCap) }
             NotificationBus.shared.post(AgentNotification(
                 surfaceID: nil,
                 daemonSurfaceID: nil,

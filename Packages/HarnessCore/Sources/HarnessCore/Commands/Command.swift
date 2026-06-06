@@ -121,6 +121,13 @@ public indirect enum Command: Codable, Sendable, Equatable {
     /// `find-window [-N|-C|-T] <pattern>` — fnmatch against window name/title (and pane
     /// content with `-C`), then focus the match. Default matches name + title, like tmux.
     case findWindow(pattern: String, matchName: Bool, matchContent: Bool, matchTitle: Bool)
+    /// `refresh-client [-S]`: re-pull options/snapshot and repaint. The GUI re-syncs;
+    /// the compositor re-reads options, re-solves, and rewrites the frame.
+    case refreshClient
+    /// `respawn-window [-k]`: respawn every pane in the focused (or targeted) window.
+    case respawnWindow(keepHistory: Bool)
+    /// `show-messages`: the daemon's recent display-message log.
+    case showMessages
 
     // MARK: Targeting
     /// Run `command` as if the client's focus were `spec`'s resolved target
@@ -238,6 +245,9 @@ extension Command {
         case let .unbindHook(id): return "unbind-hook \(id.uuidString)"
         case let .findWindow(pattern, _, content, _):
             return "find-window\(content ? " -C" : "") \(pattern)"
+        case .refreshClient: return "refresh-client"
+        case let .respawnWindow(keep): return keep ? "respawn-window" : "respawn-window -k"
+        case .showMessages: return "show-messages"
         case let .targeted(spec, command):
             return "\(command.shortDescription)\(spec.raw.isEmpty ? "" : " -t \(spec.raw)")"
         }

@@ -136,6 +136,8 @@ public enum IPCRequest: Codable, Sendable {
     case unbindHook(id: UUID)
     case listHooks(event: String?)
     case displayMessage(format: String)
+    /// tmux `show-messages`: the daemon's recent display-message log (most recent last).
+    case showMessages
 }
 
 public enum DirectionalAxis: String, Codable, Sendable {

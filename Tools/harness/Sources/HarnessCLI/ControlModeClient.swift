@@ -126,6 +126,9 @@ enum ControlModeClient {
         case let .showHooks(event):
             guard case let .hooks(hooks)? = try? client.request(.listHooks(event: event), timeout: 3) else { return nil }
             return hooks.map { "\($0.event) → \($0.commandSource) [\($0.id.uuidString)]" }.joined(separator: "\n")
+        case .showMessages:
+            guard case let .text(log)? = try? client.request(.showMessages, timeout: 3) else { return nil }
+            return log
         case let .findWindow(pattern, name, content, title):
             // Only the -C form reaches here (non-content translated to selectTab upstream).
             _ = content

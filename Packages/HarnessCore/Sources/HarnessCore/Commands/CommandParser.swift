@@ -63,7 +63,7 @@ public enum CommandParser {
         "synchronize-panes", "synchronize-pane", "setw-synchronize",
         "kill-window", "kill-tab", "rename-window", "rename-tab",
         "new-window", "new-tab", "rotate-window", "select-layout",
-        "new-session", "kill-session", "rename-session",
+        "new-session", "kill-session", "rename-session", "respawn-window",
         // `link-window` is excluded: its leaf parser interprets `-t` itself as the
         // target session to link into, so stripping it here would leave it empty.
         "unlink-window",
@@ -123,6 +123,7 @@ public enum CommandParser {
         "set-environment", "show-environment",
         "set-buffer", "paste-buffer", "delete-buffer", "list-buffers", "show-buffer",
         "set-hook", "show-hooks", "unbind-hook", "find-window",
+        "refresh-client", "respawn-window", "show-messages",
     ]
 
     private static func buildCommand(name rawName: String, tokens: [String]) throws -> Command {
@@ -471,6 +472,13 @@ public enum CommandParser {
                   let id = UUID(uuidString: raw)
             else { throw CommandParseError.missingArgument("unbind-hook requires a hook id (see show-hooks)") }
             return .unbindHook(id: id)
+        case "refresh-client", "refreshc":
+            return .refreshClient
+        case "respawn-window", "respawnw":
+            let keep = !(tokens.contains("-k") || tokens.contains("--clear-history"))
+            return .respawnWindow(keepHistory: keep)
+        case "show-messages":
+            return .showMessages
         case "find-window":
             guard let pattern = positionalTokens(tokens, skippingValuesFor: []).first else {
                 throw CommandParseError.missingArgument("find-window requires a pattern")

@@ -139,6 +139,14 @@ struct HarnessCLI {
                 try handleUnlinkWindow(args, client: client)
             case "control-mode", "-CC":
                 exit(try ControlModeClient.run(client: client))
+            case "kill-server":
+                handleKillServer()
+            case "start-server":
+                handleStartServer(client: client)
+            case "show-messages":
+                if case let .text(log) = try checkedRequest(client, .showMessages) {
+                    print(log.isEmpty ? "no messages" : log)
+                }
             case "kill-pane":
                 try handlePaneCommand(args, client: client) { paneID in .killPane(paneID: paneID) }
             case "swap-pane":
@@ -1211,6 +1219,50 @@ struct HarnessCLI {
         }
         let response = try checkedRequest(client, .selectPaneDirectional(currentPaneID: paneID, direction: axis))
         if case let .paneID(id) = response { print(id.uuidString) }
+    }
+
+    /// tmux `kill-server`, adapted to launchd supervision: SIGTERM stops the daemon
+    /// gracefully; KeepAlive respawns it with sessions restored from layout.json. A
+    /// permanent stop is launchctl's job, so say so instead of fighting it.
+    static func handleKillServer() {
+        let raw = (try? String(contentsOf: HarnessPaths.daemonPIDURL, encoding: .utf8)) ?? ""
+        guard let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else {
+            fputs("kill-server: no daemon.pid — is the daemon running? (try: harness-cli ping)\n", harnessStderr)
+            exit(1)
+        }
+        guard kill(pid, SIGTERM) == 0 else {
+            fputs("kill-server: kill(\(pid)) failed: \(String(cString: strerror(errno)))\n", harnessStderr)
+            exit(1)
+        }
+        print("sent SIGTERM to HarnessDaemon (pid \(pid))")
+        #if os(macOS)
+        print("note: launchd KeepAlive restarts it (sessions restore from layout.json);")
+        print("      to stop it for good: launchctl bootout gui/$(id -u)/\(HarnessPaths.launchAgentLabel)")
+        #endif
+    }
+
+    /// tmux `start-server`, adapted: ensure the daemon is up (ping → launchctl kickstart).
+    static func handleStartServer(client: DaemonClient) {
+        if case .pong? = try? client.request(.ping, timeout: 1) {
+            print("daemon already running")
+            return
+        }
+        #if os(macOS)
+        let kick = Process()
+        kick.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        kick.arguments = ["kickstart", "gui/\(getuid())/\(HarnessPaths.launchAgentLabel)"]
+        try? kick.run()
+        kick.waitUntilExit()
+        if case .pong? = try? client.request(.ping, timeout: 3) {
+            print("daemon started")
+            return
+        }
+        fputs("start-server: could not start the daemon — run 'harness-cli install' (LaunchAgent) or open Harness.app\n", harnessStderr)
+        exit(1)
+        #else
+        fputs("start-server: start HarnessDaemon directly (e.g. via systemd) on this platform\n", harnessStderr)
+        exit(1)
+        #endif
     }
 
     static func handleSetOption(_ args: [String], client: DaemonClient) throws {

@@ -1262,6 +1262,15 @@ private final class WindowSession: @unchecked Sendable {
                 flashStatus(hooks.isEmpty ? "no hooks bound"
                     : hooks.prefix(2).map { "\($0.event)→\($0.commandSource)" }.joined(separator: " · "))
             }
+        case .refreshClient:
+            refreshStatusOptions()
+            scheduleStructureCheck()
+            compositor.invalidate()
+            composeAndWrite()
+        case .showMessages:
+            if case let .text(log)? = try? client.request(.showMessages, timeout: 1) {
+                flashStatus(log.isEmpty ? "no messages" : (log.split(separator: "\n").last.map(String.init) ?? log))
+            }
         case let .findWindow(pattern, name, content, title):
             // Only the -C form reaches here (non-content translated to selectTab upstream).
             _ = content

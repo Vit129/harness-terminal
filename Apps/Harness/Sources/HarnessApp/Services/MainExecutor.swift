@@ -210,6 +210,14 @@ final class MainExecutor: CommandExecutor {
                 let lines = hooks.map { "\($0.event) → \($0.commandSource)  [\($0.id.uuidString.prefix(8))]" }
                 DisplayMessage.show(lines.isEmpty ? "no hooks bound" : lines.joined(separator: "\n"))
             }
+        case .refreshClient:
+            coordinator.syncFromDaemon()
+        case .respawnWindow:
+            try runViaTranslator(command, coordinator: coordinator)
+        case .showMessages:
+            if case let .text(log)? = coordinator.requestDaemon(.showMessages) {
+                DisplayMessage.show(log.isEmpty ? "no messages" : log)
+            }
         case let .findWindow(pattern, name, content, title):
             // Non-content searches translate to a selectTab request; -C needs live
             // captures, done inline (re-dispatching the clientLocal result would loop).

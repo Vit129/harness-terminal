@@ -31,6 +31,21 @@ final class SurfaceRegistryTests: XCTestCase {
         guard case .pong = SurfaceRegistry().handle(.ping) else { return XCTFail("expected pong") }
     }
 
+    /// tmux `show-messages`: display-message lines accumulate in a capped ring.
+    func testShowMessagesReturnsCappedLog() {
+        let registry = SurfaceRegistry()
+        guard case let .text(empty) = registry.handle(.showMessages) else { return XCTFail("expected text") }
+        XCTAssertTrue(empty.isEmpty)
+        for index in 0 ..< 55 {
+            _ = registry.handle(.displayMessage(format: "msg-\(index)"))
+        }
+        guard case let .text(log) = registry.handle(.showMessages) else { return XCTFail("expected text") }
+        let lines = log.split(separator: "\n")
+        XCTAssertEqual(lines.count, 50, "ring caps at 50")
+        XCTAssertTrue(lines.last?.contains("msg-54") ?? false, "most recent last")
+        XCTAssertFalse(log.contains("msg-0"), "oldest evicted")
+    }
+
     /// `remain-on-exit` (default on): a naturally exited pane is retained, but its
     /// live-looking metadata must be cleared — waiting status/notification reset, agent
     /// cleared, exit status recorded — and a revival via `ensureSurface` clears the exit
