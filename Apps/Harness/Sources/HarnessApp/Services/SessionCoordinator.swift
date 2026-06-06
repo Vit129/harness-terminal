@@ -430,7 +430,7 @@ final class SessionCoordinator: NSObject {
         let workspace = snapshot.activeWorkspace
         let session = workspace?.activeSession
         let tab = workspace?.activeTab
-        return FormatContext(
+        var context = FormatContext(
             paneID: activeSurfaceID?.uuidString,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -445,6 +445,17 @@ final class SessionCoordinator: NSObject {
             gitBranch: tab?.gitBranch,
             clientName: "Harness.app"
         )
+        // Extended tmux-parity fields derivable from the snapshot (PTY-backed values —
+        // pane_pid, pane_width, history_bytes — are daemon vantage; left nil here).
+        context.paneCurrentCommand = tab?.currentCommand
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        return context
     }
 
     /// Apply a theme. By default this seeds the full editable color set from the

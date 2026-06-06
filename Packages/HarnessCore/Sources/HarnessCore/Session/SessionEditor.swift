@@ -513,6 +513,14 @@ public struct SessionEditor: Sendable {
         bumpRevision()
     }
 
+    /// Foreground-command metadata (`#{pane_current_command}`), refreshed by the daemon's
+    /// metadata scan alongside cwd — same per-tab granularity as `updateTabCwd`.
+    public mutating func updateTabCurrentCommand(surfaceID: SurfaceID, command: String?) {
+        guard let match = tabIndex(surfaceID: surfaceID) else { return }
+        snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex].tabs[match.tabIndex].currentCommand = command
+        bumpRevision()
+    }
+
     public func tab(for surfaceID: SurfaceID) -> (workspaceID: WorkspaceID, tabID: TabID)? {
         tab(forSurfaceKey: surfaceID.uuidString)
     }

@@ -472,7 +472,7 @@ private final class WindowSession: @unchecked Sendable {
         let order = target.paneOrder
         let paneIndex = activePaneID.flatMap { order.firstIndex(of: $0) }
         let tabIndex = target.session?.tabs.firstIndex(where: { $0.id == tab.id })
-        return FormatContext(
+        var context = FormatContext(
             paneID: activePaneID?.uuidString,
             paneTitle: tab.title,
             paneCwd: tab.cwd,
@@ -487,6 +487,8 @@ private final class WindowSession: @unchecked Sendable {
             clientName: configuration.label,
             windowFlags: windowFlags()
         )
+        fillExtendedContext(&context, session: target.session)
+        return context
     }
 
     /// Format context for a *specific* pane (for `pane-border-format`): its index in the
@@ -496,7 +498,7 @@ private final class WindowSession: @unchecked Sendable {
         let target = currentTarget()
         let paneIndex = target.paneOrder.firstIndex(of: rect.paneID)
         let tabIndex = target.session?.tabs.firstIndex(where: { $0.id == tab.id })
-        return FormatContext(
+        var context = FormatContext(
             paneID: rect.paneID.uuidString,
             paneTitle: tab.title,
             paneCwd: tab.cwd,
@@ -511,6 +513,28 @@ private final class WindowSession: @unchecked Sendable {
             clientName: configuration.label,
             windowFlags: windowFlags()
         )
+        fillExtendedContext(&context, session: target.session)
+        // The compositor sized this pane itself — the rect IS the pane's cell geometry.
+        context.paneWidth = rect.cols
+        context.paneHeight = rect.rows
+        return context
+    }
+
+    /// Extended tmux-parity fields visible from the attach client: snapshot metadata plus
+    /// this client's own tty facts (the daemon fills PTY-backed values on its side).
+    private func fillExtendedContext(_ context: inout FormatContext, session: SessionGroup?) {
+        context.paneCurrentCommand = tab.currentCommand
+        context.paneDead = tab.exitStatus != nil
+        context.paneExitStatus = tab.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab.rootPane.allPaneIDs().count
+        if let session { context.windowActive = tab.id == session.activeTabID }
+        context.clientWidth = cols
+        context.clientHeight = rows
+        if let tty = ttyname(STDIN_FILENO) { context.clientTTY = String(cString: tty) }
+        context.clientTermname = ProcessInfo.processInfo.environment["TERM"]
     }
 
     private func windowFlags() -> String {

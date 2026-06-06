@@ -26,6 +26,10 @@ public struct Tab: Codable, Sendable, Identifiable, Equatable {
     public var bell: Bool
     /// Non-nil once the pane's process exits while `remain-on-exit` keeps the dead pane.
     public var exitStatus: Int?
+    /// Name of the foreground process in this tab's terminal (`#{pane_current_command}`),
+    /// refreshed by the daemon's ~1.5s metadata scan — same per-tab simplification as `cwd`
+    /// (a split tab reports its most recently probed pane). nil until first probed.
+    public var currentCommand: String?
     /// Pin this individual tab to survive a clean GUI quit even when neither the global
     /// `keepSessionsOnQuit` nor its session's `persistent` flag is set. The finest-grained
     /// persistence control: a tab survives iff `keepSessionsOnQuit || session.persistent ||
@@ -55,6 +59,7 @@ public struct Tab: Codable, Sendable, Identifiable, Equatable {
         silence: Bool = false,
         bell: Bool = false,
         exitStatus: Int? = nil,
+        currentCommand: String? = nil,
         persistent: Bool = false
     ) {
         self.id = id
@@ -77,6 +82,7 @@ public struct Tab: Codable, Sendable, Identifiable, Equatable {
         self.silence = silence
         self.bell = bell
         self.exitStatus = exitStatus
+        self.currentCommand = currentCommand
         self.persistent = persistent
     }
 
@@ -112,6 +118,8 @@ public struct Tab: Codable, Sendable, Identifiable, Equatable {
         silence = try container.decodeIfPresent(Bool.self, forKey: .silence) ?? false
         bell = try container.decodeIfPresent(Bool.self, forKey: .bell) ?? false
         exitStatus = try container.decodeIfPresent(Int.self, forKey: .exitStatus)
+        // Foreground-command metadata — absent in older layout.json; re-probed within ~1.5s.
+        currentCommand = try container.decodeIfPresent(String.self, forKey: .currentCommand)
         // Per-tab persistence pin — absent in older layout.json; default to unpinned.
         persistent = try container.decodeIfPresent(Bool.self, forKey: .persistent) ?? false
     }
