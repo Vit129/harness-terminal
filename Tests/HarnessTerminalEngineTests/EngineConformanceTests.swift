@@ -396,22 +396,22 @@ final class EngineConformanceTests: XCTestCase {
         // tools (Claude Code) read this to recognize which terminal they're in.
         let emu = TerminalEmulator(cols: 80, rows: 24)
         emu.terminalName = "Harness"
-        emu.terminalVersion = "1.2.0"
+        emu.terminalVersion = "1.3.0"
         var response = Data()
         emu.onResponse = { response.append($0) }
         emu.feed("\u{1b}[>q")
-        XCTAssertEqual(String(data: response, encoding: .utf8), "\u{1b}P>|Harness 1.2.0\u{1b}\\")
+        XCTAssertEqual(String(data: response, encoding: .utf8), "\u{1b}P>|Harness 1.3.0\u{1b}\\")
     }
 
     func testXTVersionUsesCompatibleIdentityWhenSet() {
         // Compatible mode reports `ghostty` so tools enable Kitty-keyboard / Shift+Enter today.
         let emu = TerminalEmulator(cols: 80, rows: 24)
         emu.terminalName = "ghostty"
-        emu.terminalVersion = "1.2.0"
+        emu.terminalVersion = "1.3.0"
         var response = Data()
         emu.onResponse = { response.append($0) }
         emu.feed("\u{1b}[>q")
-        XCTAssertEqual(String(data: response, encoding: .utf8), "\u{1b}P>|ghostty 1.2.0\u{1b}\\")
+        XCTAssertEqual(String(data: response, encoding: .utf8), "\u{1b}P>|ghostty 1.3.0\u{1b}\\")
     }
 
     func testTitleOSC() {

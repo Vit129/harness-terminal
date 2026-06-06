@@ -42,7 +42,7 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Color/theme diagnostics from the CLI: `harness-cli color-check` and `harness-cli theme-preview --theme <name>` print deterministic SGR pages for eyeballing fidelity in Harness itself
 - Command set: `send-keys`, `capture-pane`, `kill-pane`, `resize-pane`, `zoom-pane`, `swap-pane`, `rename-tab`, `attach`, and more
 - Command prefix keymap (default `Ctrl-A`) with a live cheatsheet (prefix `?`)
-- Agent detection for Claude Code, Codex, Cursor, Grok, Pi, Hermes, OpenClaw, OpenCode, Aider, Gemini, and Goose — each with a brand color and a sidebar chip
+- Agent detection for Claude Code, Codex, Cursor, Grok, Pi, Hermes, OpenClaw, OpenCode, Aider, Gemini, Goose, and Antigravity — each with a brand color and a sidebar chip
 - Agent alerts as desktop banners and a sidebar bell; `Cmd+Shift+U` jumps to whoever is waiting
 - One-line hook install: `harness-cli install-hooks <agent>`
 - Command palette (`Cmd+K`) and a native macOS Settings window (`Cmd+,`)
@@ -79,6 +79,8 @@ A project-aware file tree that stays in sync with your active terminal session:
 - Single-click to open a file; right-click to copy the full path
 - Drag a file or folder into a terminal pane to insert its shell-quoted path
 - Tree updates when you `cd` in the terminal
+- **Git status colors** in the file tree (yellow for modified, green for untracked, red/strikethrough for deleted)
+- **FSEvents watcher** for real-time auto-refresh on Git branch switches and filesystem updates
 
 ### Git
 

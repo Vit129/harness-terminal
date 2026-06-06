@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] - 2026-06-06
+
+### Added
+- **Antigravity / agy support** — Full native support for the Antigravity agent family (process-tree detection, `agy`/`antigravity` title inference, custom brand color, and the Gemini spark vector brand mark).
+- **File Tree Auto-Update & Git Status** — Integrated real-time FSEvents filesystem watcher for auto-refreshing the file tree on branch switches and file changes. Added Git status color indicators directly in the file tree (yellow for modified, green for untracked, red/strikethrough for deleted).
+- **Richer Sidebar UI** — Default session titles now show the active AI agent name (e.g., `Claude Code`, `Codex`, `Antigravity`), while the subtitle shows the repository name, active Git branch, running command/process, and directory path.
+- **Dynamic Session Group Headers** — Enlarged font size/weight of group session names (`13 semibold`) and disclosure chevrons (`15 bold`), with dynamic color highlights on hover (`textSecondary` -> `textPrimary` white).
+
+### Fixed
+- **Sidebar Reload Performance (P1)** — Cached row calculations to eliminate O(N²) calculations during table reload.
+- **O(1) Surface/Tab Registry Lookup (P3)** — Added `surfaceIndex` flat map dictionary to bypass triple-nested workspace/session/tab scanning.
+- **Redundant Theme Application (P4)** — Guarded `applyThemeToAllHosts()` with a theme signature key to prevent expensive restyling on simple pane switches.
+- **Split Pane Layout Flicker (P5)** — Synchronously enforced `layoutSubtreeIfNeeded()` during split pane construction to eliminate double-layout layout stutter/PTY SIGWINCH.
+- **Metadata Probe Deduplication (P6)** — Deduplicated CWD path checking during metadata refreshes and extended the poll interval.
+
 ## [1.2.0] - 2026-06-06
 
 ### Added
