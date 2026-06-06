@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-06-06
+
+### Added
+- **CMUX-style split panes** — Split right with ⌘D, navigate panes with ⌥⌘←→↑↓, close pane with ⌥⇧⌘W. Split buttons (split right + close) appear at top-right corner of each pane.
+- **Enhanced Git panel** — Commit ▼ dropdown menu (Commit Tracked, Amend, Signoff). Sync button with per-remote submenus (Fetch From, Pull Rebase, Push To). Auto-switches between "Fetch ▼" and "Push ▼" based on upstream status.
+
+### Changed
+- **Removed pane-local surface tabs (S1/S2/S3)** — Replaced broken drag-to-split UX with CMUX-inspired keyboard shortcuts and icon buttons. Each pane is now 1 terminal (no multi-surface per pane).
+
+### Known Issues
+- Split down (⌘⇧D) causes terminal to go black (Metal CADisplayLink not re-activated on same-window reparent).
+- Split 3+ panes stack to the right (nested binary 50/50). Planned fix: N-ary PaneNode + single NSSplitView with adjustSubviews().
+
 ## [1.3.0] - 2026-06-06
 
 ### Added

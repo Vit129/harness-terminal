@@ -146,6 +146,28 @@ final class SessionEditorTests: XCTestCase {
         XCTAssertEqual(updated.rootPane.allPaneIDs().count, 2)
     }
 
+    func testPaneSurfaceTabCanSplitOutOfPaneBeforeTarget() throws {
+        var editor = SessionEditor()
+        let tab = try XCTUnwrap(editor.snapshot.activeWorkspace?.activeTab)
+        let paneID = try XCTUnwrap(tab.activePaneID)
+        let originalSurface = try XCTUnwrap(editor.surfaceID(forPaneID: paneID))
+        let movedSurface = try XCTUnwrap(editor.addSurface(tabID: tab.id, paneID: paneID))
+
+        let newPaneID = try XCTUnwrap(editor.splitPaneSurface(
+            tabID: tab.id,
+            sourcePaneID: paneID,
+            surfaceID: movedSurface,
+            targetPaneID: paneID,
+            direction: .horizontal,
+            beforeTarget: true
+        ))
+
+        XCTAssertEqual(editor.surfaceID(forPaneID: newPaneID), movedSurface)
+        let updated = try XCTUnwrap(editor.snapshot.activeWorkspace?.activeTab)
+        XCTAssertEqual(Set(updated.rootPane.allSurfaceIDs()), Set([originalSurface, movedSurface]))
+        XCTAssertEqual(updated.rootPane.allPaneIDs().count, 2)
+    }
+
     /// v2 layout.json had no `activePaneID`/`lastActivePaneID`; decoding must backfill
     /// the focus to the first leaf so older files load with a valid active pane.
     func testTabDecodeBackfillsActivePaneFromV2() throws {

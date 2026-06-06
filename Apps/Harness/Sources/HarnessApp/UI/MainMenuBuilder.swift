@@ -101,6 +101,30 @@ enum MainMenuBuilder {
         splitVItem.target = MenuTarget.shared
         view.submenu?.addItem(splitVItem)
         view.submenu?.addItem(.separator())
+
+        let focusLeft = NSMenuItem(title: "Focus Pane Left", action: #selector(MenuTarget.focusPaneLeft), keyEquivalent: "\u{F702}")
+        focusLeft.keyEquivalentModifierMask = [.command, .option]
+        focusLeft.target = MenuTarget.shared
+        view.submenu?.addItem(focusLeft)
+        let focusRight = NSMenuItem(title: "Focus Pane Right", action: #selector(MenuTarget.focusPaneRight), keyEquivalent: "\u{F703}")
+        focusRight.keyEquivalentModifierMask = [.command, .option]
+        focusRight.target = MenuTarget.shared
+        view.submenu?.addItem(focusRight)
+        let focusUp = NSMenuItem(title: "Focus Pane Up", action: #selector(MenuTarget.focusPaneUp), keyEquivalent: "\u{F700}")
+        focusUp.keyEquivalentModifierMask = [.command, .option]
+        focusUp.target = MenuTarget.shared
+        view.submenu?.addItem(focusUp)
+        let focusDown = NSMenuItem(title: "Focus Pane Down", action: #selector(MenuTarget.focusPaneDown), keyEquivalent: "\u{F701}")
+        focusDown.keyEquivalentModifierMask = [.command, .option]
+        focusDown.target = MenuTarget.shared
+        view.submenu?.addItem(focusDown)
+
+        let closePane = NSMenuItem(title: "Close Pane", action: #selector(MenuTarget.closePane), keyEquivalent: "w")
+        closePane.keyEquivalentModifierMask = [.command, .shift, .option]
+        closePane.target = MenuTarget.shared
+        view.submenu?.addItem(closePane)
+        view.submenu?.addItem(.separator())
+
         let detachItem = NSMenuItem(title: "Detach Pane", action: #selector(MenuTarget.detachPane), keyEquivalent: "")
         detachItem.target = MenuTarget.shared
         view.submenu?.addItem(detachItem)
@@ -342,6 +366,12 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
     @objc func splitV() {
         SessionCoordinator.shared.splitActivePane(direction: .vertical)
     }
+
+    @objc func focusPaneLeft() { SessionCoordinator.shared.focusPaneDirectional(.left) }
+    @objc func focusPaneRight() { SessionCoordinator.shared.focusPaneDirectional(.right) }
+    @objc func focusPaneUp() { SessionCoordinator.shared.focusPaneDirectional(.up) }
+    @objc func focusPaneDown() { SessionCoordinator.shared.focusPaneDirectional(.down) }
+    @objc func closePane() { SessionCoordinator.shared.killActivePane() }
 
     @objc func detachPane() {
         SessionCoordinator.shared.detachActiveSurface()

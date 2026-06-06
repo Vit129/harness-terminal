@@ -36,7 +36,7 @@ final class GitPanelView: NSView {
     // Bottom bar: branch + fetch
     private let bottomBar = NSView()
     private let branchLabel = NSTextField(labelWithString: "")
-    private let syncButton = NSButton(title: "Fetch ▾", target: nil, action: nil)
+    private let syncButton = NSButton(title: "Fetch ▼", target: nil, action: nil)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -83,9 +83,13 @@ final class GitPanelView: NSView {
         commitField.maximumNumberOfLines = 4
         commitField.translatesAutoresizingMaskIntoConstraints = false
 
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        commitButton.title = "Commit ▼"
         commitButton.bezelStyle = .recessed; commitButton.controlSize = .small
-        commitButton.font = .systemFont(ofSize: 11, weight: .medium)
-        commitButton.target = self; commitButton.action = #selector(commitAction)
+        commitButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        commitButton.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        commitButton.imagePosition = .imageLeft
+        commitButton.target = self; commitButton.action = #selector(showCommitMenu)
         commitButton.translatesAutoresizingMaskIntoConstraints = false
 
         // History container
@@ -118,8 +122,10 @@ final class GitPanelView: NSView {
         branchLabel.isSelectable = false
 
         syncButton.bezelStyle = .recessed; syncButton.controlSize = .small
-        syncButton.font = .systemFont(ofSize: 11, weight: .medium)
+        syncButton.font = .systemFont(ofSize: 12, weight: .semibold)
         syncButton.target = self; syncButton.action = #selector(showSyncMenu)
+        syncButton.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        syncButton.imagePosition = .imageLeft
         syncButton.translatesAutoresizingMaskIntoConstraints = false
 
         bottomBar.addSubview(branchLabel)
@@ -233,25 +239,87 @@ final class GitPanelView: NSView {
 
     @objc private func showSyncMenu() {
         let menu = NSMenu()
-        let fetch = NSMenuItem(title: "Fetch", action: #selector(doFetch), keyEquivalent: "")
-        fetch.target = self
-        let pull = NSMenuItem(title: "Pull", action: #selector(doPull), keyEquivalent: "")
-        pull.target = self
-        let push = NSMenuItem(title: "Push", action: #selector(doPush), keyEquivalent: "")
-        push.target = self
-        let forcePush = NSMenuItem(title: "Force Push", action: #selector(doForcePush), keyEquivalent: "")
-        forcePush.target = self
-        menu.addItem(fetch)
-        menu.addItem(pull)
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(push)
-        menu.addItem(forcePush)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: syncButton.bounds.height), in: syncButton)
+        guard let path = currentPath else { return }
+        
+        Task {
+            let remotes = await getRemotes(in: path)
+            
+            let fetch = NSMenuItem(title: "Fetch", action: #selector(doFetch), keyEquivalent: "")
+            fetch.target = self
+            fetch.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Fetch")
+            menu.addItem(fetch)
+            
+            if !remotes.isEmpty {
+                let fetchFrom = NSMenuItem(title: "Fetch From", action: nil, keyEquivalent: "")
+                fetchFrom.image = NSImage(systemSymbolName: "arrow.down.left.circle", accessibilityDescription: "Fetch From")
+                let fetchFromSubmenu = NSMenu()
+                for remote in remotes {
+                    let item = NSMenuItem(title: remote, action: #selector(doFetchFrom(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = remote
+                    fetchFromSubmenu.addItem(item)
+                }
+                fetchFrom.submenu = fetchFromSubmenu
+                menu.addItem(fetchFrom)
+            }
+            
+            let pull = NSMenuItem(title: "Pull", action: #selector(doPull), keyEquivalent: "")
+            pull.target = self
+            pull.image = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: "Pull")
+            menu.addItem(pull)
+            
+            let pullRebase = NSMenuItem(title: "Pull (Rebase)", action: #selector(doPullRebase), keyEquivalent: "")
+            pullRebase.target = self
+            pullRebase.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "Pull (Rebase)")
+            menu.addItem(pullRebase)
+            
+            menu.addItem(NSMenuItem.separator())
+            
+            let push = NSMenuItem(title: "Push", action: #selector(doPush), keyEquivalent: "")
+            push.target = self
+            push.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "Push")
+            menu.addItem(push)
+            
+            if !remotes.isEmpty {
+                let pushTo = NSMenuItem(title: "Push To", action: nil, keyEquivalent: "")
+                pushTo.image = NSImage(systemSymbolName: "arrow.up.right.circle", accessibilityDescription: "Push To")
+                let pushToSubmenu = NSMenu()
+                for remote in remotes {
+                    let item = NSMenuItem(title: remote, action: #selector(doPushTo(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = remote
+                    pushToSubmenu.addItem(item)
+                }
+                pushTo.submenu = pushToSubmenu
+                menu.addItem(pushTo)
+            }
+            
+            let forcePush = NSMenuItem(title: "Force Push", action: #selector(doForcePush), keyEquivalent: "")
+            forcePush.target = self
+            forcePush.image = NSImage(systemSymbolName: "arrow.up.to.line", accessibilityDescription: "Force Push")
+            menu.addItem(forcePush)
+            
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: syncButton.bounds.height), in: syncButton)
+        }
+    }
+
+    private func getRemotes(in path: String) async -> [String] {
+        let output = await runGit(["remote"], in: path)
+        return output.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     @objc private func doFetch() { runAndRefresh(["fetch"]) }
+    @objc private func doFetchFrom(_ sender: NSMenuItem) {
+        guard let remote = sender.representedObject as? String else { return }
+        runAndRefresh(["fetch", remote])
+    }
     @objc private func doPull() { runAndRefresh(["pull"]) }
+    @objc private func doPullRebase() { runAndRefresh(["pull", "--rebase"]) }
     @objc private func doPush() { runAndRefresh(["push"]) }
+    @objc private func doPushTo(_ sender: NSMenuItem) {
+        guard let remote = sender.representedObject as? String else { return }
+        runAndRefresh(["push", remote])
+    }
     @objc private func doForcePush() { runAndRefresh(["push", "--force-with-lease"]) }
 
     @objc private func stageAllAction() { runAndRefresh(["add", "-A"]) }
@@ -279,10 +347,47 @@ final class GitPanelView: NSView {
         runAndRefresh(["checkout", branch])
     }
 
+    @objc private func showCommitMenu() {
+        let menu = NSMenu()
+        
+        let commit = NSMenuItem(title: "Commit Tracked", action: #selector(commitAction), keyEquivalent: "")
+        commit.target = self
+        commit.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: "Commit Tracked")
+        
+        let amend = NSMenuItem(title: "Amend", action: #selector(commitAmendAction), keyEquivalent: "")
+        amend.target = self
+        amend.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Amend")
+        
+        let signoff = NSMenuItem(title: "Signoff", action: #selector(commitSignoffAction), keyEquivalent: "")
+        signoff.target = self
+        signoff.image = NSImage(systemSymbolName: "signature", accessibilityDescription: "Signoff")
+        
+        menu.addItem(commit)
+        menu.addItem(amend)
+        menu.addItem(signoff)
+        
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: commitButton.bounds.height), in: commitButton)
+    }
+
     @objc private func commitAction() {
         let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         runAndRefresh(["commit", "-m", msg], clearField: true)
+    }
+
+    @objc private func commitAmendAction() {
+        let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if msg.isEmpty {
+            runAndRefresh(["commit", "--amend", "--no-edit"], clearField: true)
+        } else {
+            runAndRefresh(["commit", "--amend", "-m", msg], clearField: true)
+        }
+    }
+
+    @objc private func commitSignoffAction() {
+        let msg = commitField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !msg.isEmpty else { return }
+        runAndRefresh(["commit", "-s", "-m", msg], clearField: true)
     }
 
     @objc private func addWorktreeAction() {
@@ -414,7 +519,14 @@ final class GitPanelView: NSView {
                 isAhead = true
             }
         }
-        syncButton.title = (isAhead || didCommitSinceLastSync) ? "Push ▾" : "Fetch ▾"
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        if isAhead || didCommitSinceLastSync {
+            syncButton.title = "Push ▼"
+            syncButton.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        } else {
+            syncButton.title = "Fetch ▼"
+            syncButton.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)?.withSymbolConfiguration(symbolConfig)
+        }
 
         let changeCount = porcelain.components(separatedBy: "\n").filter { !$0.isEmpty }.count
         tabSelector.setLabel("Changes (\(changeCount))", forSegment: 0)

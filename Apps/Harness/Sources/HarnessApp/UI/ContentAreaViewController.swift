@@ -304,6 +304,17 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
             container.bottomAnchor.constraint(equalTo: terminalHost.bottomAnchor),
         ])
         paneContainer = container
+        // Force re-render: hosts reused within the same window don't fire
+        // viewDidMoveToWindow, so their CADisplayLink may be stale.
+        DispatchQueue.main.async {
+            for surfaceID in tab.rootPane.allSurfaceIDs() {
+                if let host = TerminalPaneRegistryAccess.host(for: surfaceID) {
+                    host.needsLayout = true
+                    host.needsDisplay = true
+                    host.subviews.forEach { $0.needsDisplay = true }
+                }
+            }
+        }
         // Re-assert the focused-pane border after the (re)mount — reused hosts keep
         // their flag, but a freshly shown tab needs its active pane established.
         coordinator.ensureActivePane(for: tab)
@@ -383,7 +394,7 @@ final class PaneContainerView: NSView {
     private func build(node: PaneNode, cwd: String, into parent: NSView) {
         switch node {
         case let .leaf(leaf):
-            let paneShell = PaneSurfaceDropTargetView(tabID: tabID, paneID: leaf.id)
+            let paneShell = NSView()
             HarnessDesign.makeClear(paneShell)
             paneShell.translatesAutoresizingMaskIntoConstraints = false
             parent.addSubview(paneShell)
@@ -394,28 +405,27 @@ final class PaneContainerView: NSView {
                 paneShell.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
             ])
 
-            if let tabID {
-                let strip = PaneSurfaceTabStripView(tabID: tabID, leaf: leaf)
-                strip.translatesAutoresizingMaskIntoConstraints = false
-                paneShell.addSubview(strip)
-                NSLayoutConstraint.activate([
-                    strip.topAnchor.constraint(equalTo: paneShell.topAnchor),
-                    strip.leadingAnchor.constraint(equalTo: paneShell.leadingAnchor),
-                    strip.trailingAnchor.constraint(equalTo: paneShell.trailingAnchor),
-                    strip.heightAnchor.constraint(equalToConstant: 26),
-                ])
-            }
-
             let host = coordinator.terminalHost(for: leaf.activeSurfaceID ?? leaf.surfaceID, cwd: cwd)
             host.translatesAutoresizingMaskIntoConstraints = false
             paneShell.addSubview(host)
             NSLayoutConstraint.activate([
-                host.topAnchor.constraint(equalTo: paneShell.topAnchor, constant: 26),
+                host.topAnchor.constraint(equalTo: paneShell.topAnchor),
                 host.leadingAnchor.constraint(equalTo: paneShell.leadingAnchor),
                 host.trailingAnchor.constraint(equalTo: paneShell.trailingAnchor),
                 host.bottomAnchor.constraint(equalTo: paneShell.bottomAnchor),
             ])
-            if let tab = coordinator.snapshot.activeWorkspace?.activeTab {
+
+            // CMUX-style split buttons at top-right, above Metal via zPosition
+            if let tabID {
+                let splitButtons = PaneSplitButtonsView(tabID: tabID, paneID: leaf.id)
+                splitButtons.translatesAutoresizingMaskIntoConstraints = false
+                splitButtons.wantsLayer = true
+                splitButtons.layer?.zPosition = 1000
+                paneShell.addSubview(splitButtons)
+                NSLayoutConstraint.activate([
+                    splitButtons.trailingAnchor.constraint(equalTo: paneShell.trailingAnchor, constant: -8),
+                    splitButtons.topAnchor.constraint(equalTo: paneShell.topAnchor, constant: 8),
+                ])
             }
         case let .branch(direction, ratio, firstNode, secondNode):
             let split = HarnessSplitView()
@@ -424,9 +434,13 @@ final class PaneContainerView: NSView {
             split.tabID = tabID
             split.firstPaneID = firstLeafID(firstNode)
             split.secondPaneID = firstLeafID(secondNode)
+            split.ratio = ratio
+            split.direction = direction
             split.delegate = split
             let first = NSView()
+            first.autoresizingMask = [.width, .height]
             let second = NSView()
+            second.autoresizingMask = [.width, .height]
             split.addSubview(first)
             split.addSubview(second)
             split.translatesAutoresizingMaskIntoConstraints = false
@@ -462,16 +476,26 @@ final class PaneContainerView: NSView {
     }
 }
 
+/// Transparent overlay that passes all hits through to the view behind it,
+/// except for clicks that land on one of its subviews (the split buttons).
 @MainActor
-private final class PaneSurfaceTabStripView: NSView {
-    private let tabID: TabID
-    private let leaf: PaneLeaf
-    private let stack = NSStackView()
-    private let plusButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+private final class HitTestPassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
 
-    init(tabID: TabID, leaf: PaneLeaf) {
+/// CMUX-style split buttons: small icon buttons at the bottom-right corner of each pane.
+@MainActor
+private final class PaneSplitButtonsView: NSView {
+    private let tabID: TabID
+    private let paneID: PaneID
+    private let stack = NSStackView()
+
+    init(tabID: TabID, paneID: PaneID) {
         self.tabID = tabID
-        self.leaf = leaf
+        self.paneID = paneID
         super.init(frame: .zero)
         setup()
     }
@@ -480,203 +504,58 @@ private final class PaneSurfaceTabStripView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        HarnessDesign.makeClear(self)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
+        layer?.cornerRadius = 6
+        layer?.zPosition = 1000
+
         stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 4
+        stack.spacing = 1
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
-        for (index, surface) in leaf.surfaces.enumerated() {
-            let button = PaneSurfaceDragButton(
-                title: surfaceTitle(surface, index: index),
-                tabID: tabID,
-                paneID: leaf.id,
-                surfaceID: surface.id
-            )
-            button.target = self
-            button.action = #selector(selectSurface(_:))
-            button.bezelStyle = .texturedRounded
-            button.controlSize = .small
-            button.font = .systemFont(ofSize: 10, weight: surface.id == leaf.activeSurfaceID ? .semibold : .regular)
-            button.contentTintColor = surface.id == leaf.activeSurfaceID
-                ? HarnessDesign.chrome.textPrimary
-                : HarnessDesign.chrome.textSecondary
-            button.toolTip = surface.cwd
-            button.identifier = NSUserInterfaceItemIdentifier(surface.id.uuidString)
-            stack.addArrangedSubview(button)
-        }
-
-        plusButton.setSymbol("plus", accessibilityDescription: "New surface", pointSize: 10, weight: .medium)
-        plusButton.toolTip = "New surface in pane"
-        plusButton.target = self
-        plusButton.action = #selector(newSurface)
-        plusButton.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(plusButton)
-        plusButton.widthAnchor.constraint(equalToConstant: 22).isActive = true
-        plusButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        let splitRight = makeButton("square.split.2x1", tooltip: "Split Right (⌘D)", action: #selector(splitH))
+        let closeBtn = makeButton("xmark", tooltip: "Close Pane (⌥⇧⌘W)", action: #selector(closePane))
+        stack.addArrangedSubview(splitRight)
+        stack.addArrangedSubview(closeBtn)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
         ])
+
+        alphaValue = 1
     }
 
-    private func surfaceTitle(_ surface: PaneSurface, index: Int) -> String {
-        let trimmed = surface.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == "Shell" ? "S\(index + 1)" : trimmed
+    private func makeButton(_ symbol: String, tooltip: String, action: Selector) -> NSButton {
+        let btn = NSButton(frame: .zero)
+        btn.bezelStyle = .inline
+        btn.isBordered = false
+        btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+        btn.imagePosition = .imageOnly
+        btn.toolTip = tooltip
+        btn.target = self
+        btn.action = action
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        btn.contentTintColor = .white.withAlphaComponent(0.7)
+        return btn
     }
 
-    @objc private func selectSurface(_ sender: NSButton) {
-        guard let raw = sender.identifier?.rawValue,
-              let surfaceID = UUID(uuidString: raw)
-        else { return }
-        SessionCoordinator.shared.selectPaneSurface(tabID: tabID, paneID: leaf.id, surfaceID: surfaceID)
+    @objc private func splitH() {
+        SessionCoordinator.shared.splitActivePane(direction: .horizontal)
     }
 
-    @objc private func newSurface() {
-        SessionCoordinator.shared.newSurface(tabID: tabID, paneID: leaf.id)
-    }
-}
-
-private struct PaneSurfaceDragPayload: Codable {
-    var tabID: TabID
-    var sourcePaneID: PaneID
-    var surfaceID: SurfaceID
-
-    static let pasteboardType = NSPasteboard.PasteboardType("dev.harness.pane-surface")
-
-    init(tabID: TabID, sourcePaneID: PaneID, surfaceID: SurfaceID) {
-        self.tabID = tabID
-        self.sourcePaneID = sourcePaneID
-        self.surfaceID = surfaceID
+    @objc private func splitV() {
+        SessionCoordinator.shared.splitActivePane(direction: .vertical)
     }
 
-    init?(pasteboard: NSPasteboard) {
-        guard let data = pasteboard.data(forType: Self.pasteboardType),
-              let payload = try? JSONDecoder().decode(Self.self, from: data)
-        else { return nil }
-        self = payload
-    }
-
-    func pasteboardItem() -> NSPasteboardItem? {
-        guard let data = try? JSONEncoder().encode(self) else { return nil }
-        let item = NSPasteboardItem()
-        item.setData(data, forType: Self.pasteboardType)
-        return item
-    }
-}
-
-@MainActor
-private final class PaneSurfaceDragButton: NSButton, NSDraggingSource {
-    private let payload: PaneSurfaceDragPayload
-    private var dragStarted = false
-
-    init(title: String, tabID: TabID, paneID: PaneID, surfaceID: SurfaceID) {
-        self.payload = PaneSurfaceDragPayload(tabID: tabID, sourcePaneID: paneID, surfaceID: surfaceID)
-        super.init(frame: .zero)
-        self.title = title
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func mouseDown(with event: NSEvent) {
-        dragStarted = false
-        super.mouseDown(with: event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard !dragStarted, let item = payload.pasteboardItem() else {
-            super.mouseDragged(with: event)
-            return
-        }
-        dragStarted = true
-        let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        draggingItem.setDraggingFrame(bounds, contents: dragImage())
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
-    }
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .move
-    }
-
-    private func dragImage() -> NSImage {
-        guard let bitmap = bitmapImageRepForCachingDisplay(in: bounds) else {
-            return NSImage(size: bounds.size)
-        }
-        cacheDisplay(in: bounds, to: bitmap)
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(bitmap)
-        return image
-    }
-}
-
-@MainActor
-private final class PaneSurfaceDropTargetView: NSView {
-    private let tabID: TabID?
-    private let paneID: PaneID
-
-    init(tabID: TabID?, paneID: PaneID) {
-        self.tabID = tabID
-        self.paneID = paneID
-        super.init(frame: .zero)
-        registerForDraggedTypes([PaneSurfaceDragPayload.pasteboardType])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(sender)
-    }
-
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(sender)
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let tabID,
-              let payload = PaneSurfaceDragPayload(pasteboard: sender.draggingPasteboard),
-              payload.tabID == tabID
-        else { return false }
-        let placement = splitPlacement(for: convert(sender.draggingLocation, from: nil))
-        SessionCoordinator.shared.splitPaneSurface(
-            tabID: tabID,
-            sourcePaneID: payload.sourcePaneID,
-            surfaceID: payload.surfaceID,
-            targetPaneID: paneID,
-            direction: placement.direction,
-            beforeTarget: placement.beforeTarget
-        )
-        return true
-    }
-
-    private func dragOperation(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let tabID,
-              let payload = PaneSurfaceDragPayload(pasteboard: sender.draggingPasteboard),
-              payload.tabID == tabID
-        else { return [] }
-        return .move
-    }
-
-    private func splitPlacement(for point: NSPoint) -> (direction: SplitDirection, beforeTarget: Bool) {
-        let left = max(0, point.x)
-        let right = max(0, bounds.width - point.x)
-        let bottom = max(0, point.y)
-        let top = max(0, bounds.height - point.y)
-        let nearest = min(left, right, bottom, top)
-        switch nearest {
-        case left:
-            return (.horizontal, true)
-        case right:
-            return (.horizontal, false)
-        case bottom:
-            return (.vertical, false)
-        default:
-            return (.vertical, true)
-        }
+    @objc private func closePane() {
+        SessionCoordinator.shared.killActivePane()
     }
 }
 
@@ -688,9 +567,26 @@ final class HarnessSplitView: NSSplitView, NSSplitViewDelegate {
     var tabID: TabID?
     var firstPaneID: PaneID?
     var secondPaneID: PaneID?
+    var ratio: Double?
+    var direction: SplitDirection?
+    private var appliedRatio = false
     private var ratioDebounce: DispatchWorkItem?
 
     override var dividerColor: NSColor { HarnessChrome.current.border }
+
+    override func layout() {
+        super.layout()
+        if !appliedRatio, let ratio, let direction {
+            let totalSize = direction == .horizontal ? frame.width : frame.height
+            if totalSize > 0 {
+                let position = totalSize * ratio
+                if position > 0, position < totalSize {
+                    appliedRatio = true
+                    setPosition(position, ofDividerAt: 0)
+                }
+            }
+        }
+    }
 
     func splitView(
         _ splitView: NSSplitView,

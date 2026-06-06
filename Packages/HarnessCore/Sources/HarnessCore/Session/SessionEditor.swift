@@ -183,7 +183,7 @@ public struct SessionEditor: Sendable {
         return (workspace.id, tab.id, pane)
     }
 
-    private func split(node: inout PaneNode, targetPaneID: PaneID, direction: SplitDirection) -> PaneID? {
+    private func split(node: inout PaneNode, targetPaneID: PaneID, direction: SplitDirection, paneCount: Int = 1) -> PaneID? {
         switch node {
         case let .leaf(leaf) where leaf.id == targetPaneID:
             let newLeaf = PaneLeaf()

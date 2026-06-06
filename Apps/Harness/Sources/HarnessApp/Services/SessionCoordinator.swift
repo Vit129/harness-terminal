@@ -544,6 +544,22 @@ final class SessionCoordinator: NSObject {
         syncFromDaemon()
     }
 
+    func focusPaneDirectional(_ direction: DirectionalAxis) {
+        guard let workspace = snapshot.activeWorkspace,
+              let tab = workspace.activeTab,
+              let paneID = activeSurfaceID.flatMap({ paneID(for: $0, in: tab.rootPane) })
+                ?? tab.rootPane.allPaneIDs().last
+        else { return }
+        if case let .surfaceID(raw)? = requestDaemon(.selectPaneDirectional(currentPaneID: paneID, direction: direction)),
+           let surfaceID = UUID(uuidString: raw) {
+            syncFromDaemon()
+            setActiveSurface(surfaceID)
+            terminalHosts.host(for: surfaceID)?.focusTerminal()
+        } else {
+            syncFromDaemon()
+        }
+    }
+
     func newSurface(tabID: TabID, paneID: PaneID) {
         guard case let .surfaceID(raw)? = requestDaemon(.newSurface(tabID: tabID, paneID: paneID, shell: settings.defaultShell)),
               let surfaceID = UUID(uuidString: raw)

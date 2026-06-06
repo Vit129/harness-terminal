@@ -1730,7 +1730,7 @@ private final class SessionGroupHeaderRowView: NSView {
 
     private let leftStack = NSStackView()
     private let rightStack = NSStackView()
-    private let disclosureLabel = NSTextField(labelWithString: "▾")
+    private let disclosureLabel = NSTextField(labelWithString: "▼")
     private let label = NSTextField(labelWithString: "")
     private let addButton = NSButton()
     private let optionsButton = NSButton()
@@ -1742,7 +1742,7 @@ private final class SessionGroupHeaderRowView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        disclosureLabel.font = .systemFont(ofSize: 15, weight: .bold)
+        disclosureLabel.font = .systemFont(ofSize: 10, weight: .bold)
         disclosureLabel.textColor = HarnessDesign.chrome.textTertiary
         disclosureLabel.alignment = .center
         disclosureLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1852,7 +1852,7 @@ private final class SessionGroupHeaderRowView: NSView {
     func configure(name: String, isCollapsed: Bool) {
         label.stringValue = name
         toolTip = name
-        disclosureLabel.stringValue = isCollapsed ? "▸" : "▾"
+        disclosureLabel.stringValue = isCollapsed ? "▶" : "▼"
         refresh()
     }
 

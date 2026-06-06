@@ -14,12 +14,17 @@ This branch adds IDE-like sidebar functionality to Harness Terminal, transformin
 
 ### Git Tab (Zed-style)
 - **Changes / History** tab switcher with change count badge
-- **Stage/unstage** checkboxes per file (⚠️ known issue: CASE-001)
+- **Stage/unstage** checkboxes per file
 - **Stage All** button
-- **Commit message** text area with Commit Tracked button
+- **Commit message** text area with **Commit ▼** menu — Commit Tracked, Amend, Signoff
 - **History view** — SourceTree-style commit cards (subject + author · time · hash)
 - **Branch switcher** — click branch name to see dropdown of all branches
-- **Sync dropdown** (Fetch ▾) — Fetch, Pull, Push, Force Push
+- **Sync button** (Fetch ▼ / Push ▼) — contextual menu: Fetch, Fetch From (per-remote), Pull, Pull (Rebase), Push, Push To (per-remote), Force Push; auto-switches to "Push" when ahead of upstream
+
+### CMUX Pane Splitting
+- **Drag surface tabs** between panes to split left/right/top/bottom
+- **Drop overlay** — accent-colored half-pane highlight shows where the split will land
+- **Ratio preservation** — custom split ratios persist across tab switches and rebuilds (CASE-002 fix)
 
 ### Session Management
 - **1 session = 1 project** — tab bar shows sessions, not tabs within a session

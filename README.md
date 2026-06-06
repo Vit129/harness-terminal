@@ -53,7 +53,8 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Set Harness as the default terminal for SSH/Telnet/man-page links and `.command` / `.tool` files from Settings > Terminal
 - **IDE sidebar** — Sessions, Files, and Git panels toggled with `Cmd+\`
 - **Project-aware file tree** — SwiftUI tree with folder expand/collapse, right-click copy path, and drag-to-terminal
-- **Git workflow** — stage/unstage files, commit, fetch/pull/push, branch switcher, and worktree controls from the sidebar
+- **Git workflow** — stage/unstage files, commit (with amend & signoff), fetch/pull/push (with per-remote and rebase options), branch switcher, and worktree controls from the sidebar
+- **CMUX pane splitting** — drag surface tabs to split left/right/top/bottom with live drop overlays and ratio auto-restoration
 - **Session-as-tab** — each top tab is a project session; sidebar group headers can create a new session in that group with `+`, and the session card `×` appears on hover to close it
 - **Recent projects** — clock button in the sidebar footer shows the last 10 project roots and switches to an existing session on duplicate
 
@@ -89,9 +90,9 @@ A three-tab Git panel covering the full day-to-day workflow without leaving the 
 **Changes tab**
 - Lists every modified, staged, added, and deleted file with colour-coded status (orange = modified, green = added/untracked, red = deleted)
 - Checkbox per file to stage or unstage individually; **Stage All** button to stage everything at once
-- Commit message field + **Commit Tracked** button
+- Commit message field + **Commit ▼** menu — Commit Tracked, Amend, Signoff
 - Branch name at the bottom — click it to switch branches from a menu
-- **Fetch ▾** button — dropdown for Fetch, Pull, Push, Force Push
+- **Sync button** (Fetch ▼ / Push ▼) — contextual menu: Fetch, Fetch From (per-remote), Pull, Pull (Rebase), Push, Push To (per-remote), Force Push; auto-switches to "Push" when ahead of upstream
 
 **History tab**
 - Shows the last 25 commits: subject line, author, relative time, and short hash
