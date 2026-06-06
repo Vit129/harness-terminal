@@ -6,6 +6,35 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [1.5.1] - 2026-06-05
+
+Cursor and resize-fluidity fixes on the live-resize release: the cursor no longer turns into a
+permanent block after a TUI resets it, streaming output keeps moving while you drag, and the
+per-boundary re-wrap is 3× faster on deep scrollback.
+
+### Fixed
+- **Cursor stuck as a thick block after running a TUI.** (#80) `CSI 0 SP q` (and the parameter-less
+  `CSI SP q`) — the standard "reset cursor" sequence programs emit on exit — was mapped to a hard
+  blinking block instead of the user's configured style (the Ghostty/kitty/xterm de-facto
+  semantics). Because attach replays the persisted scrollback tail, a leaked reset re-applied the
+  block at every launch, making it look permanent. `0` now resolves back to your configured
+  cursor style; `1` remains the explicit blinking block.
+
+### Changed
+- **PTY output presents live during a drag.** (#81) Output arriving mid-drag (a TUI's redraw after
+  `SIGWINCH`, streaming logs, keystroke echo) previously reached the screen only at the next
+  cell-boundary commit — content rode one boundary behind the drag and froze while the pointer
+  held still. Output now presents continuously during the drag inside explicit Core Animation
+  transactions. The resize target moved into queue-shared state (`pendingResize`) applied by
+  whichever build runs next, so the latest-wins build coalescing can never strand the grid at a
+  stale size after the PTY vote went out.
+- **Width reflow is 3× faster on deep scrollback.** (#82) The per-boundary re-wrap — paid at every
+  cell-boundary crossing of a live drag — streamed source rows by reference and re-wraps
+  wide-glyph-free lines with bulk slice copies instead of three full buffer materializations and
+  per-cell stepping. Measured at the 10k-line scrollback cap (release): 30.25ms → 10.04ms per
+  reflow (CJK-heavy content 1.5×; the drag preview 2.6×). Byte-identical to the previous
+  algorithm across the golden corpus, property, fast-path, and preview-parity suites.
+
 ## [1.5.0] - 2026-06-05
 
 The live-resize release: dragging a window edge now drives the running program in real time
@@ -458,6 +487,9 @@ and a signed/notarized DMG with Sparkle auto-update. See the
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases) for the
 per-patch detail.
 
+[1.5.1]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.5.1
+[1.5.0]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.5.0
+[1.4.1]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.4.1
 [1.4.0]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.4.0
 [1.3.2]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.3.2
 [1.3.1]: https://github.com/robzilla1738/harness-terminal/releases/tag/v1.3.1
