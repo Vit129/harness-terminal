@@ -6,7 +6,7 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
-## [Unreleased]
+## [1.7.1] - 2026-06-06
 
 The post-release audit of 1.7.0: a second exhaustive multi-agent pass (56 hunt dimensions across
 the release diff and the whole app, refute-by-default verification, every fix below pinned by a
