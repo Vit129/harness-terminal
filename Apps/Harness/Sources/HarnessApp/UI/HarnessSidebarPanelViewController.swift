@@ -1712,7 +1712,7 @@ private final class SessionGroupHeaderRowView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        disclosureLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        disclosureLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         disclosureLabel.textColor = HarnessDesign.chrome.textTertiary
         disclosureLabel.alignment = .center
         disclosureLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1774,7 +1774,7 @@ private final class SessionGroupHeaderRowView: NSView {
             rightStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(HarnessDesign.horizontalInset - 4)),
             rightStack.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            disclosureLabel.widthAnchor.constraint(equalToConstant: 12),
+            disclosureLabel.widthAnchor.constraint(equalToConstant: 16),
 
             addButton.widthAnchor.constraint(equalToConstant: 16),
             addButton.heightAnchor.constraint(equalToConstant: 16),
@@ -1978,6 +1978,9 @@ final class SessionCardRowView: NSView {
         toolTip = session.name.isEmpty ? folder : "\(session.name) — \(folder)"
 
         var metaParts: [String] = []
+        if let branch = tab.gitBranch, !branch.isEmpty {
+            metaParts.append("⎇ \(branch)")
+        }
         if session.tabs.count > 1 {
             metaParts.append("\(session.tabs.count) tabs")
         }
