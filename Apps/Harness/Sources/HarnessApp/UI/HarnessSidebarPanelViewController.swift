@@ -244,6 +244,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
         sidebarToggleButton.target = self
         sidebarToggleButton.action = #selector(sidebarToggleClicked)
         sidebarToggleButton.translatesAutoresizingMaskIntoConstraints = false
+        updateSidebarToggleMenu()
 
         workspaceBar.addSubview(notificationBell)
         workspaceBar.addSubview(sidebarToggleButton)
@@ -268,6 +269,20 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
     @objc private func sidebarToggleClicked() {
         (view.window?.contentViewController as? MainSplitViewController)?.toggleSidebar()
+    }
+
+    private func updateSidebarToggleMenu() {
+        let menu = NSMenu()
+        let right = SessionCoordinator.shared.settings.sidebarOnRight
+        let item = NSMenuItem(title: right ? "Move Sidebar to Left" : "Move Sidebar to Right", action: #selector(toggleSidebarPositionFromMenu), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        sidebarToggleButton.menu = menu
+    }
+
+    @objc private func toggleSidebarPositionFromMenu() {
+        (view.window?.contentViewController as? MainSplitViewController)?.toggleSidebarPosition()
+        updateSidebarToggleMenu()
     }
 
     @objc private func notificationBellClicked() {

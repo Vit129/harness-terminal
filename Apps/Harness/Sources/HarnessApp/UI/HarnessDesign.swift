@@ -466,6 +466,11 @@ final class SoftIconButton: NSButton {
         let c = HarnessDesign.chrome
         iconView.contentTintColor = isHovered ? c.textPrimary : c.textSecondary
     }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if let menu { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+        else { super.rightMouseDown(with: event) }
+    }
 }
 
 /// Theme-aware pill button used for primary/secondary actions across onboarding and
