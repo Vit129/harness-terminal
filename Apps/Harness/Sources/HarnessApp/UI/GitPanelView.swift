@@ -6,9 +6,9 @@ final class GitPanelView: NSView {
     private var currentPath: String?
     private var didCommitSinceLastSync = false
     private var selectedCommitHash: String?
-    private var watchSource: DispatchSourceFileSystemObject?
-    private var watchFd: Int32 = -1
-    private var watchDebounce: DispatchWorkItem?
+    private nonisolated(unsafe) var watchSource: DispatchSourceFileSystemObject?
+    private nonisolated(unsafe) var watchFd: Int32 = -1
+    private nonisolated(unsafe) var watchDebounce: DispatchWorkItem?
 
     // Top tabs: Changes | History | Worktrees
     private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
@@ -88,9 +88,10 @@ final class GitPanelView: NSView {
         watchSource = source
         source.setEventHandler { [weak self] in
             self?.watchDebounce?.cancel()
-            let work = DispatchWorkItem { [weak self] in
+            let work = DispatchWorkItem {
                 Task { @MainActor [weak self] in
-                    await self?.refresh()
+                    guard let self else { return }
+                    await self.refresh()
                 }
             }
             self?.watchDebounce = work
