@@ -2,6 +2,14 @@
 
 These are the commands Harness accepts from the `:` prompt, key bindings, hooks, and `harness-cli`.
 
+The 2026-06 parity series added bindable forms of the config/buffer/hook verbs
+(`set-option`/`set`/`setw`, `show-options`, `set-environment`/`setenv`, `set-buffer`,
+`paste-buffer`, `delete-buffer`, `list-buffers`, `show-buffer`, `set-hook`, `show-hooks`,
+`unbind-hook`), plus `find-window`, `refresh-client`, `respawn-window`, `show-messages`,
+grouped sessions (`new-session -t <session>`), and full `-t` targets on
+`select-pane`/`swap-pane`. tmux-parity status, adaptations, and divergences live in
+[TMUX_PARITY.md](TMUX_PARITY.md).
+
 ## Pane operations
 
 | Command | What it does |
@@ -154,12 +162,18 @@ host), `-l` (login user), and the flag-only `-4 -6 -A -T -q -v`. Example:
 | `unbind-key [-T <table>] <spec>` | Remove a binding. |
 | `list-keys [-T <table>]` | Print bindings; one table per `[table]` header. |
 
+Table names: `root`, `prefix`, `copy-mode` (tmux's `copy-mode-vi` is accepted everywhere
+a table is named — parser, CLI, `switch-client -T`), `copy-mode-emacs`, `command`.
+
 ## Options
 
 | Command | Effect |
 |---|---|
-| `set-option [-g\|-w\|-s\|-t\|-p] [-T <target>] <key> <value>` | Set a typed option in the chosen scope. Coerces `on`/`off`/`true`/`false`/integers. |
-| `show-options [-g\|-w\|-s\|-t\|-p]` | Dump options for the chosen scope (or all). |
+| `set-option [-g\|-w\|-s\|-t\|-p] [-T <target>] <key> <value>` | Set a typed option in the chosen scope. Coerces `on`/`off`/`true`/`false`/integers. Bindable as `set`; a scoped set without `-T` resolves against the caller's focus (CLI: the calling pane via `$HARNESS_SURFACE`). |
+| `setw <key> <value>` (alias `set-window-option`) | Window (tab) option for the focused/calling tab — same scope in the CLI, the `:` prompt, and a sourced `.tmux.conf`. |
+| `show-options [-g\|-w\|-s\|-t\|-p]` (alias `show`, `showw`) | Dump options for the chosen scope (or all). |
+| `set-environment [-g] [-u] <key> [value]` (alias `setenv`) | Session (default) or global environment variable; `-u` unsets; a bare key errors. |
+| `show-environment [-g]` (alias `showenv`) | Dump the environment table. |
 
 Built-in defaults include:
 
@@ -179,8 +193,10 @@ Built-in defaults include:
 | `bind-hook <event> <command...> [--if <format>]` | Bind a command to an event. The optional `--if` is a `FormatString` whose result must be non-empty/non-zero to fire. |
 | `unbind-hook --id <uuid>` | Remove a hook by its ID. |
 | `list-hooks [--event <event>]` | List bound hooks. |
+| `set-hook [--if <format>] <event> "<command>"` | Bindable form (the `:` prompt, `bind-key`, `source-file`) of `bind-hook`. |
+| `show-hooks [<event>]` / `unbind-hook <uuid>` | Bindable list/remove forms. |
 
-Events: `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pane`, `after-kill-pane`, `after-resize-pane`, `pane-exited`, `client-attached`, `client-detached`, `agent-state-changed`, `notification-posted`.
+Events: `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pane`, `after-kill-pane`, `after-resize-pane`, `session-created`, `session-renamed`, `session-closed`, `window-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `alert-activity`, `alert-silence`, `alert-bell`, `pane-exited`, `client-attached`, `client-detached`, `agent-state-changed`, `notification-posted`. Hook commands format with the EVENT's subject (e.g. `#{session_name}` in `session-closed` names the closed session).
 
 ## Scripting
 
@@ -192,6 +208,10 @@ Events: `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pan
 | `display-popup [-E <command>]` | Open a floating terminal pane. With `-E <command>`, run `<command>` in the popup and close it on exit. |
 | `display-menu [-T <title>] <name> <key> <command> …` | Show a native popup menu built from `name`/`key`/`command` triples. Key may be empty (`""`). |
 | `wait-for [-S \| -L \| -U] <channel>` | Named-channel synchronisation. No flag: block until the channel is signalled. `-S`: signal the channel (unblocking any waiters). `-L`: lock (exclusive, blocks if held). `-U`: unlock. Alias `wait`. |
+| `find-window [-N] [-T] [-C] <pattern>` | Focus the first window matching by name/title (default) or pane content (`-C`). No match fails loudly in every front-end. |
+| `respawn-window [-k] [-t <target>]` (alias `respawnw`) | Respawn every pane in the window; `-k` clears scrollback. |
+| `refresh-client` (alias `refreshc`) | Re-pull options and snapshot for the calling client. |
+| `show-messages` | Print the recent `display-message` log (client- and hook-fired). |
 | `run-shell [-b] <command>` | Spawn a subprocess. `-b` captures stdout into a paste buffer. |
 | `if-shell <condition> <then> [<else>]` | Run `<condition>` in the shell; on exit 0 run `<then>`, else `<else>`. |
 | `source-config` (alias `source`, `reload-config`) | Re-import the imported terminal config and refresh chrome. |

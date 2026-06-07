@@ -9,6 +9,10 @@ model, compositor, and CLI are first-party Harness components. The naming is
 familiar where it helps: a Harness tab is the same idea as a tmux window, and a
 Harness pane is a split terminal.
 
+For the exact parity status — what matches tmux, what is adapted to Harness's
+daemon-owned design, and what is deliberately rejected — see
+[TMUX_PARITY.md](TMUX_PARITY.md).
+
 ## 1. Five-minute setup
 
 Use this path for a fresh install.
