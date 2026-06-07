@@ -1,8 +1,9 @@
 import AppKit
 import HarnessCore
+import QuickLookUI
 
 /// Read-only preview of a file's contents, hosted in the sidebar in place of
-/// the file tree. Plain-text MVP: no syntax highlighting (P4 Track 1 follow-up).
+/// the file tree.
 @MainActor
 final class FileViewerViewController: NSViewController {
     /// Files larger than this are not loaded into the text view.
@@ -11,9 +12,10 @@ final class FileViewerViewController: NSViewController {
     private let header = NSView()
     private let backButton = HarnessDesign.softIconButton(symbol: "chevron.left", tooltip: "Back to file tree")
     private let pathLabel = NSTextField(labelWithString: "")
-    private let scrollView = NSScrollView()
-    private let textView = NSTextView()
+    private let syntaxView = SyntaxTextView()
+    private let quickLookView = QLPreviewView(frame: .zero, style: .normal)
     private let messageLabel = NSTextField(labelWithString: "")
+    private let lspSession = LSPFileSession()
 
     /// Invoked when the user taps the back button.
     var onBack: (() -> Void)?
@@ -25,7 +27,7 @@ final class FileViewerViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupHeader()
-        setupTextView()
+        setupPreviewViews()
         setupMessageLabel()
     }
 
@@ -37,6 +39,12 @@ final class FileViewerViewController: NSViewController {
 
         let expanded = (path as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded)
+        let ext = url.pathExtension.lowercased()
+
+        if Self.quickLookExtensions.contains(ext) {
+            showQuickLook(url)
+            return
+        }
 
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: expanded),
               let size = attributes[.size] as? Int else {
@@ -51,7 +59,7 @@ final class FileViewerViewController: NSViewController {
             showMessage("Unable to preview this file (binary or unsupported encoding).")
             return
         }
-        showText(contents)
+        showText(contents, url: url, fileExtension: ext)
     }
 
     // MARK: - Setup
@@ -86,29 +94,41 @@ final class FileViewerViewController: NSViewController {
         ])
     }
 
-    private func setupTextView() {
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        view.addSubview(scrollView)
+    private func setupPreviewViews() {
+        syntaxView.translatesAutoresizingMaskIntoConstraints = false
+        syntaxView.onHover = { [weak self] position in await self?.lspSession.hover(position: position) }
+        syntaxView.onDefinition = { [weak self] position in await self?.lspSession.definition(position: position) }
+        syntaxView.onNavigateToDefinition = { [weak self] target in
+            self?.load(path: target.url.path)
+        }
+        view.addSubview(syntaxView)
 
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: HarnessDesign.Spacing.sm, height: HarnessDesign.Spacing.sm)
-        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        textView.textColor = HarnessDesign.chrome.textPrimary
-        textView.textContainer?.widthTracksTextView = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        scrollView.documentView = textView
+        if let quickLookView {
+            quickLookView.translatesAutoresizingMaskIntoConstraints = false
+            quickLookView.autostarts = true
+            quickLookView.isHidden = true
+            view.addSubview(quickLookView)
+        }
 
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
+        lspSession.onDiagnostics = { [weak self] diagnostics in
+            self?.syntaxView.setDiagnostics(diagnostics)
+        }
+
+        var constraints = [
+            syntaxView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            syntaxView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            syntaxView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            syntaxView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ]
+        if let quickLookView {
+            constraints.append(contentsOf: [
+                quickLookView.topAnchor.constraint(equalTo: header.bottomAnchor),
+                quickLookView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                quickLookView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                quickLookView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate(constraints)
     }
 
     private func setupMessageLabel() {
@@ -129,15 +149,30 @@ final class FileViewerViewController: NSViewController {
 
     // MARK: - Display state
 
-    private func showText(_ text: String) {
+    private func showText(_ text: String, url: URL, fileExtension ext: String) {
         messageLabel.isHidden = true
-        scrollView.isHidden = false
-        textView.string = text
-        textView.scrollToBeginningOfDocument(nil)
+        quickLookView?.isHidden = true
+        syntaxView.isHidden = false
+        syntaxView.load(text: text, fileExtension: ext)
+        lspSession.open(url: url, text: text, fileExtension: ext)
+    }
+
+    private func showQuickLook(_ url: URL) {
+        lspSession.close()
+        guard let quickLookView else {
+            showMessage("Unable to start Quick Look preview.")
+            return
+        }
+        messageLabel.isHidden = true
+        syntaxView.isHidden = true
+        quickLookView.isHidden = false
+        quickLookView.previewItem = url as NSURL
     }
 
     private func showMessage(_ message: String) {
-        scrollView.isHidden = true
+        lspSession.close()
+        syntaxView.isHidden = true
+        quickLookView?.isHidden = true
         messageLabel.isHidden = false
         messageLabel.stringValue = message
     }
@@ -145,4 +180,19 @@ final class FileViewerViewController: NSViewController {
     @objc private func backTapped() {
         onBack?()
     }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onBack?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    private static let quickLookExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp", "tiff", "heic",
+        "pdf", "rtf", "rtfd", "doc", "docx", "pages", "key", "keynote", "numbers",
+    ]
 }
