@@ -173,6 +173,96 @@ final class CommandParserTests: XCTestCase {
         XCTAssertEqual(try CommandParser.parse("last-pane"), .selectPane(target: .last))
     }
 
+    func testPaneTargetSpecialFormsParse() throws {
+        XCTAssertEqual(try CommandParser.parse("select-pane -t :.+"), .selectPane(target: .next))
+        XCTAssertEqual(try CommandParser.parse("select-pane -t :.-"), .selectPane(target: .previous))
+        XCTAssertEqual(try CommandParser.parse("swap-pane -t !"), .swapPane(target: .last, source: nil))
+    }
+
+    /// Absolute `-t` targets parse via the full `TargetSpec` grammar into `.targeted` —
+    /// names that don't exist (`bogus`) parse fine and fail loudly at *resolution*, exactly
+    /// like tmux's "can't find session". Deliberate rewrite of the v1.7.1 throws-pin: the
+    /// no-silent-misroute policy moved from parse time to resolve time (see
+    /// `testPaneTargetEmptySpecStillThrows` for what parse still rejects).
+    func testPaneTargetAbsoluteFormsParseAsTargeted() throws {
+        guard case let .targeted(spec, inner) = try CommandParser.parse("swap-pane -t api:1.0") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(spec.session, .byName("api"))
+        XCTAssertEqual(spec.window, .byIndex(1))
+        XCTAssertEqual(spec.pane, .byIndex(0))
+        XCTAssertEqual(inner, .swapPane(target: .next, source: nil))
+
+        let paneID = UUID()
+        guard case let .targeted(byID, select) = try CommandParser.parse("select-pane -t %\(paneID.uuidString)") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(byID.pane, .byID(paneID))
+        XCTAssertEqual(select, .selectPane(target: .next))
+
+        // A lone `{top}` is level-ambiguous at parse (window vs pane) — it rides
+        // `bareToken` and resolves at the command's natural level.
+        guard case let .targeted(geometry, _) = try CommandParser.parse("select-pane -t {top}") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(geometry.bareToken, "{top}")
+
+        // A lone unknown name is a session/level-ambiguous ref — parses, resolves to nothing.
+        guard case .targeted = try CommandParser.parse("select-pane -t bogus") else {
+            return XCTFail("expected .targeted")
+        }
+    }
+
+    /// tmux `swap-pane -s <src>`: the source pane rides the command; without `-t`
+    /// the destination is the current pane.
+    func testSwapPaneSourceFlagParses() throws {
+        let paneID = UUID()
+        guard case let .swapPane(target, source) = try CommandParser.parse("swap-pane -s %\(paneID.uuidString)") else {
+            return XCTFail("expected bare swapPane with source")
+        }
+        XCTAssertEqual(target, .current, "-s without -t swaps with the current pane")
+        XCTAssertEqual(source?.pane, .byID(paneID))
+
+        guard case let .targeted(spec, .swapPane(_, src2)) = try CommandParser.parse(
+            "swap-pane -s %\(paneID.uuidString) -t api:1.0") else {
+            return XCTFail("expected targeted swapPane with source")
+        }
+        XCTAssertEqual(spec.session, .byName("api"))
+        XCTAssertEqual(src2?.pane, .byID(paneID))
+
+        // `-s` with a relative `-t` keeps the relative destination.
+        guard case let .swapPane(rel, src3) = try CommandParser.parse(
+            "swap-pane -s %\(paneID.uuidString) -t :.-") else {
+            return XCTFail("expected relative swapPane with source")
+        }
+        XCTAssertEqual(rel, .previous)
+        XCTAssertEqual(src3?.pane, .byID(paneID))
+    }
+
+    /// Relative fast paths are untouched by the absolute-target branch.
+    func testPaneTargetRelativeFormsStayRelative() throws {
+        XCTAssertEqual(try CommandParser.parse("select-pane -t :.+"), .selectPane(target: .next))
+        XCTAssertEqual(try CommandParser.parse("swap-pane -t !"), .swapPane(target: .last, source: nil))
+        XCTAssertEqual(try CommandParser.parse("select-pane -L"), .selectPane(target: .left))
+    }
+
+    /// What parse still rejects loudly: a `-t` value that parses to nothing actionable.
+    func testPaneTargetEmptySpecStillThrows() {
+        XCTAssertThrowsError(try CommandParser.parse("select-pane -t :")) { error in
+            guard let parseError = error as? CommandParseError,
+                  case .invalidArgument = parseError else {
+                return XCTFail("expected invalidArgument, got \(error)")
+            }
+        }
+        XCTAssertThrowsError(try CommandParser.parse("swap-pane -t :."))
+    }
+
+    /// A dangling -t (flag present, value missing) is a typo, not a request for the default.
+    func testPaneTargetDanglingFlagThrows() {
+        XCTAssertThrowsError(try CommandParser.parse("select-pane -t"))
+        XCTAssertThrowsError(try CommandParser.parse("swap-pane -t"))
+    }
+
     // MARK: - Robustness (audit Tier 1.5)
 
     func testUnterminatedQuoteThrows() {
@@ -230,6 +320,160 @@ final class CommandParserTests: XCTestCase {
             try CommandParser.parse(#"display-menu "Only" "" kill-pane"#),
             .displayMenu(items: [.init(title: "Only", key: nil, command: .killPane)])
         )
+    }
+
+    // MARK: - Config / buffer / hook verbs (bindable forms)
+
+    func testSetOptionParsesScopesAndJoinsValue() throws {
+        XCTAssertEqual(
+            try CommandParser.parse("set-option -g status-left ' #{session_name} '"),
+            .setOption(scope: "global", target: nil, key: "status-left", rawValue: " #{session_name} ")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set -t automatic-rename off"),
+            .setOption(scope: "tab", target: nil, key: "automatic-rename", rawValue: "off")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-option -s -T abc history-limit 5000"),
+            .setOption(scope: "session", target: "abc", key: "history-limit", rawValue: "5000")
+        )
+        // tmux setw = window option = Harness tab scope.
+        XCTAssertEqual(
+            try CommandParser.parse("setw monitor-activity on"),
+            .setOption(scope: "tab", target: nil, key: "monitor-activity", rawValue: "on")
+        )
+        XCTAssertThrowsError(try CommandParser.parse("set-option -g status"))
+    }
+
+    func testShowVerbsParse() throws {
+        XCTAssertEqual(try CommandParser.parse("show-options -g"), .showOptions(scope: "global"))
+        XCTAssertEqual(try CommandParser.parse("show"), .showOptions(scope: nil))
+        XCTAssertEqual(try CommandParser.parse("show-environment -g"), .showEnvironment(global: true))
+        XCTAssertEqual(try CommandParser.parse("list-buffers"), .listBuffers)
+        XCTAssertEqual(try CommandParser.parse("show-buffer -b scratch"), .showBuffer(name: "scratch"))
+        XCTAssertEqual(try CommandParser.parse("show-hooks after-new-tab"), .showHooks(event: "after-new-tab"))
+    }
+
+    func testEnvironmentAndBufferVerbsParse() throws {
+        XCTAssertEqual(
+            try CommandParser.parse("setenv -g EDITOR vim"),
+            .setEnvironment(global: true, key: "EDITOR", value: "vim")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-environment -u EDITOR"),
+            .setEnvironment(global: false, key: "EDITOR", value: nil)
+        )
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-buffer -b notes "hello world""#),
+            .setBuffer(name: "notes", text: "hello world")
+        )
+        XCTAssertEqual(try CommandParser.parse("paste-buffer -b notes"), .pasteBuffer(name: "notes"))
+        XCTAssertEqual(try CommandParser.parse("delete-buffer notes"), .deleteBuffer(name: "notes"))
+        XCTAssertThrowsError(try CommandParser.parse("delete-buffer"))
+    }
+
+    func testSetHookParsesEventAndCommand() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-hook after-new-tab "display-message hi""#),
+            .setHook(event: "after-new-tab", source: "display-message hi", condition: nil)
+        )
+        XCTAssertThrowsError(try CommandParser.parse("set-hook after-new-tab"))
+        let id = UUID()
+        XCTAssertEqual(try CommandParser.parse("unbind-hook \(id.uuidString)"), .unbindHook(id: id))
+        XCTAssertThrowsError(try CommandParser.parse("unbind-hook not-a-uuid"))
+    }
+
+    // MARK: - find-window + copy-mode-vi alias (P3)
+
+    func testFindWindowParsesFlagsAndDefaults() throws {
+        // No flags: match name + title (cheap snapshot fields), not content.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window api"),
+            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true)
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -C 'error 42'"),
+            .findWindow(pattern: "error 42", matchName: false, matchContent: true, matchTitle: false)
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -N -T build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
+        XCTAssertThrowsError(try CommandParser.parse("find-window"))
+        // A `-t` value is a (currently unsupported) target, never the pattern.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -t somewhere build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
+    }
+
+    /// tmux's table name for the vi copy-mode table is `copy-mode-vi`; Harness's is
+    /// `copy-mode`. Both must work at every site a table name is typed.
+    func testCopyModeViTableNameIsAccepted() throws {
+        guard case let .bindKey(table, _, _, _) = try CommandParser.parse(
+            "bind-key -T copy-mode-vi v copy-mode -X begin-selection") else {
+            return XCTFail("expected bindKey")
+        }
+        XCTAssertEqual(table, "copy-mode")
+        guard case let .unbindKey(unbindTable, _) = try CommandParser.parse(
+            "unbind-key -T copy-mode-vi v") else {
+            return XCTFail("expected unbindKey")
+        }
+        XCTAssertEqual(unbindTable, "copy-mode")
+        XCTAssertEqual(try CommandParser.parse("list-keys -T copy-mode-vi"), .listKeys(table: "copy-mode"))
+        XCTAssertEqual(
+            try CommandParser.parse("switch-client -T copy-mode-vi"),
+            .switchClientTable(table: "copy-mode")
+        )
+        // The emacs table keeps its own name.
+        XCTAssertEqual(try CommandParser.parse("list-keys -T copy-mode-emacs"), .listKeys(table: "copy-mode-emacs"))
+    }
+
+    func testServerAdminVerbsParse() throws {
+        XCTAssertEqual(try CommandParser.parse("refresh-client"), .refreshClient)
+        XCTAssertEqual(try CommandParser.parse("refresh-client -S"), .refreshClient)
+        XCTAssertEqual(try CommandParser.parse("respawn-window"), .respawnWindow(keepHistory: true))
+        XCTAssertEqual(try CommandParser.parse("respawn-window -k"), .respawnWindow(keepHistory: false))
+        XCTAssertEqual(try CommandParser.parse("show-messages"), .showMessages)
+        // respawn-window takes the universal -t — and so does its alias.
+        guard case let .targeted(spec, inner) = try CommandParser.parse("respawn-window -t :1") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(spec.window, .byIndex(1))
+        XCTAssertEqual(inner, .respawnWindow(keepHistory: true))
+        guard case .targeted = try CommandParser.parse("respawnw -t :1") else {
+            return XCTFail("respawnw alias must take the universal -t too")
+        }
+    }
+
+    /// `--if <format>` makes bindable set-hook condition-capable like CLI bind-hook.
+    func testSetHookParsesCondition() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(##"set-hook --if "#{?pane_active,1,}" after-new-tab "display-message hi""##),
+            .setHook(event: "after-new-tab", source: "display-message hi", condition: "#{?pane_active,1,}")
+        )
+    }
+
+    /// Values that begin with `-` survive once the positional run starts (getopt):
+    /// a quoted hook command with flags, a buffer payload, an env value. `--` ends
+    /// flag parsing explicitly for a leading-dash first positional.
+    func testDashPrefixedValuesAreNotSwallowed() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-hook after-new-tab splitw -h"#),
+            .setHook(event: "after-new-tab", source: "splitw -h", condition: nil),
+            "unquoted trailing flags belong to the hook command"
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-environment PS1_SUFFIX -v"),
+            .setEnvironment(global: false, key: "PS1_SUFFIX", value: "-v")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-buffer -- "-rf""#),
+            .setBuffer(name: nil, text: "-rf"),
+            "-- ends flag parsing so a dash-leading payload parses"
+        )
+        // A bare key with no value still errors (tmux) rather than persisting "".
+        XCTAssertThrowsError(try CommandParser.parse("set-environment LONESOME"))
     }
 
     func testKnownVerbsAreAllParseable() {

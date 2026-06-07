@@ -9,6 +9,9 @@ public enum IPCRequest: Codable, Sendable {
     case listAgents
     case newWorkspace(name: String)
     case newSession(workspaceID: UUID, cwd: String?, name: String?, shell: String? = nil)
+    /// tmux `new-session -t <session>`: an independent session grouped with the target,
+    /// sharing its window list (linked windows / shared surfaces).
+    case newSessionInGroup(targetSessionID: UUID, name: String?)
     case newTab(workspaceID: UUID, cwd: String?, shell: String? = nil)
     case newTabInWorkspace(named: String, cwd: String?, shell: String? = nil)
     case newSplit(tabID: UUID, paneID: UUID?, direction: SplitDirection, shell: String? = nil)
@@ -88,6 +91,12 @@ public enum IPCRequest: Codable, Sendable {
     case subscribeSurfaceOutput(surfaceID: String, label: String?)
     case cancelSubscription(surfaceID: String)
     case replayScrollback(surfaceID: String, fromSequence: UInt64?)
+    /// Like `replayScrollback`, but the reply also carries the sequence one past the last
+    /// replayed byte (`replayResult`). A client that subscribed FIRST uses that boundary to
+    /// dedupe its buffered live frames and close the replay→subscribe gap. An old daemon doesn't
+    /// know this case and replies `.error("unrecognized request")`, so the caller degrades to the
+    /// plain `replayScrollback` (replay-then-stream) path — no dedup, but never a double-deliver.
+    case replayScrollbackSequenced(surfaceID: String, fromSequence: UInt64?)
     case resizeSurface(surfaceID: String, rows: UInt16, cols: UInt16)
     case detachSurface(surfaceID: String)
     /// Identify this connection to the daemon so it shows up in `list-clients`
@@ -130,6 +139,8 @@ public enum IPCRequest: Codable, Sendable {
     case unbindHook(id: UUID)
     case listHooks(event: String?)
     case displayMessage(format: String)
+    /// tmux `show-messages`: the daemon's recent display-message log (most recent last).
+    case showMessages
 }
 
 public enum DirectionalAxis: String, Codable, Sendable {
@@ -162,6 +173,9 @@ public enum IPCResponse: Codable, Sendable {
     case snapshot(SessionSnapshot)
     case text(String)
     case data(Data, sequence: UInt64)
+    /// Reply to `replayScrollbackSequenced`: the replay text plus the sequence one past its last
+    /// byte. Only ever sent in answer to that request, so an old client never receives it.
+    case replayResult(text: String, endSequence: UInt64)
     /// Pushed on a `subscribeSnapshot` channel when the layout commits at `revision`.
     case snapshotChanged(revision: Int)
     case agentInfo(AgentSnapshot?)

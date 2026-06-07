@@ -39,6 +39,35 @@ final class RemoteHostStoreTests: XCTestCase {
         XCTAssertEqual(store.load().count, 1)
     }
 
+    func testUpsertReportsSavedTrueOnSuccess() {
+        let store = RemoteHostStore()
+        let result = store.upsert(RemoteHost(name: "devbox", sshTarget: "rob@devbox", remoteSocketPath: "/tmp/x.sock"))
+        XCTAssertTrue(result.saved, "a successful write must report saved == true")
+        XCTAssertEqual(result.hosts.count, 1)
+    }
+
+    func testUpsertReportsSavedFalseWhenWriteFails() throws {
+        // Force the on-disk write to fail in a way that holds even when tests run as root (the
+        // Linux CI container — root ignores permission bits, so a chmod-based setup passes the
+        // write and fails the test there): replace the sessions *directory* with a regular file.
+        // Creating remote-hosts.json (and the flock sidecar, which degrades to unlocked) then
+        // fails with ENOTDIR for any uid, and ensureDirectories() can't silently heal it because
+        // a file already occupies the path. The mutating API must surface the failure
+        // (saved == false) instead of silently swallowing it.
+        let sessions = HarnessPaths.sessionsDirectory
+        let fm = FileManager.default
+        try? fm.removeItem(at: sessions)
+        fm.createFile(atPath: sessions.path, contents: Data())
+        defer {
+            try? fm.removeItem(at: sessions)
+            try? fm.createDirectory(at: sessions, withIntermediateDirectories: true)
+        }
+
+        let store = RemoteHostStore()
+        let result = store.upsert(RemoteHost(name: "devbox", sshTarget: "rob@devbox", remoteSocketPath: "/tmp/x.sock"))
+        XCTAssertFalse(result.saved, "a failed write must report saved == false")
+    }
+
     func testSSHTunnelAllowsSafeUserArgs() throws {
         let host = RemoteHost(
             name: "build",

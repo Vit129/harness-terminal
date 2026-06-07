@@ -204,38 +204,52 @@ extension Command {
 extension CommandTarget {
     /// Resolve a `TargetSpec` against this target's snapshot, returning a copy with
     /// the focused workspace/tab/pane overridden by the spec. Components the spec
-    /// omits keep the receiver's focus (the active chain). `baseIndex` /
-    /// `paneBaseIndex` offset 1-based (or user-configured) window/pane indices to
-    /// array positions.
+    /// omits keep the receiver's focus (the active chain); a component the spec
+    /// *names* that doesn't match returns nil — STRICT, so a mistyped `-t` becomes
+    /// `.unresolved` and fails loudly in every front-end instead of silently acting
+    /// on the caller's focus (the v1.7.1 no-silent-misroute policy, applied at
+    /// resolve time for every targeted verb). `baseIndex` / `paneBaseIndex` offset
+    /// 1-based (or user-configured) window/pane indices to array positions.
     public func resolving(
         _ spec: TargetSpec,
         command: Command? = nil,
         baseIndex: Int = 0,
         paneBaseIndex: Int = 0
-    ) -> CommandTarget {
+    ) -> CommandTarget? {
         if spec.isEmpty { return self }
         var result = self
         let kind = command?.targetKind ?? .window
 
         // 1. Session → workspace + session (and default the tab to its active tab).
-        if let sref = spec.session, let (ws, sg) = Self.findSession(sref, in: snapshot, current: session) {
+        if let sref = spec.session {
+            guard let (ws, sg) = Self.findSession(sref, in: snapshot, current: session) else { return nil }
             result.focusedWorkspaceID = ws.id
             result.focusedTabID = sg.activeTab?.id
             result.focusedPaneID = nil
         }
 
         // 2. Window (explicit, or a bare token when the command addresses a window).
-        let windowRef = spec.window ?? (kind == .window ? spec.bareToken.flatMap(TargetSpec.parseWindowToken) : nil)
-        if let wref = windowRef, let sg = result.session,
-           let tab = Self.findWindow(wref, in: sg, baseIndex: baseIndex) {
+        if let wref = spec.window ?? (kind == .window ? spec.bareToken.flatMap(TargetSpec.parseWindowToken) : nil) {
+            guard let sg = result.session, let tab = Self.findWindow(wref, in: sg, baseIndex: baseIndex) else {
+                return nil
+            }
             result.focusedTabID = tab.id
             result.focusedPaneID = nil
         }
 
         // 3. Pane (explicit, or a bare token when the command addresses a pane).
-        let paneRef = spec.pane ?? (kind == .pane ? spec.bareToken.flatMap(TargetSpec.parsePaneToken) : nil)
-        if let pref = paneRef, let tab = result.tab,
-           let pid = Self.findPane(pref, in: tab, baseIndex: paneBaseIndex) {
+        // A pane-kind bare token that parses to nothing (panes have no names) is
+        // itself a miss: `kill-pane -t bogus` must not fall through to the focus.
+        if let pref = spec.pane {
+            guard let tab = result.tab, let pid = Self.findPane(pref, in: tab, baseIndex: paneBaseIndex) else {
+                return nil
+            }
+            result.focusedPaneID = pid
+        } else if kind == .pane, let bare = spec.bareToken {
+            guard let pref = TargetSpec.parsePaneToken(bare),
+                  let tab = result.tab,
+                  let pid = Self.findPane(pref, in: tab, baseIndex: paneBaseIndex)
+            else { return nil }
             result.focusedPaneID = pid
         }
         return result

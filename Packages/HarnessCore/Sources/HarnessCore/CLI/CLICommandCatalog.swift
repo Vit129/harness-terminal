@@ -27,6 +27,8 @@ public enum CLICommandCatalog {
         // Query / inspection
         .init("doctor", "Diagnose the daemon, socket, paths, and integrations", json: true),
         .init("version", "Print CLI and daemon versions", aliases: ["--version", "-v"], json: true),
+        .init("color-check", "Print ANSI/256/truecolor diagnostic swatches"),
+        .init("theme-preview", "Print deterministic themed sample output"),
         .init("ping", "Check the daemon is reachable"),
         .init("daemon-stats", "Daemon pid, uptime, surface/client counts", json: true),
         .init("list-workspaces", "List workspaces", json: true),
@@ -81,6 +83,9 @@ public enum CLICommandCatalog {
         .init("record", "Record a surface's output to a JSON Lines file"),
         .init("replay", "Replay a recorded session to this terminal"),
         .init("control-mode", "tmux control protocol over stdio", aliases: ["-CC"]),
+        .init("kill-server", "Stop the daemon gracefully (launchd restarts it)"),
+        .init("start-server", "Ensure the daemon is running"),
+        .init("show-messages", "Recent display-message log"),
         // Buffers
         .init("set-buffer", "Set a paste buffer"),
         .init("list-buffers", "List paste buffers", json: true),
@@ -112,6 +117,8 @@ public enum CLICommandCatalog {
         .init("install-hooks", "Install agent notification hooks"),
         .init("install-shell-integration", "Install OSC 133 shell integration"),
         .init("completions", "Print a shell completion script (zsh|fish|bash)"),
+        .init("remote", "Manage remote daemons reached over SSH (list|add|remove)"),
+        .init("daemon", "Run the daemon in the foreground (execs HarnessDaemon)"),
     ]
 
     /// Every name a user might type for a command (canonical names + aliases), in catalog order.

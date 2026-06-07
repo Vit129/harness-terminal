@@ -54,6 +54,57 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertEqual(HarnessSettings.makeDefaults(imported: nil).cursorStyle, "bar")
     }
 
+    // MARK: - Per-event notification gating
+
+    func testNotificationEventDefaultsMatchPriorBehavior() {
+        let settings = HarnessSettings()
+        XCTAssertTrue(settings.isEventEnabled(.agentWaiting))
+        XCTAssertTrue(settings.isEventEnabled(.agentFinished))
+        XCTAssertTrue(settings.isEventEnabled(.bell))
+        // Command-finished stays opt-in, as the standalone toggle was.
+        XCTAssertFalse(settings.isEventEnabled(.commandFinished))
+    }
+
+    func testSetEventEnabledRoundTripsThroughCoding() throws {
+        var settings = HarnessSettings()
+        settings.setEventEnabled(.bell, false)
+        settings.setEventEnabled(.commandFinished, true)
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: data)
+
+        XCTAssertFalse(decoded.isEventEnabled(.bell))
+        XCTAssertTrue(decoded.isEventEnabled(.commandFinished))
+        // Untouched events still resolve to their defaults.
+        XCTAssertTrue(decoded.isEventEnabled(.agentWaiting))
+    }
+
+    func testLegacyCommandFinishedNotificationsMigratesIntoEventMap() throws {
+        let legacy = Data("""
+        { "fontSize": 14, "commandFinishedNotifications": true }
+        """.utf8)
+        let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
+        XCTAssertTrue(migrated.isEventEnabled(.commandFinished))
+        // Other events keep their defaults through the migration.
+        XCTAssertTrue(migrated.isEventEnabled(.agentWaiting))
+    }
+
+    func testExplicitEventMapWinsOverLegacyCommandFinishedFlag() throws {
+        // A user who has already moved to the new map shouldn't have a stale legacy flag override it.
+        let blob = Data("""
+        { "fontSize": 14, "commandFinishedNotifications": true, "notificationEvents": { "commandFinished": false } }
+        """.utf8)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: blob)
+        XCTAssertFalse(decoded.isEventEnabled(.commandFinished))
+    }
+
+    func testSettingsWithNoNotificationKeysDecodeToDefaults() throws {
+        let blob = Data(#"{ "fontSize": 14 }"#.utf8)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: blob)
+        XCTAssertTrue(decoded.isEventEnabled(.agentFinished))
+        XCTAssertFalse(decoded.isEventEnabled(.commandFinished))
+    }
+
     func testVividColorsLoadMigrationPreservesExplicitChoice() throws {
         try withTemporaryHarnessHome { root in
             try HarnessPaths.ensureDirectories()
@@ -195,6 +246,31 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertFalse(decoded.offMainParserFramePipeline)
     }
 
+    func testLiveResizeReflowDefaultsOnAndRoundTrips() throws {
+        // Real-time (Ghostty-style) resize is the production default.
+        XCTAssertTrue(HarnessSettings().liveResizeReflow)
+
+        // A legacy settings.json with no key gets real-time resize on upgrade.
+        let legacy = Data("""
+        { "fontSize": 14, "customBackgroundHex": "#000000" }
+        """.utf8)
+        let migrated = try JSONDecoder().decode(HarnessSettings.self, from: legacy)
+        XCTAssertTrue(migrated.liveResizeReflow, "absent key defaults to on")
+
+        // An explicitly stored `false` is honored as an opt-out to defer-to-release.
+        let optedOut = Data("""
+        { "fontSize": 14, "liveResizeReflow": false }
+        """.utf8)
+        let decodedOptOut = try JSONDecoder().decode(HarnessSettings.self, from: optedOut)
+        XCTAssertFalse(decodedOptOut.liveResizeReflow, "explicit false is preserved")
+
+        var settings = HarnessSettings()
+        settings.liveResizeReflow = false
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(HarnessSettings.self, from: encoded)
+        XCTAssertFalse(decoded.liveResizeReflow)
+    }
+
     func testRestoreWindowSizeDefaultsOffAndRoundTrips() throws {
         // New option: opt-in window frame persistence. Default off so existing users
         // keep the centered default-size launch.
@@ -267,6 +343,59 @@ final class HarnessSettingsTests: XCTestCase {
         XCTAssertEqual(HarnessSettings.clampedBlur(20), 20)
         XCTAssertEqual(HarnessSettings.clampedBlur(100), 100)
         XCTAssertEqual(HarnessSettings.clampedBlur(999), 100)
+    }
+
+    func testClampedFontSizeStaysInZoomRange() {
+        // 8–32 matches the Cmd+/- zoom policy; out-of-range values are footguns
+        // (huge → glyph-atlas overflow → invisible text; tiny → multi-hundred-MB grid alloc).
+        XCTAssertEqual(HarnessSettings.clampedFontSize(0), 8, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(1), 8, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(8), 8, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(16), 16, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(32), 32, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(999), 32, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedFontSize(-5), 8, accuracy: 0.001)
+    }
+
+    func testFontSizeIsClampedAtEveryPersistenceBoundary() throws {
+        // init clamps.
+        XCTAssertEqual(HarnessSettings(fontSize: 999).fontSize, 32, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings(fontSize: 1).fontSize, 8, accuracy: 0.001)
+
+        // init(from:) clamps a decoded out-of-range value.
+        let huge = try JSONDecoder().decode(HarnessSettings.self, from: Data(#"{ "fontSize": 999 }"#.utf8))
+        XCTAssertEqual(huge.fontSize, 32, accuracy: 0.001)
+        let tiny = try JSONDecoder().decode(HarnessSettings.self, from: Data(#"{ "fontSize": 1 }"#.utf8))
+        XCTAssertEqual(tiny.fontSize, 8, accuracy: 0.001)
+        let negative = try JSONDecoder().decode(HarnessSettings.self, from: Data(#"{ "fontSize": -5 }"#.utf8))
+        XCTAssertEqual(negative.fontSize, 8, accuracy: 0.001)
+    }
+
+    func testLoadClampsRunawayFontSizeAndPaddingAndRewritesOnce() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            let url = root.appendingPathComponent("settings.json")
+            // A hand-edited file with a runaway font size and negative padding. load() must clamp
+            // and persist the recovered state (the didMutate rewrite path), like the opacity floor.
+            try Data(#"{ "fontSize": 999, "windowPaddingX": -10, "windowPaddingY": -3 }"#.utf8).write(to: url)
+
+            let settings = HarnessSettings.load()
+            XCTAssertEqual(settings.fontSize, 32, accuracy: 0.001)
+            XCTAssertEqual(settings.windowPaddingX, 0, accuracy: 0.001)
+            XCTAssertEqual(settings.windowPaddingY, 0, accuracy: 0.001)
+
+            // The migrated, clamped state is persisted back to disk.
+            let reloaded = try JSONDecoder().decode(HarnessSettings.self, from: try Data(contentsOf: url))
+            XCTAssertEqual(reloaded.fontSize, 32, accuracy: 0.001)
+            XCTAssertEqual(reloaded.windowPaddingX, 0, accuracy: 0.001)
+        }
+    }
+
+    func testClampedPaddingNeverNegative() {
+        XCTAssertEqual(HarnessSettings.clampedPadding(-10), 0, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedPadding(0), 0, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings.clampedPadding(14), 14, accuracy: 0.001)
+        XCTAssertEqual(HarnessSettings(windowPaddingX: -5, windowPaddingY: -1).windowPaddingX, 0, accuracy: 0.001)
     }
 
     func testAgentColorOverridesNormalizeAndFallbackToDefaults() throws {

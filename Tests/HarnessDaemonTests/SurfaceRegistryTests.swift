@@ -31,6 +31,21 @@ final class SurfaceRegistryTests: XCTestCase {
         guard case .pong = SurfaceRegistry().handle(.ping) else { return XCTFail("expected pong") }
     }
 
+    /// tmux `show-messages`: display-message lines accumulate in a capped ring.
+    func testShowMessagesReturnsCappedLog() {
+        let registry = SurfaceRegistry()
+        guard case let .text(empty) = registry.handle(.showMessages) else { return XCTFail("expected text") }
+        XCTAssertTrue(empty.isEmpty)
+        for index in 0 ..< 55 {
+            _ = registry.handle(.displayMessage(format: "msg-\(index)"))
+        }
+        guard case let .text(log) = registry.handle(.showMessages) else { return XCTFail("expected text") }
+        let lines = log.split(separator: "\n")
+        XCTAssertEqual(lines.count, 50, "ring caps at 50")
+        XCTAssertTrue(lines.last?.contains("msg-54") ?? false, "most recent last")
+        XCTAssertFalse(log.contains("msg-0"), "oldest evicted")
+    }
+
     /// `remain-on-exit` (default on): a naturally exited pane is retained, but its
     /// live-looking metadata must be cleared — waiting status/notification reset, agent
     /// cleared, exit status recorded — and a revival via `ensureSurface` clears the exit
@@ -518,5 +533,134 @@ final class SurfaceRegistryTests: XCTestCase {
             .flatMap { $0.sessions.flatMap(\.tabs) }
             .first { $0.rootPane.allSurfaceIDs().contains(uuid) }?
             .status
+    }
+
+    // MARK: - Off-lock metadata refresh (item 3)
+
+    /// After moving the cwd probe off the registry lock, `refreshSurfaceMetadata` must still
+    /// update a tab's cwd to the live shell's working directory. Live-gated: it needs the
+    /// spawned shell to actually `cd` and `proc_pidinfo` to read its cwd.
+    func testRefreshSurfaceMetadataUpdatesTabCwd() throws {
+        try skipUnlessLiveDaemonTests()
+        let registry = SurfaceRegistry()
+        guard case let .surfaces(initial) = registry.handle(.listSurfaces), let target = initial.first else {
+            return XCTFail("expected a default surface")
+        }
+        let sid = target.surfaceID
+
+        func tabCwd() -> String? {
+            registry.snapshot.workspaces.flatMap(\.sessions).flatMap(\.tabs)
+                .first { $0.rootPane.allSurfaceIDs().map(\.uuidString).contains(sid) }?
+                .cwd
+        }
+
+        // Drive the live shell into a known directory, then refresh and observe the new cwd.
+        let dest = try FileManager.default.url(
+            for: .itemReplacementDirectory, in: .userDomainMask,
+            appropriateFor: FileManager.default.temporaryDirectory, create: true
+        )
+        defer { try? FileManager.default.removeItem(at: dest) }
+        let canonicalDest = dest.resolvingSymlinksInPath().path
+        usleep(400_000) // let the shell come up
+        // Single-quote the path: on Linux, corelibs-foundation's itemReplacementDirectory is named
+        // "(A Document Being Saved By …)" — spaces and parens are a bash syntax error unquoted.
+        _ = registry.handle(.sendData(surfaceID: sid, data: Data("cd '\(canonicalDest)'\n".utf8)))
+
+        var updated = false
+        for _ in 0 ..< 50 {
+            registry.refreshSurfaceMetadata()
+            if tabCwd().map({ ($0 as NSString).resolvingSymlinksInPath }) == canonicalDest { updated = true; break }
+            usleep(100_000)
+        }
+        XCTAssertTrue(updated, "off-lock refresh must still propagate the live shell's cwd to the tab")
+    }
+
+    /// Closing a session must drop its per-session environment so entries don't accumulate in
+    /// environment.json forever. Regression for the close paths never calling `clearSession`.
+    func testCloseSessionClearsPerSessionEnvironment() throws {
+        let registry = SurfaceRegistry()
+        let wsID = try XCTUnwrap(registry.snapshot.activeWorkspaceID)
+        guard case let .sessionID(sessionID) = registry.handle(
+            .newSession(workspaceID: wsID, cwd: "/tmp", name: "env-test", shell: nil)
+        ) else { return XCTFail("expected a new session") }
+
+        // Seed a per-session variable.
+        guard case .ok = registry.handle(.setEnvironment(sessionID: sessionID, key: "API_KEY", value: "secret")) else {
+            return XCTFail("expected set-environment to succeed")
+        }
+        XCTAssertEqual(registry.environmentStore.resolved(sessionID: sessionID.uuidString)["API_KEY"], "secret")
+
+        // Closing the session must clear its map.
+        guard case .ok = registry.handle(.closeSession(sessionID: sessionID)) else {
+            return XCTFail("expected close-session to succeed")
+        }
+        XCTAssertNil(
+            registry.environmentStore.resolved(sessionID: sessionID.uuidString)["API_KEY"],
+            "a closed session's per-session env must not survive in environment.json"
+        )
+        XCTAssertTrue(
+            registry.environmentStore.entries(sessionID: sessionID.uuidString)
+                .allSatisfy { $0.scope != "session" },
+            "no per-session entries should remain after the session is closed"
+        )
+    }
+
+    /// Closing a workspace must clear the per-session environment of every session it held.
+    func testCloseWorkspaceClearsPerSessionEnvironment() throws {
+        let registry = SurfaceRegistry()
+        guard case let .workspaceID(wsID) = registry.handle(.newWorkspace(name: "Env WS")) else {
+            return XCTFail("expected a new workspace")
+        }
+        guard case let .sessionID(sessionID) = registry.handle(
+            .newSession(workspaceID: wsID, cwd: "/tmp", name: "ws-env", shell: nil)
+        ) else { return XCTFail("expected a new session") }
+
+        guard case .ok = registry.handle(.setEnvironment(sessionID: sessionID, key: "WS_VAR", value: "v")) else {
+            return XCTFail("expected set-environment to succeed")
+        }
+        XCTAssertEqual(registry.environmentStore.resolved(sessionID: sessionID.uuidString)["WS_VAR"], "v")
+
+        guard case .ok = registry.handle(.closeWorkspace(id: wsID)) else {
+            return XCTFail("expected close-workspace to succeed")
+        }
+        XCTAssertNil(
+            registry.environmentStore.resolved(sessionID: sessionID.uuidString)["WS_VAR"],
+            "closing a workspace must clear every member session's per-session env"
+        )
+    }
+
+    // MARK: - Orphan-scrollback sweep safety (item 5)
+
+    /// On startup the sweep must keep a `.scroll` file whose surface is referenced by the layout
+    /// (even one whose PTY failed to spawn) and delete a `.scroll` whose UUID isn't in the layout.
+    func testScrollbackSweepKeepsReferencedDeletesOrphan() throws {
+        // Seed a layout that references one surface, plus an unrelated orphan UUID.
+        let referencedSurface = UUID()
+        let leaf = PaneLeaf(surfaceID: referencedSurface)
+        let tab = Tab(rootPane: .leaf(leaf))
+        let snapshot = SessionSnapshot(workspaces: [Workspace(sessions: [SessionGroup(tabs: [tab])])])
+        try SessionStore().saveImmediately(snapshot)
+
+        // Write a scroll file for the referenced surface AND a genuine orphan.
+        let referencedFile = HarnessPaths.scrollbackFileURL(forSurfaceID: referencedSurface.uuidString)
+        let orphanFile = HarnessPaths.scrollbackFileURL(forSurfaceID: UUID().uuidString)
+        try Data("history".utf8).write(to: referencedFile)
+        try Data("orphan".utf8).write(to: orphanFile)
+
+        // Constructing the registry runs `cleanupOrphanScrollbackFiles` in init.
+        let registry = SurfaceRegistry()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: referencedFile.path),
+            "a layout-referenced surface's scrollback must survive the startup sweep"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: orphanFile.path),
+            "a scrollback file for a UUID absent from the layout is a genuine orphan and must be deleted"
+        )
+
+        // The live set must include the layout-referenced surface via the snapshot half of the
+        // union — the property that protects a failed-to-spawn surface (in layout, not in sessions).
+        XCTAssertTrue(registry.scrollbackLiveSurfaceKeys().contains(referencedSurface.uuidString))
     }
 }

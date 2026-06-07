@@ -58,6 +58,94 @@ final class FrameBuilderTests: XCTestCase {
         XCTAssertGreaterThan(shiftedSteps, 10, "the walk should exercise the shift path")
     }
 
+    /// Output-scroll reuse must be byte-identical to a full rebuild: drive real output through
+    /// the engine (streamed lines, mid-screen overwrites, multi-line bursts), consume the damage
+    /// hint each step, and rebuild via `buildShifted(freshRows:)` exactly as the surface view's
+    /// off-main plain path does. The engine's `scroll`/`scrolledRows` contract and the builder's
+    /// shift-copy must agree at every step.
+    func testBuildShiftedWithFreshRowsMatchesFullBuildOnOutputScroll() {
+        let cols = 24, rows = 6
+        let term = HarnessGridTerminal(cols: cols, rows: rows)!
+        for i in 0 ..< 10 {
+            term.feed("\u{1b}[3\(i % 8)mfill \(i) 漢字 \u{1b}[4mu\(i)\u{1b}[0m\r\n")
+        }
+        let b = builder
+        _ = term.consumeDamage()
+        var previous = b.build(term.readGrid()!)
+        var hintSteps = 0
+        for step in 0 ..< 40 {
+            switch step % 5 {
+            case 0: // plain streamed line (one scroll)
+                term.feed("\u{1b}[3\(step % 8)mnew \(step) wide 漢\u{1b}[0m\r\n")
+            case 1: // burst (two scrolls in one consume window)
+                term.feed("burst-a \(step)\r\nburst-b \(step)\r\n")
+            case 2: // scroll, then overwrite a moved top row (fresh row inside the kept band)
+                term.feed("scrolled \(step)\r\n\u{1b}[2;3Hovr\u{1b}[\(rows);1H")
+            case 3: // decorated content with a trailing partial line (no scroll on the write)
+                term.feed("\u{1b}[7minverse \(step)\u{1b}[27m\r\n")
+            default: // wide chars crossing the wrap (wrap + scroll interplay)
+                term.feed(String(repeating: "漢", count: cols / 2 + 2) + "\r\n")
+            }
+            let damage = term.consumeDamage()
+            guard let snap = term.readGrid() else { return XCTFail("snapshot failed") }
+            let full = b.build(snap)
+            if damage.scroll != 0, !damage.full, !damage.scrolledRows.isEmpty,
+               let shifted = b.buildShifted(snap, reusing: previous, shift: damage.scroll,
+                                            freshRows: damage.rows.subtracting(damage.scrolledRows)) {
+                XCTAssertEqual(shifted, full, "step \(step) (scroll \(damage.scroll))")
+                previous = shifted
+                hintSteps += 1
+            } else {
+                previous = full
+            }
+        }
+        XCTAssertGreaterThan(hintSteps, 15, "the walk should exercise the hint path")
+    }
+
+    /// The cell-overlay pass must be byte-identical to baking: a plain build re-shaded by
+    /// `applyHighlights` equals `build(region:searchHighlights:)` for linear/block selections,
+    /// find hits, and the selection-beats-search precedence — across colored, wide-char,
+    /// decorated, and inverse content. Passing extra (unshaded) rows must be harmless: they
+    /// re-resolve to their plain cells.
+    func testApplyHighlightsMatchesBakedBuild() {
+        let cols = 24, rows = 8
+        let term = HarnessGridTerminal(cols: cols, rows: rows)!
+        for i in 0 ..< 7 {
+            term.feed("\u{1b}[3\(i % 8);4\((i + 1) % 8)mrow \(i) 漢字 \u{1b}[4mu\(i)\u{1b}[24m \u{1b}[7minv\u{1b}[27m\r\n")
+        }
+        term.feed("tail row")
+        let snap = term.readGrid()!
+        let b = FrameBuilder(
+            theme: theme,
+            selectionBackground: RGBColor(red: 60, green: 80, blue: 200),
+            searchBackground: RGBColor(red: 200, green: 180, blue: 40)
+        )
+        let cases: [(SelectionRegion?, [TerminalSelection], String)] = [
+            (.linear(TerminalSelection((1, 3), (4, 10))), [], "linear"),
+            (.block(BlockSelection((2, 2), (5, 9))), [], "block"),
+            (nil, [TerminalSelection((0, 0), (0, 5)), TerminalSelection((3, 4), (3, 9))], "find"),
+            (.linear(TerminalSelection((2, 0), (3, 23))), [TerminalSelection((2, 5), (2, 8))], "precedence"),
+            (.linear(TerminalSelection((0, 0), (7, 23))), [], "whole grid"),
+        ]
+        for (region, hits, name) in cases {
+            let baked = b.build(snap, region: region, searchHighlights: hits)
+            var shaded = b.build(snap)
+            b.applyHighlights(into: &shaded, from: snap, region: region, searchHighlights: hits,
+                              rows: IndexSet(integersIn: 0 ..< rows)) // extra rows must be harmless
+            XCTAssertEqual(shaded, baked, name)
+        }
+    }
+
+    func testApplyHighlightsWithoutShadingIsANoOp() {
+        let snap = HarnessGridTerminal(cols: 10, rows: 3)!.readGrid()!
+        let b = builder
+        let clean = b.build(snap)
+        var copy = clean
+        b.applyHighlights(into: &copy, from: snap, region: nil, searchHighlights: [],
+                          rows: IndexSet(integersIn: 0 ..< 3))
+        XCTAssertEqual(copy, clean)
+    }
+
     func testBuildShiftedRejectsInapplicableShifts() {
         let term = HarnessGridTerminal(cols: 10, rows: 3)!
         for i in 0 ..< 12 { term.feed("line \(i)\r\n") }
@@ -134,6 +222,16 @@ final class FrameBuilderTests: XCTestCase {
         let f = FrameBuilder(theme: theme, cursorStyle: .bar).build(term.readGrid()!)
 
         XCTAssertEqual(f.cursor.style, .bar)
+    }
+
+    func testCursorResetAfterProgramShapeReturnsToUserStyle() {
+        // The TUI exit path: program shape (steady block) then `CSI 0 SP q` reset — the build
+        // must resolve back to the user's configured style, not keep the program's block.
+        let term = HarnessGridTerminal(cols: 4, rows: 1)!
+        term.feed("\u{1b}[2 q")
+        XCTAssertEqual(FrameBuilder(theme: theme, cursorStyle: .bar).build(term.readGrid()!).cursor.style, .block)
+        term.feed("\u{1b}[0 q")
+        XCTAssertEqual(FrameBuilder(theme: theme, cursorStyle: .bar).build(term.readGrid()!).cursor.style, .bar)
     }
 
     func testRenderColorNormalizesChannels() {

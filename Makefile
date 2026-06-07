@@ -1,4 +1,4 @@
-.PHONY: run build bench preview preview-stop preview-clean release package dmg smoke-dmg sign appcast finalize hotfix-release icon clean video-skills video-dev video-check video-render video-doctor
+.PHONY: run install build bench preview preview-stop preview-clean release release-notes package dmg smoke-dmg sign appcast finalize hotfix-release icon clean video-skills video-dev video-check video-render video-doctor
 
 run:
 	./Scripts/run.sh app
@@ -28,6 +28,11 @@ preview-clean:
 
 icon:
 	./Scripts/generate-app-icon.sh
+
+# Regenerate the post-update banner's notes from the top CHANGELOG.md block.
+# Run in release prep after editing CHANGELOG.md (guarded by ReleaseNotesGuardTests).
+release-notes:
+	swift Scripts/generate-release-notes.swift
 
 release: icon
 	./Scripts/build-release.sh

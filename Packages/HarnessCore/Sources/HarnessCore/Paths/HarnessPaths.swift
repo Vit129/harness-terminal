@@ -130,6 +130,12 @@ public enum HarnessPaths {
         sessionsDirectory.appendingPathComponent("remote-hosts.json")
     }
 
+    /// Sidecar lock file guarding the cross-process read-modify-write of `remote-hosts.json` (held
+    /// via `flock`). Kept beside the JSON, never read for content — its presence is the lock.
+    public static var remoteHostsLockURL: URL {
+        sessionsDirectory.appendingPathComponent("remote-hosts.json.lock")
+    }
+
     /// Local sockets that SSH forwards to remote daemons (one per connected host). Kept short and
     /// under the runtime dir so the forwarded path comfortably fits `sockaddr_un.sun_path`.
     public static var tunnelsDirectory: URL {
@@ -167,6 +173,19 @@ public enum HarnessPaths {
 
     public static var settingsURL: URL {
         applicationSupport.appendingPathComponent("settings.json")
+    }
+
+    /// Daemon-owned record of the last build whose first-run/what's-new banner was shown.
+    /// Read at registry start; the pending banner is consumed (and this rewritten) by the
+    /// first freshly created surface after an install or update.
+    public static var versionStateURL: URL {
+        applicationSupport.appendingPathComponent("version-state.json")
+    }
+
+    /// User-installed `.harnesstheme` files (imported by double-clicking a shared theme).
+    /// Kept under application support so installs survive relaunch and can be re-shared.
+    public static var themesDirectory: URL {
+        applicationSupport.appendingPathComponent("themes", isDirectory: true)
     }
 
     public static var logsDirectory: URL {

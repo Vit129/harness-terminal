@@ -62,18 +62,10 @@ final class MainExecutor: CommandExecutor {
         case .selectPane(let target):
             try selectPane(target: target, coordinator: coordinator)
         case .swapPane:
-            // Pane targets for swap-pane (next/previous) translate to swapping
-            // with the next/previous pane in flat order.
-            guard let workspace = coordinator.snapshot.activeWorkspace,
-                  let tab = workspace.activeTab,
-                  let sid = coordinator.activeSurfaceID,
-                  let activePane = panePathLookup(surfaceID: sid, in: tab.rootPane)
-            else { throw CommandExecutionError.noActiveSurface }
-            let panes = tab.rootPane.allPaneIDs()
-            guard panes.count >= 2, let idx = panes.firstIndex(of: activePane) else { return }
-            let nextIdx = (idx + 1) % panes.count
-            coordinator.requestDaemon(.swapPanes(srcPaneID: activePane, dstPaneID: panes[nextIdx]))
-            coordinator.syncFromDaemon()
+            // Route through the shared translator so next/previous/last and `-s`
+            // resolve identically to the CLI, compositor, and control mode (the
+            // old inline handler always swapped with the next pane).
+            try runViaTranslator(command, coordinator: coordinator)
         case .resizePane(let direction, let amount):
             try resizeActivePane(direction: direction, amount: amount, coordinator: coordinator)
         case .markPane(let set):
@@ -173,6 +165,68 @@ final class MainExecutor: CommandExecutor {
             DisplayMessage.show(KeybindingsService.shared.summary(table: table.map { KeyTableID(rawValue: $0) }))
         case .sourceConfig:
             coordinator.reimportTerminalConfig()
+        // Config / buffer / hook write verbs: resolve scope/session/pane against the GUI's
+        // focus through the shared translator (same path as the compositor and hooks).
+        case .setOption, .setEnvironment, .setBuffer, .pasteBuffer, .deleteBuffer,
+             .setHook, .unbindHook:
+            try runViaTranslator(command, coordinator: coordinator)
+        // Show verbs: query the daemon and render through the message overlay (the same
+        // surface list-keys uses).
+        case let .showOptions(scope):
+            if case let .options(items)? = coordinator.requestDaemon(.showOptions(scope: scope)) {
+                let lines = items.map { entry in
+                    "\(entry.scope)\(entry.target.map { "(\($0.prefix(8)))" } ?? "") \(entry.key) = \(entry.value)"
+                }
+                DisplayMessage.show(lines.isEmpty ? "no options set" : lines.joined(separator: "\n"))
+            }
+        case let .showEnvironment(global):
+            let sessionID = global ? nil : coordinator.snapshot.activeWorkspace?.activeSession?.id
+            if case let .options(items)? = coordinator.requestDaemon(.showEnvironment(sessionID: sessionID)) {
+                let lines = items.map { "\($0.key)=\($0.value)" }
+                DisplayMessage.show(lines.isEmpty ? "no environment entries" : lines.joined(separator: "\n"))
+            }
+        case .listBuffers:
+            if case let .buffers(buffers)? = coordinator.requestDaemon(.listBuffers) {
+                let lines = buffers.map { "\($0.name): \($0.byteCount) bytes: \"\($0.preview)\"" }
+                DisplayMessage.show(lines.isEmpty ? "no buffers" : lines.joined(separator: "\n"))
+            }
+        case let .showBuffer(name):
+            if case let .buffer(buffer)? = coordinator.requestDaemon(.getBuffer(name: name)) {
+                let text = buffer.data.map { String(decoding: $0, as: UTF8.self) } ?? buffer.preview
+                DisplayMessage.show(text.isEmpty ? "buffer is empty" : text)
+            } else {
+                DisplayMessage.show("no such buffer")
+            }
+        case let .showHooks(event):
+            if case let .hooks(hooks)? = coordinator.requestDaemon(.listHooks(event: event)) {
+                let lines = hooks.map { "\($0.event) → \($0.commandSource)  [\($0.id.uuidString.prefix(8))]" }
+                DisplayMessage.show(lines.isEmpty ? "no hooks bound" : lines.joined(separator: "\n"))
+            }
+        case .refreshClient:
+            coordinator.syncFromDaemon()
+        case .respawnWindow:
+            try runViaTranslator(command, coordinator: coordinator)
+        case .showMessages:
+            if case let .text(log)? = coordinator.requestDaemon(.showMessages) {
+                DisplayMessage.show(log.isEmpty ? "no messages" : log)
+            }
+        case let .findWindow(pattern, name, content, title):
+            // Non-content searches translate to a selectTab request; -C needs live
+            // captures, done inline (re-dispatching the clientLocal result would loop).
+            guard content else { return try runViaTranslator(command, coordinator: coordinator) }
+            let match = FindWindowMatcher.firstMatch(
+                coordinator.snapshot, pattern: pattern, name: name, title: title
+            ) { surfaceID in
+                guard case let .text(text)? = coordinator.requestDaemon(
+                    .capturePane(surfaceID: surfaceID, includeScrollback: false)) else { return nil }
+                return text
+            }
+            guard let match else {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
+            _ = coordinator.requestDaemon(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID))
+            coordinator.syncFromDaemon()
         case .reloadKeybindings:
             KeybindingsService.shared.reload()
             PrefixKeymap.shared.rebuildFromSettings()
@@ -273,11 +327,30 @@ final class MainExecutor: CommandExecutor {
         )
         switch CommandIPCTranslator.translate(command, target: focus, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex) {
         case let .requests(requests):
-            for request in requests { _ = coordinator.requestDaemon(request) }
+            // Daemon validation errors (unknown hook event, bad option scope, …) must
+            // reach the user — a silently-dropped .error reads as success (fail-loud
+            // policy). First error aborts the remainder.
+            for request in requests {
+                if case let .error(message)? = coordinator.requestDaemon(request) {
+                    coordinator.syncFromDaemon()
+                    throw CommandExecutionError.daemonError(message)
+                }
+            }
             coordinator.syncFromDaemon()
         case let .clientLocal(local):
             try dispatch(local)
         case .unresolved:
+            // find-window's no-match is a search result, not a focus problem — say so
+            // (matches the -C path and the compositor/control-mode wording).
+            if case let .findWindow(pattern, _, _, _) = command {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
+            // Distinguish "you named something that doesn't exist" (strict `-t`/`-s`
+            // resolution) from "there is nothing focused to act on".
+            if case let .targeted(spec, _) = command {
+                throw CommandExecutionError.targetNotFound(spec.raw)
+            }
             throw CommandExecutionError.noActiveSurface
         }
     }
@@ -364,6 +437,7 @@ final class MainExecutor: CommandExecutor {
         case .next: coordinator.cycleActivePane(forward: true)
         case .previous: coordinator.cycleActivePane(forward: false)
         case .last: coordinator.selectLastPane()
+        case .current: break // already focused — explicit no-op
         case .left, .right, .up, .down:
             guard let tab = coordinator.snapshot.activeWorkspace?.activeTab,
                   let sid = coordinator.activeSurfaceID,
@@ -454,13 +528,27 @@ final class MainExecutor: CommandExecutor {
 
 @MainActor
 enum DisplayMessage {
+    /// `display-time` cache: a synchronous show-options IPC round-trip per toast
+    /// blocked the main actor (hook bursts fire many). The value changes rarely —
+    /// re-read at most every few seconds, like the compositor's applyOptions cache.
+    private static var cachedDisplayTimeMS = 750
+    private static var displayTimeFetchedAt = Date.distantPast
+
     /// Non-blocking transient toast anchored to the active window, with the
     /// message run through the `FormatString` evaluator so tokens like
     /// `#{pane_title}` / `#{session_name}` resolve (matching the status line).
     static func show(_ format: String) {
         let rendered = FormatString.evaluate(format, context: SessionCoordinator.shared.currentFormatContext())
         guard let host = (NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.contentView != nil }))?.contentView else { return }
-        Toast.show(rendered, in: host)
+        // `display-time` (ms, tmux) bounds the toast hold, same as the compositor's flash.
+        if Date().timeIntervalSince(displayTimeFetchedAt) > 5 {
+            displayTimeFetchedAt = Date()
+            cachedDisplayTimeMS = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)).flatMap { response -> Int? in
+                guard case let .options(entries) = response else { return nil }
+                return entries.first { $0.key == "display-time" }.flatMap { Int($0.value) }
+            } ?? 750
+        }
+        Toast.show(rendered, in: host, hold: max(Double(cachedDisplayTimeMS) / 1000, 0.1))
     }
 }
 

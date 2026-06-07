@@ -112,6 +112,13 @@ public final class TerminalHostView: NSView {
     /// transient "not yet subscribed" state. Drives menu-item enablement.
     public var isDetachedFromDaemon: Bool { detachedOverlay != nil }
 
+    /// A small, non-interactive "Reconnecting…" status chip shown in the corner while the output
+    /// stream is dropped and the backoff is retrying (daemon restart/crash). Distinct from
+    /// `detachedOverlay` (the full-pane click-to-re-grab affordance that only appears after the
+    /// backoff is exhausted): this is a quiet liveness cue during the ~55s recovery window so the
+    /// pane isn't silently frozen. Hidden the moment the resubscribe succeeds. nil while attached.
+    private var reconnectingOverlay: DetachedPaneOverlay?
+
     /// Show a `pane-border-format` label at the top (or bottom) edge, or hide it (nil/empty).
     public func setPaneBorderLabel(_ text: String?, atTop: Bool) {
         let trimmed = text?.trimmingCharacters(in: .whitespaces)
@@ -171,7 +178,8 @@ public final class TerminalHostView: NSView {
             vivid: settings?.vividColors ?? false,
             colorRendering: settings?.colorRendering,
             colorGamut: settings?.colorGamut ?? .auto,
-            offMainParserFramePipeline: settings?.offMainParserFramePipeline ?? true
+            offMainParserFramePipeline: settings?.offMainParserFramePipeline ?? true,
+            liveResizeReflow: settings?.liveResizeReflow ?? true
         )
         self.nativeView = nativeView
         super.init(frame: .zero)
@@ -222,6 +230,12 @@ public final class TerminalHostView: NSView {
             // OSC 9 carries no title; fall back to the app name so the banner reads sensibly.
             self.hostDelegate?.terminalHostDidRequestDesktopNotification(
                 title: title ?? "Harness", body: body, surfaceID: self.surfaceID)
+        }
+        native.onBecameFocused = { [weak self] in
+            guard let self else { return }
+            // Focusing a pane (click, ⌘-Tab back to the app, window key) clears its pending
+            // notification — the same delegate path a programmatic tab switch already uses.
+            self.hostDelegate?.terminalHostDidChangeFocus(true, surfaceID: self.surfaceID)
         }
         native.onCopy = { [weak self] text in
             self?.storeCopyBuffer(text)
@@ -362,7 +376,8 @@ public final class TerminalHostView: NSView {
             minimumContrast: HarnessSettings.clampedContrast(settings.minimumContrast),
             boldIsBright: settings.boldIsBright,
             promptGutter: settings.showPromptGutter,
-            offMainParserFramePipeline: settings.offMainParserFramePipeline
+            offMainParserFramePipeline: settings.offMainParserFramePipeline,
+            liveResizeReflow: settings.liveResizeReflow
         )
         // Resize overlay: legible on any theme via the canvas FG fill + BG text (same trick as the
         // pane-border label), positioned per settings.
@@ -546,6 +561,7 @@ public final class TerminalHostView: NSView {
         outputSubscription?.cancel()
         outputSubscription = nil
         io.attach(subscription: nil) // fall back to the per-call client while detached
+        hideReconnectingOverlay() // a deliberate release supersedes any in-flight reconnect cue
         showDetachedOverlay()
     }
 
@@ -555,6 +571,7 @@ public final class TerminalHostView: NSView {
         guard outputSubscription == nil else { return }
         intentionallyDetached = false
         reconnectAttempts = 0
+        hideReconnectingOverlay()
         hideDetachedOverlay()
         startDaemonOutput(resetBeforeReplay: true)
     }
@@ -579,6 +596,29 @@ public final class TerminalHostView: NSView {
     private func hideDetachedOverlay() {
         detachedOverlay?.removeFromSuperview()
         detachedOverlay = nil
+    }
+
+    /// Drop a small, unobtrusive "Reconnecting…" chip in the top-right while the backoff retries.
+    /// Non-interactive (passes clicks/scroll through to the frozen pane) and does not steal focus —
+    /// it's a liveness cue, not the re-grab affordance. Idempotent; no-op if the full detached
+    /// overlay is already up (the backoff was exhausted, so the chip would be redundant).
+    private func showReconnectingOverlay() {
+        guard reconnectingOverlay == nil, detachedOverlay == nil else { return }
+        let overlay = DetachedPaneOverlay(frame: bounds, style: .reconnectingChip)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(overlay, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        reconnectingOverlay = overlay
+    }
+
+    private func hideReconnectingOverlay() {
+        reconnectingOverlay?.removeFromSuperview()
+        reconnectingOverlay = nil
     }
 
     /// Scroll the viewport to the previous/next OSC 133 shell prompt (no-op without shell
@@ -614,27 +654,31 @@ public final class TerminalHostView: NSView {
     }
 
     private func startDaemonOutput(resetBeforeReplay: Bool = false) {
-        // Reconnect/reattach: reset the emulator (RIS) first so the replayed scrollback replaces
-        // stale pre-restart content instead of stacking on it (which shows a doubled prompt). On the
-        // first connect the emulator is empty, so RIS would be a no-op — keep it off that path.
-        if resetBeforeReplay {
-            nativeView.receive("\u{1b}c")
-        }
-        do {
-            if case let .text(text) = try daemonClient.request(.replayScrollback(
-                surfaceID: surfaceID.uuidString,
-                fromSequence: nil
-            )), !text.isEmpty {
-                nativeView.receive(text)
+        // Gap-free attach: subscribe FIRST (live frames buffer), THEN replay, then flush the
+        // buffered live frames deduped against the replay boundary — so a byte appended between the
+        // replay snapshot and the handler registration is delivered exactly once instead of dropped.
+        // `onReplay` resets stale content (when reconnecting) and feeds the replayed history; both
+        // run on main, and live frames only reach main AFTER this (via `makeOutputDataHandler`'s
+        // `main.async`), so FIFO keeps history before live output.
+        let reset = resetBeforeReplay
+        let onData = makeOutputDataHandler()
+        let onReplay: @Sendable (String) -> Void = { [weak self] text in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // Reconnect/reattach: RIS first so the replay replaces stale pre-restart content
+                    // instead of stacking on it. First connect: emulator empty, so RIS is a no-op.
+                    if reset { self.nativeView.receive("\u{1b}c") }
+                    if !text.isEmpty { self.nativeView.receive(text) }
+                }
             }
-        } catch {
-            fputs("Harness: replayScrollback failed for \(surfaceID.uuidString): \(error)\n", harnessStderr)
         }
         do {
-            outputSubscription = try daemonClient.subscribeSurfaceOutput(
+            outputSubscription = try daemonClient.attachReplayingSurfaceOutput(
                 surfaceID: surfaceID.uuidString,
                 label: "Harness.app",
-                onData: makeOutputDataHandler(),
+                onReplay: onReplay,
+                onData: onData,
                 onEnd: makeOutputEndHandler()
             )
             // Ride this persistent full-duplex connection for input (fire-and-forget), replacing
@@ -686,13 +730,18 @@ public final class TerminalHostView: NSView {
     /// back to the manual "click to re-grab" affordance. No-op once intentionally detached.
     private func scheduleDaemonReconnect() {
         guard !intentionallyDetached, outputSubscription == nil else { return }
-        guard reconnectAttempts < 60 else {
+        guard !DaemonReconnectPolicy.isExhausted(attempts: reconnectAttempts) else {
+            hideReconnectingOverlay() // the chip gives way to the full re-grab affordance
             showDetachedOverlay() // ~50s of retries elapsed; let the user re-grab manually
             return
         }
+        // Surface a quiet "Reconnecting…" cue at the start of the backoff so a dropped stream isn't
+        // silently frozen for the whole recovery window. Hidden on a successful re-attach (or when
+        // the backoff is exhausted and the full re-grab overlay takes over). Idempotent.
+        showReconnectingOverlay()
         let attempt = reconnectAttempts
         reconnectAttempts += 1
-        let delay = min(0.1 * Double(attempt + 1), 1.0)
+        let delay = DaemonReconnectPolicy.delay(forAttempt: attempt)
         // Capture main-actor state so the whole probe + (re)attach handshake — ping, ensureSurface,
         // replayScrollback, and subscribe — runs OFF main. A still-restarting daemon answers slowly
         // (or its socket blocks), so doing these synchronous round trips on main froze the UI for the
@@ -731,6 +780,7 @@ public final class TerminalHostView: NSView {
                         // the last grid size, correcting a surface respawned at the placeholder size.
                         self.io.attach(subscription: subscription)
                         self.reconnectAttempts = 0
+                        self.hideReconnectingOverlay()
                         self.hideDetachedOverlay()
                     } else {
                         self.scheduleDaemonReconnect() // daemon not back / subscribe failed — retry
@@ -747,16 +797,13 @@ public final class TerminalHostView: NSView {
             guard case .ok? = try? client.request(.ensureSurface(
                 surfaceID: sid, cwd: cwd, shell: shell, rows: 24, cols: 80, scrollbackBytes: scrollbackBytes
             )) else { onAttached(nil); return }
-            var replayText = ""
-            if case let .text(text)? = try? client.request(.replayScrollback(surfaceID: sid, fromSequence: nil)) {
-                replayText = text
-            }
-            // Reset + replay on main BEFORE the live stream starts: this main hop is queued before the
-            // subscribe below, and `onData` only ever hops to main AFTER the subscribe — so FIFO
-            // guarantees the replayed history lands before any live byte.
-            onReplay(replayText)
-            let subscription = try? client.subscribeSurfaceOutput(
-                surfaceID: sid, label: "Harness.app", onData: onData, onEnd: onEnd
+            // Gap-free resubscribe: the helper subscribes first (buffering live frames), replays,
+            // then flushes the buffered frames deduped against the replay boundary — closing the
+            // window where a byte appended between the replay and the subscribe was dropped. The
+            // helper invokes `onReplay` (reset + replayed history on main) before the live stream,
+            // and the buffered/live frames reach main via `onData` AFTER it, so FIFO keeps order.
+            let subscription = try? client.attachReplayingSurfaceOutput(
+                surfaceID: sid, label: "Harness.app", onReplay: onReplay, onData: onData, onEnd: onEnd
             )
             onAttached(subscription)
         }
@@ -789,13 +836,20 @@ private final class TerminalFrameOverlayView: NSView {
 /// than reaching the stale surface underneath.
 @MainActor
 private final class DetachedPaneOverlay: NSView {
-    var onReattach: (() -> Void)?
-    private let label = NSTextField(labelWithString: "Pane released — click to re-grab")
+    /// `detached` = the full-pane dim + centered "click to re-grab" affordance (captures clicks).
+    /// `reconnectingChip` = a small, corner-pinned, non-interactive "Reconnecting…" liveness cue
+    /// shown during the backoff window (passes events through, shares the same chrome palette).
+    enum Style { case detached, reconnectingChip }
 
-    override init(frame frameRect: NSRect) {
+    var onReattach: (() -> Void)?
+    private let style: Style
+    private let label: NSTextField
+
+    init(frame frameRect: NSRect, style: Style = .detached) {
+        self.style = style
+        self.label = NSTextField(labelWithString: style == .detached ? "Pane released — click to re-grab" : "Reconnecting…")
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         label.textColor = .white
@@ -803,21 +857,51 @@ private final class DetachedPaneOverlay: NSView {
         label.maximumNumberOfLines = 2
         label.lineBreakMode = .byWordWrapping
         label.isSelectable = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -24),
-        ])
+
+        switch style {
+        case .detached:
+            // Dim the whole pane and center the affordance.
+            layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+            addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+                label.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -24),
+            ])
+        case .reconnectingChip:
+            // A small rounded chip pinned top-right; the overlay itself stays transparent so the
+            // pane underneath shows through. Reuses the detached overlay's dark/white palette.
+            let chip = NSView()
+            chip.translatesAutoresizingMaskIntoConstraints = false
+            chip.wantsLayer = true
+            chip.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+            chip.layer?.cornerRadius = 6
+            chip.addSubview(label)
+            addSubview(chip)
+            NSLayoutConstraint.activate([
+                chip.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                chip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+                label.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 10),
+                label.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -10),
+                label.topAnchor.constraint(equalTo: chip.topAnchor, constant: 4),
+                label.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -4),
+            ])
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// A click anywhere re-grabs the surface.
+    /// The reconnecting chip is a passive cue — let every event fall through to the pane underneath
+    /// so the user can still scroll/select the frozen content. The detached overlay captures.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        style == .reconnectingChip ? nil : super.hitTest(point)
+    }
+
+    /// A click anywhere re-grabs the surface (detached style only; the chip never hit-tests).
     override func mouseDown(with event: NSEvent) { onReattach?() }
     /// Re-grab even when the window isn't key (the first click also focuses).
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    /// Swallow scroll so the frozen pane underneath doesn't react to wheel events.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { style == .detached }
+    /// Swallow scroll so the frozen pane underneath doesn't react to wheel events (detached only).
     override func scrollWheel(with event: NSEvent) {}
 }
 
@@ -840,6 +924,26 @@ private final class SurfaceIO: @unchecked Sendable {
     /// its placeholder size is corrected without waiting for the next layout pass. Guarded by `lock`.
     private var lastRows: UInt16 = 0
     private var lastCols: UInt16 = 0
+    /// Monotonic tag for coalescing live-resize votes: a real-time window drag fires one
+    /// `resize(...)` per cell boundary, and the daemon re-`ioctl`s on every identical size, so a
+    /// fast drag must not storm the IPC socket. Each call bumps this; a queued send drops itself if
+    /// a newer call superseded it. Guarded by `lock`.
+    private var resizeVoteEpoch: UInt64 = 0
+    /// Coalescing buffer for the per-call `.sendData` fallback (used only when the persistent
+    /// subscription can't deliver — torn down, or evicted for slowness — e.g. during a daemon
+    /// restart). Each fallback `client.request` connects + blocks reading; an SSH-tunnel endpoint
+    /// `connect()`s even when the remote daemon is gone, so a naïve per-keystroke fallback replays
+    /// N keystrokes as N × the read timeout in a stalled burst. Instead we accumulate all bytes
+    /// awaiting a fallback here and drain them as ONE ordered request per attempt. Guarded by `lock`.
+    private var pendingFallback = Data()
+    /// Whether a fallback drain is already enqueued on `queue`; keeps `send` from piling up one
+    /// blocking request per keystroke. Guarded by `lock`.
+    private var fallbackDrainScheduled = false
+    /// Short read timeout for the fallback request. The persistent subscription is the real input
+    /// path; the fallback only covers the brief window between subscription death and the
+    /// main-thread `attach(nil)`, so it must fail fast (not the default 2 s) to avoid stalling the
+    /// serial input queue while a daemon is down.
+    private let fallbackTimeout: TimeInterval = 0.3
 
     init(surfaceID: String, endpoint: Endpoint = .localControlSocket) {
         self.surfaceID = surfaceID
@@ -852,6 +956,10 @@ private final class SurfaceIO: @unchecked Sendable {
         lock.lock()
         self.subscription = subscription
         let rows = lastRows, cols = lastCols
+        // Schedule a drain through the fresh subscription for any bytes that fell back while it was
+        // down, unless one is already pending (avoid two concurrent drains).
+        let scheduleDrain = subscription != nil && !pendingFallback.isEmpty && !fallbackDrainScheduled
+        if scheduleDrain { fallbackDrainScheduled = true }
         lock.unlock()
         // Re-assert the grid size on attach: a surface respawned by a restarted daemon comes up at
         // the daemon's placeholder size until a client resize vote arrives. Send it on the
@@ -862,6 +970,11 @@ private final class SurfaceIO: @unchecked Sendable {
                 subscription.resize(surfaceID, rows: rows, cols: cols)
             }
         }
+        // Flush any buffered fallback input through the recovered subscription, in order.
+        // `drainFallback` clears `fallbackDrainScheduled` itself.
+        if scheduleDrain {
+            queue.async { [weak self] in self?.drainFallback() }
+        }
     }
 
     private var currentSubscription: DaemonSubscription? {
@@ -869,29 +982,101 @@ private final class SurfaceIO: @unchecked Sendable {
     }
 
     func send(_ data: Data) {
+        guard !data.isEmpty else { return }
         // Stay on `queue` so keystrokes are ordered and off the main thread (matching the old
         // path); the write itself is now one frame on the persistent fd with no socket setup or
         // reply wait. Before the subscription exists (first keystrokes), fall back to the client.
-        queue.async { [weak self, client, surfaceID] in
-            if let sub = self?.currentSubscription {
-                sub.sendInput(data, surfaceID: surfaceID)
-            } else {
-                _ = try? client.request(.sendData(surfaceID: surfaceID, data: data))
+        queue.async { [weak self, surfaceID] in
+            guard let self else { return }
+            // Once any byte is awaiting a fallback drain, ALL later bytes must queue behind it —
+            // even if the subscription has recovered — or they'd jump ahead and reorder input. So
+            // check the pending buffer first, under the lock.
+            self.lock.lock()
+            let draining = !self.pendingFallback.isEmpty || self.fallbackDrainScheduled
+            self.lock.unlock()
+            if !draining,
+               let sub = self.currentSubscription,
+               sub.sendInput(data, surfaceID: surfaceID) {
+                // Healthy fast path: one frame on the persistent fd, no socket setup or reply wait.
+                return
             }
+            // Subscription can't deliver — torn down, evicted for slowness, or not yet attached.
+            // Buffer the bytes and ensure exactly one coalescing drain is scheduled, so N keystrokes
+            // during an outage produce ordered single-request attempts instead of N blocking RPCs.
+            self.enqueueFallback(data)
+        }
+    }
+
+    /// Append `data` to the fallback buffer and schedule one drain if none is pending. Runs on
+    /// `queue`. Coalesces a burst of keystrokes (during subscription loss / daemon restart) into a
+    /// single ordered `.sendData` request per attempt, bounding the stall to one `fallbackTimeout`.
+    private func enqueueFallback(_ data: Data) {
+        lock.lock()
+        pendingFallback.append(data)
+        guard !fallbackDrainScheduled else { lock.unlock(); return }
+        fallbackDrainScheduled = true
+        lock.unlock()
+        queue.async { [weak self] in self?.drainFallback() }
+    }
+
+    /// Drain the coalesced fallback buffer in order. Prefers a recovered subscription; otherwise
+    /// one short-timeout `.sendData` RPC carrying everything buffered. On failure the bytes stay
+    /// buffered and the next `send` re-schedules a drain (single retry per keystroke burst, never
+    /// N × timeout). Runs on `queue`.
+    private func drainFallback() {
+        lock.lock()
+        let batch = pendingFallback
+        pendingFallback.removeAll(keepingCapacity: true)
+        fallbackDrainScheduled = false
+        lock.unlock()
+        guard !batch.isEmpty else { return }
+
+        if let sub = currentSubscription, sub.sendInput(batch, surfaceID: surfaceID) {
+            return // subscription recovered — delivered in order, buffer already cleared
+        }
+        do {
+            _ = try client.request(.sendData(surfaceID: surfaceID, data: batch), timeout: fallbackTimeout)
+        } catch {
+            // Still unreachable (e.g. daemon mid-restart): re-buffer this batch AHEAD of anything
+            // that accumulated while the request was in flight, preserving byte order. We do NOT
+            // auto-re-arm here — that would busy-spin one fallbackTimeout request after another
+            // while the daemon is down. The next `send` re-schedules a drain (so a typing user
+            // keeps retrying once per keystroke), and `attach()` flushes on reattach, so buffered
+            // bytes are never stranded once delivery is possible again.
+            lock.lock()
+            pendingFallback = batch + pendingFallback
+            lock.unlock()
         }
     }
 
     func resize(rows: UInt16, cols: UInt16) {
-        lock.lock(); lastRows = rows; lastCols = cols; lock.unlock()
-        // Prefer the persistent subscription (mirrors `send`): the daemon keys size votes by fd,
-        // so a vote on the subscription holds until detach — a one-shot vote evaporates with its
+        lock.lock()
+        lastRows = rows
+        lastCols = cols
+        resizeVoteEpoch &+= 1
+        let epoch = resizeVoteEpoch
+        lock.unlock()
+        // Coalesce a live drag's per-cell-boundary votes: each call bumps the epoch, and the queued
+        // send fires only if its epoch is still newest when it runs, reading the freshest size under
+        // the lock. A burst on the IPC socket collapses to the final size — the daemon does not
+        // dedupe identical `TIOCSWINSZ` calls, so the client must — while every DISTINCT settled
+        // size still lands (the per-fd vote is sticky, so the last value wins).
+        // Prefer the persistent subscription (mirrors `send`): the daemon keys size votes by fd, so
+        // a vote on the subscription holds until detach — a one-shot vote evaporates with its
         // socket. Before the subscription exists, fall back to the per-call client (apply-then-drop
         // is correct for a not-yet-attached client).
         queue.async { [weak self, client, surfaceID] in
-            if let sub = self?.currentSubscription {
-                sub.resize(surfaceID, rows: rows, cols: cols)
+            guard let self else { return }
+            self.lock.lock()
+            let isLatest = epoch == self.resizeVoteEpoch
+            let r = self.lastRows
+            let c = self.lastCols
+            self.lock.unlock()
+            guard isLatest else { return } // a newer vote superseded this one — drop the duplicate
+            if let sub = self.currentSubscription {
+                sub.resize(surfaceID, rows: r, cols: c)
             } else {
-                _ = try? client.request(.resizeSurface(surfaceID: surfaceID, rows: rows, cols: cols))
+                _ = try? client.request(.resizeSurface(surfaceID: surfaceID, rows: r, cols: c))
             }
         }
     }
@@ -932,4 +1117,19 @@ private final class InputGate: @unchecked Sendable {
             }
         }
     }
+}
+
+/// Pure backoff policy for `TerminalHostView.scheduleDaemonReconnect`, extracted so the recovery
+/// window's shape — bounded retries, ramping delay, hand-off to the manual re-grab overlay — is
+/// pinned by unit tests (the live wiring needs a real daemon and is covered by the gated suites).
+enum DaemonReconnectPolicy {
+    static let maxAttempts = 60
+
+    /// Ramp 0.1s → 1.0s: a fast daemon restart reattaches almost immediately, a slow one isn't
+    /// hammered; the full window is ~55s before the manual re-grab affordance takes over.
+    static func delay(forAttempt attempt: Int) -> TimeInterval {
+        min(0.1 * Double(attempt + 1), 1.0)
+    }
+
+    static func isExhausted(attempts: Int) -> Bool { attempts >= maxAttempts }
 }

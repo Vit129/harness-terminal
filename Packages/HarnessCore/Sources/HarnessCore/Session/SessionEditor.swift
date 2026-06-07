@@ -553,6 +553,102 @@ public struct SessionEditor: Sendable {
         return closeTab(tabID)
     }
 
+    // MARK: Grouped sessions (tmux `new-session -t <session>`)
+
+    /// Create an independent session sharing `targetSessionID`'s window list: every
+    /// window is a linked copy (fresh tab/pane IDs, SAME surface IDs — live PTYs), and
+    /// the new member keeps its own active window. First grouping stamps the group ID
+    /// on the target too. Returns the new session's ID.
+    public mutating func addGroupedSession(
+        groupWith targetSessionID: SessionID,
+        name: String? = nil
+    ) -> SessionID? {
+        guard let loc = sessionIndex(sessionID: targetSessionID) else { return nil }
+        let groupID = snapshot.workspaces[loc.workspaceIndex].sessions[loc.sessionIndex].groupID ?? UUID()
+        snapshot.workspaces[loc.workspaceIndex].sessions[loc.sessionIndex].groupID = groupID
+
+        let target = snapshot.workspaces[loc.workspaceIndex].sessions[loc.sessionIndex]
+        let linkedTabs: [Tab] = target.tabs.map { source in
+            var linked = source
+            linked.id = UUID()
+            linked.rootPane = Self.cloneWithFreshPaneIDs(source.rootPane)
+            linked.zoomedPaneID = nil
+            linked.activePaneID = linked.rootPane.allPaneIDs().first
+            linked.lastActivePaneID = nil
+            return linked
+        }
+        // tmux: the new member starts on the group's CURRENT window (focus then
+        // diverges per member) — the linked copy at the target's active position.
+        let activeIndex = target.tabs.firstIndex { $0.id == target.activeTabID } ?? 0
+        let member = SessionGroup(
+            name: name ?? "",
+            tabs: linkedTabs,
+            activeTabID: (linkedTabs.indices.contains(activeIndex) ? linkedTabs[activeIndex] : linkedTabs.first)?.id,
+            sortOrder: (snapshot.workspaces[loc.workspaceIndex].sessions.map(\.sortOrder).max() ?? 0) + 1,
+            groupID: groupID
+        )
+        snapshot.workspaces[loc.workspaceIndex].sessions.append(member)
+        snapshot.workspaces[loc.workspaceIndex].activeSessionID = member.id
+        bumpRevision()
+        return member.id
+    }
+
+    /// Group peers of a session (same groupID, excluding itself). Empty when ungrouped.
+    func groupPeers(of sessionID: SessionID) -> [(workspaceIndex: Int, sessionIndex: Int)] {
+        guard let loc = sessionIndex(sessionID: sessionID),
+              let groupID = snapshot.workspaces[loc.workspaceIndex].sessions[loc.sessionIndex].groupID
+        else { return [] }
+        var peers: [(Int, Int)] = []
+        for wsIndex in snapshot.workspaces.indices {
+            for sIndex in snapshot.workspaces[wsIndex].sessions.indices
+            where snapshot.workspaces[wsIndex].sessions[sIndex].groupID == groupID
+                && snapshot.workspaces[wsIndex].sessions[sIndex].id != sessionID {
+                peers.append((wsIndex, sIndex))
+            }
+        }
+        return peers
+    }
+
+    /// After `addTab` created `tabID` in a grouped session, mirror it into every group
+    /// peer as a linked copy (shared surfaces). Peers' active windows are untouched —
+    /// tmux: the new window appears in all members, focus changes only where created.
+    public mutating func propagateNewTabToGroup(_ tabID: TabID) {
+        guard let match = tabIndex(tabID: tabID) else { return }
+        let owner = snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex]
+        let source = owner.tabs[match.tabIndex]
+        let peers = groupPeers(of: owner.id) // once — an O(sessions) scan
+        for peer in peers {
+            var linked = source
+            linked.id = UUID()
+            linked.rootPane = Self.cloneWithFreshPaneIDs(source.rootPane)
+            linked.zoomedPaneID = nil
+            linked.activePaneID = linked.rootPane.allPaneIDs().first
+            linked.lastActivePaneID = nil
+            linked.sortOrder = (snapshot.workspaces[peer.workspaceIndex]
+                .sessions[peer.sessionIndex].tabs.map(\.sortOrder).max() ?? 0) + 1
+            snapshot.workspaces[peer.workspaceIndex].sessions[peer.sessionIndex].tabs.append(linked)
+        }
+        if !peers.isEmpty { bumpRevision() }
+    }
+
+    /// Before closing `tabID` in a grouped session, find the peer copies of the same
+    /// window (tabs sharing any of its live surfaces) so the caller can close them
+    /// too — tmux: killing a window removes it from every group member. Overlap, not
+    /// set equality: per-window split layouts may diverge between members (a local
+    /// split adds a surface to one copy only), and the kill must still propagate —
+    /// same sharing predicate as `unlinkWindow`.
+    public func groupCounterparts(of tabID: TabID) -> [TabID] {
+        guard let match = tabIndex(tabID: tabID) else { return [] }
+        let owner = snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex]
+        let surfaces = Set(owner.tabs[match.tabIndex].rootPane.allSurfaceIDs())
+        guard !surfaces.isEmpty else { return [] }
+        return groupPeers(of: owner.id).flatMap { peer in
+            snapshot.workspaces[peer.workspaceIndex].sessions[peer.sessionIndex].tabs
+                .filter { !surfaces.isDisjoint(with: $0.rootPane.allSurfaceIDs()) }
+                .map(\.id)
+        }
+    }
+
     /// Clone a pane tree keeping surface IDs but assigning fresh pane IDs.
     static func cloneWithFreshPaneIDs(_ node: PaneNode) -> PaneNode {
         switch node {
@@ -691,6 +787,14 @@ public struct SessionEditor: Sendable {
     public mutating func updateTabCwd(surfaceID: SurfaceID, path: String) {
         guard let match = tabIndex(surfaceID: surfaceID) else { return }
         snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex].tabs[match.tabIndex].cwd = path
+        bumpRevision()
+    }
+
+    /// Foreground-command metadata (`#{pane_current_command}`), refreshed by the daemon's
+    /// metadata scan alongside cwd — same per-tab granularity as `updateTabCwd`.
+    public mutating func updateTabCurrentCommand(surfaceID: SurfaceID, command: String?) {
+        guard let match = tabIndex(surfaceID: surfaceID) else { return }
+        snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex].tabs[match.tabIndex].currentCommand = command
         bumpRevision()
     }
 

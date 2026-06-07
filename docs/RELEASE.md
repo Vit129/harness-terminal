@@ -49,6 +49,19 @@ The workflow validates that the tag version matches `Info.plist` before signing
 anything. If the version still says `1.0.3`, a `v1.0.4` run fails fast and tells
 you to bump `CFBundleShortVersionString` / `CFBundleVersion` first.
 
+Bump `HarnessVersion.swift` (`short` + `build` in `Packages/HarnessCore`) in the
+same commit as `Info.plist` — the daemon and CLI report versions from those
+constants, and `Scripts/package-app.sh` + the workflow fail the build when the
+two disagree (v1.3.0/v1.3.1 shipped daemons that reported 1.2.0). Edit the plist
+as plain text; `PlistBuddy Set` re-serializes the whole file. Also move the
+`CHANGELOG.md` `[Unreleased]` section under the new version heading.
+
+After dispatching, verify the run's `headSha` equals the release-prep commit
+before approving the `release` environment (a push that failed on a network
+blip once left `workflow_dispatch` running from the OLD head). Known flake:
+`hdiutil` "Resource busy" during DMG creation — rerun failed jobs and re-approve
+the environment.
+
 ## What the workflow publishes
 
 - A GitHub Release for the requested tag, created at the workflow commit if one

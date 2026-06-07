@@ -144,7 +144,12 @@ public enum CommandIPCTranslator {
         switch command {
         // MARK: Targeting — resolve `-t` then run the inner verb against it.
         case let .targeted(spec, inner):
-            let resolved = target.resolving(spec, command: inner, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
+            // STRICT: a named component that doesn't match makes the whole command
+            // `.unresolved` — every targeted verb (kill/respawn/send-keys/…) fails
+            // loudly on a bad `-t` instead of acting on the caller's focus.
+            guard let resolved = target.resolving(
+                spec, command: inner, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+            ) else { return .unresolved }
             // For "select" verbs with an explicit target, selecting *is* focusing
             // the resolved window/pane (absolute), not a relative step.
             switch inner {
@@ -154,9 +159,90 @@ public enum CommandIPCTranslator {
             case .selectWindow:
                 guard let ws = resolved.workspace, let tab = resolved.tab else { return .unresolved }
                 return .requests([.selectTab(workspaceID: ws.id, tabID: tab.id)])
+            case let .newSession(name):
+                // tmux `new-session -t <session>`: a session GROUPED with the target,
+                // sharing its window list — not a session created "at" the target.
+                // STRICT lookup, like `resolving` itself: never group with the wrong
+                // session — the misroute class the v1.7.1 validation eliminated.
+                guard let sref = spec.session,
+                      let (_, targetSession) = CommandTarget.findSession(sref, in: target.snapshot, current: target.session)
+                else { return .unresolved }
+                return .requests([.newSessionInGroup(targetSessionID: targetSession.id, name: name)])
+            case let .swapPane(_, source):
+                // tmux `swap-pane [-s src] -t X`: X names the DESTINATION; the pane to
+                // act from is `-s` (default: the caller's active pane). Translating
+                // against `resolved` would swap X with X's own neighbor.
+                guard let src = swapSource(source, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex),
+                      let dst = resolved.paneID, dst != src else {
+                    return .unresolved
+                }
+                return .requests([.swapPanes(srcPaneID: src, dstPaneID: dst)])
             default:
                 return translate(inner, target: resolved, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
             }
+
+        // MARK: Config / buffer / hook verbs
+        case let .setOption(scope, explicitTarget, key, rawValue):
+            // A scoped set without -T resolves against the caller's focus chain (tmux
+            // behavior); the CLI form requires -T because it has no focus to fall back on.
+            var resolvedTarget = explicitTarget
+            if resolvedTarget == nil {
+                switch scope {
+                case "workspace": resolvedTarget = target.workspace?.id.uuidString
+                case "session": resolvedTarget = target.session?.id.uuidString
+                case "tab": resolvedTarget = target.tab?.id.uuidString
+                case "pane": resolvedTarget = target.paneID?.uuidString
+                default: break
+                }
+            }
+            guard scope == "global" || resolvedTarget != nil else { return .unresolved }
+            return .requests([.setOption(scope: scope, target: resolvedTarget, key: key, rawValue: rawValue)])
+
+        case let .setEnvironment(global, key, value):
+            // tmux default scope is the focused session; -g writes the global table.
+            let sessionID = global ? nil : target.session?.id
+            guard global || sessionID != nil else { return .unresolved }
+            return .requests([.setEnvironment(sessionID: sessionID, key: key, value: value)])
+
+        case let .setBuffer(name, text):
+            return .requests([.setBuffer(name: name, data: Data(text.utf8))])
+
+        case let .pasteBuffer(name):
+            guard let pane = target.paneID, let surface = target.surfaceID(of: pane) else { return .unresolved }
+            return .requests([.pasteBuffer(surfaceID: surface, name: name, bracketed: true)])
+
+        case let .deleteBuffer(name):
+            return .requests([.deleteBuffer(name: name)])
+
+        case let .setHook(event, source, condition):
+            return .requests([.bindHook(event: event, source: source, condition: condition)])
+
+        case let .unbindHook(id):
+            return .requests([.unbindHook(id: id)])
+
+        case let .respawnWindow(keepHistory):
+            // Every pane in the focused (or `-t`-resolved) window, one respawn each.
+            guard let tab = target.tab else { return .unresolved }
+            let surfaces = tab.rootPane.allSurfaceIDs().map(\.uuidString)
+            guard !surfaces.isEmpty else { return .unresolved }
+            return .requests(surfaces.map { .respawnPane(surfaceID: $0, keepHistory: keepHistory) })
+
+        // Show verbs produce OUTPUT — each front-end queries the daemon and renders
+        // through its own surface (GUI message, compositor status flash, control-mode
+        // lines). The daemon's hook executor logs them as no-ops.
+        case .showOptions, .showEnvironment, .listBuffers, .showBuffer, .showHooks,
+             .showMessages, .refreshClient:
+            return .clientLocal(command)
+
+        case let .findWindow(pattern, name, content, title):
+            // Content matching needs a live capture (client-side concern) — hand off.
+            // Name/title resolve from the snapshot here so every front-end agrees.
+            if content { return .clientLocal(command) }
+            let matches = FindWindowMatcher.snapshotMatches(
+                target.snapshot, pattern: pattern, name: name, title: title)
+            guard let first = matches.first else { return .unresolved }
+            // tmux lists multiple matches; Harness focuses the first in snapshot order.
+            return .requests([.selectTab(workspaceID: first.workspaceID, tabID: first.tabID)])
 
         // MARK: Pane structure
         case let .splitWindow(direction):
@@ -186,16 +272,20 @@ public enum CommandIPCTranslator {
         case let .selectPane(paneTarget):
             return selectPane(paneTarget, target: target)
 
-        case let .swapPane(paneTarget):
-            guard let pane = target.paneID else { return .unresolved }
+        case let .swapPane(paneTarget, source):
+            // `-s X` swaps X with the destination; no `-s` swaps the caller's pane.
+            // Relative destinations stay relative to the caller's focus (tmux).
+            guard let src = swapSource(source, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex),
+                  let current = target.paneID else { return .unresolved }
             let neighbor: PaneID?
             switch paneTarget {
+            case .current: neighbor = current
             case .next, .right, .down: neighbor = target.pane(offset: 1)
             case .previous, .left, .up: neighbor = target.pane(offset: -1)
             case .last: neighbor = target.tab?.lastActivePaneID
             }
-            guard let dst = neighbor, dst != pane else { return .unresolved }
-            return .requests([.swapPanes(srcPaneID: pane, dstPaneID: dst)])
+            guard let dst = neighbor, dst != src else { return .unresolved }
+            return .requests([.swapPanes(srcPaneID: src, dstPaneID: dst)])
 
         case let .joinPane(direction):
             guard let dst = target.paneID, let src = target.markedPaneID, src != dst else { return .unresolved }
@@ -203,9 +293,11 @@ public enum CommandIPCTranslator {
 
         case let .movePane(direction, source):
             // move-pane = join-pane with an explicit `-s` source (the daemon op is
-            // identical). Resolve the source pane against the same snapshot.
-            let srcTarget = target.resolving(source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
-            guard let src = srcTarget.paneID, let dst = target.paneID, src != dst else { return .unresolved }
+            // identical). Resolve the source pane against the same snapshot — strictly,
+            // so a mistyped `-s` never silently moves the focused pane.
+            guard let srcTarget = target.resolving(
+                source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+            ), let src = srcTarget.paneID, let dst = target.paneID, src != dst else { return .unresolved }
             return .requests([.joinPane(sourcePaneID: src, destPaneID: dst, direction: layoutDirection(for: direction))])
 
         case .renumberWindows:
@@ -331,9 +423,26 @@ public enum CommandIPCTranslator {
 
     // MARK: Helpers
 
+    /// `-s` source pane for swap-pane: nil spec = the caller's active pane; a spec
+    /// that doesn't resolve returns nil so the verb fails loudly upstream.
+    private static func swapSource(
+        _ source: TargetSpec?,
+        target: CommandTarget,
+        baseIndex: Int,
+        paneBaseIndex: Int
+    ) -> PaneID? {
+        guard let source else { return target.paneID }
+        guard let resolved = target.resolving(
+            source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+        ) else { return nil }
+        return resolved.paneID
+    }
+
     private static func selectPane(_ paneTarget: Command.PaneTarget, target: CommandTarget) -> CommandTranslation {
         guard let tab = target.tab, let current = target.paneID else { return .unresolved }
         switch paneTarget {
+        case .current:
+            return .requests([.selectPane(tabID: tab.id, paneID: current)])
         case .next:
             guard let dst = target.pane(offset: 1) else { return .unresolved }
             return .requests([.selectPane(tabID: tab.id, paneID: dst)])

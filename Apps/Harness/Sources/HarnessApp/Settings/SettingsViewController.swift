@@ -38,6 +38,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     private let statusLineControlSegment = HarnessSegmented(frame: .zero)
     private let textRenderingSegment = HarnessSegmented(frame: .zero)
     private let offMainPipelineToggle = HarnessToggle(title: "Off-main render pipeline")
+    private let liveResizeReflowToggle = HarnessToggle(title: "Real-time resize")
     private let experienceSummaryLabel = NSTextField(wrappingLabelWithString: "")
     private let cursorStyleSegment = HarnessSegmented(frame: .zero)
     private let cursorBlinkToggle = HarnessToggle(title: "Blinking cursor")
@@ -65,16 +66,26 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     private let windowBorderWell = HarnessSwatchWell(frame: .zero)
     private let windowBorderOpacitySlider = HarnessSlider(frame: .zero)
     private let windowBorderOpacityLabel = NSTextField(labelWithString: "")
-    private let systemNotificationsToggle = HarnessToggle(title: "macOS banner when an agent stops or needs input")
-    private let notificationSoundToggle = HarnessToggle(title: "Play a chime with notifications")
+    private let systemNotificationsToggle = HarnessToggle(title: "Show a macOS banner")
+    private let notificationSoundToggle = HarnessToggle(title: "Play a sound")
     private let notchModeSegment = HarnessSegmented(frame: .zero)
     private let notchOpenOnHoverToggle = HarnessToggle(title: "Open when I hover near the macOS notch")
-    private let commandFinishedToggle = HarnessToggle(title: "Notify when a long command finishes in a background window")
+    /// One toggle per `NotificationEvent` ("which events notify me"). Built from the enum so a
+    /// new case automatically gets a wired row. Lazy so its (main-actor) `HarnessToggle`
+    /// construction runs at first access inside a method, not in a stored-property initializer.
+    private lazy var eventToggles: [NotificationEvent: HarnessToggle] = {
+        var toggles: [NotificationEvent: HarnessToggle] = [:]
+        for event in NotificationEvent.allCases {
+            toggles[event] = HarnessToggle(title: event.title)
+        }
+        return toggles
+    }()
     private let commandFinishedThresholdField = HarnessTextField()
     private let notchSummaryLabel = NSTextField(wrappingLabelWithString: "")
     // QoL additions: resize overlay (T1), balanced padding (T2), minimum contrast (T5),
     // auto light/dark (T6), paste protection (E).
     private let resizeOverlaySegment = HarnessSegmented(frame: .zero)
+    private let resizeOverlayPositionSegment = HarnessSegmented(frame: .zero)
     private let paddingBalanceToggle = HarnessToggle(title: "Center grid (distribute padding evenly)")
     private let autoThemeToggle = HarnessToggle(title: "Match the macOS light/dark appearance")
     private let lightThemePopup = HarnessSelect(frame: .zero)
@@ -201,6 +212,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         opacitySlider.doubleValue = Double(settings.backgroundOpacity)
         opacitySlider.target = self
         opacitySlider.action = #selector(opacityDidChange)
+        opacitySlider.onCommit = { [weak self] in self?.flushAndApply() }
         opacitySlider.isContinuous = true
         opacityLabel.stringValue = formatPercent(settings.backgroundOpacity)
         opacityLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -212,6 +224,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         blurSlider.doubleValue = Double(settings.backgroundBlur)
         blurSlider.target = self
         blurSlider.action = #selector(blurDidChange)
+        blurSlider.onCommit = { [weak self] in self?.flushAndApply() }
         blurSlider.isContinuous = true
         blurLabel.stringValue = formatBlur(settings.backgroundBlur)
         blurLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -223,6 +236,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         windowBorderOpacitySlider.doubleValue = Double(settings.windowBorderOpacity)
         windowBorderOpacitySlider.target = self
         windowBorderOpacitySlider.action = #selector(windowBorderOpacityDidChange)
+        windowBorderOpacitySlider.onCommit = { [weak self] in self?.flushAndApply() }
         windowBorderOpacitySlider.isContinuous = true
         windowBorderOpacityLabel.stringValue = formatPercent(settings.windowBorderOpacity)
         windowBorderOpacityLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -403,11 +417,19 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         offMainPipelineToggle.target = self
         offMainPipelineToggle.action = #selector(appearanceTextDidCommit)
 
+        liveResizeReflowToggle.state = settings.liveResizeReflow ? .on : .off
+        liveResizeReflowToggle.target = self
+        liveResizeReflowToggle.action = #selector(appearanceTextDidCommit)
+
         // Resize overlay (T1)
         resizeOverlaySegment.setSegments(["After first", "Always", "Never"])
         resizeOverlaySegment.selectItem(withTitle: resizeOverlayTitle(settings.resizeOverlay))
         resizeOverlaySegment.target = self
         resizeOverlaySegment.action = #selector(appearanceTextDidCommit)
+        resizeOverlayPositionSegment.setSegments(["Center", "Top right", "Bottom right"])
+        resizeOverlayPositionSegment.selectItem(withTitle: resizeOverlayPositionTitle(settings.resizeOverlayPosition))
+        resizeOverlayPositionSegment.target = self
+        resizeOverlayPositionSegment.action = #selector(appearanceTextDidCommit)
         // Balanced padding (T2)
         paddingBalanceToggle.state = settings.windowPaddingBalance ? .on : .off
         paddingBalanceToggle.target = self
@@ -419,6 +441,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         minContrastSlider.isContinuous = true
         minContrastSlider.target = self
         minContrastSlider.action = #selector(minContrastChanged)
+        minContrastSlider.onCommit = { [weak self] in self?.flushAndApply() }
         updateMinContrastLabel()
         // Paste protection (E)
         pasteProtectionToggle.state = settings.pasteProtection ? .on : .off
@@ -427,10 +450,12 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         boldIsBrightToggle.state = settings.boldIsBright ? .on : .off
         boldIsBrightToggle.target = self
         boldIsBrightToggle.action = #selector(appearanceTextDidCommit)
-        // Command-finished notifications (E)
-        commandFinishedToggle.state = settings.commandFinishedNotifications ? .on : .off
-        commandFinishedToggle.target = self
-        commandFinishedToggle.action = #selector(appearanceTextDidCommit)
+        // Per-event notification toggles ("which events notify me").
+        for (event, toggle) in eventToggles {
+            toggle.state = settings.isEventEnabled(event) ? .on : .off
+            toggle.target = self
+            toggle.action = #selector(appearanceTextDidCommit)
+        }
         commandFinishedThresholdField.stringValue = String(settings.commandFinishedThresholdSeconds)
         commandFinishedThresholdField.target = self
         commandFinishedThresholdField.action = #selector(appearanceTextDidCommit)
@@ -503,6 +528,10 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     fileprivate func showPage(_ index: Int) {
         for button in sidebarButtons { button.isSelected = (button.tag == index) }
         for subview in pageContainer.subviews { subview.removeFromSuperview() }
+        // Rebuild the Advanced page each time it's shown so it re-checks daemon reachability (and
+        // re-fetches live option values): a daemon that was down when Settings opened may be back,
+        // and vice-versa. The other pages are static enough to stay cached.
+        if index == 5 { pages[5] = buildAdvancedPage() }
         guard let page = pages[index] else { return }
         page.translatesAutoresizingMaskIntoConstraints = false
         pageContainer.addSubview(page)
@@ -557,6 +586,10 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         for page in pages.values { reskinControls(in: page) }
         // Re-tint links (their accent color is baked into the attributed title).
         for link in linkButtons { styleAsLink(link) }
+        // Auto light/dark lands here as a chrome change too: the color wells/placeholder hex
+        // read from the *theme*, so without a refresh they keep showing the old appearance's
+        // palette until the window reopens.
+        refreshColorPlaceholders()
     }
 
     private var lastChromeSignature: String?
@@ -598,7 +631,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         1: ["colors", "color", "background", "foreground", "cursor", "selection", "palette", "ansi", "vivid", "ligatures", "divider", "status", "soft", "native", "crisp", "rendering", "gamma"],
         2: ["terminal", "font", "shell", "directory", "scrollback", "blink", "copy", "session", "harness", "controls", "experience"],
         3: ["keys", "prefix", "binding", "keybinding", "shortcut"],
-        4: ["agents", "agent", "color", "codex", "claude", "cursor", "pi", "hermes", "openclaw", "hook", "notification", "detection"],
+        4: ["agents", "agent", "color", "codex", "claude", "cursor", "pi", "hermes", "openclaw", "hook", "notification", "notify", "banner", "bell", "sound", "detection"],
         5: ["advanced", "options", "status", "mouse", "mode", "clipboard", "base-index", "renumber", "monitor", "rename", "repeat", "history", "pane", "border", "harness-cli", "set-option", "performance", "pipeline", "render", "identity", "term_program", "xtversion", "shift+enter", "kitty", "ghostty"],
     ]
 
@@ -753,6 +786,8 @@ final class SettingsViewController: NSViewController, NSFontChanging {
                               hint: "Distribute leftover padding evenly so the grid is centered."),
             settingsRow("Resize overlay", resizeOverlaySegment,
                         hint: "Show the grid size while resizing the window."),
+            settingsRow("Overlay position", resizeOverlayPositionSegment,
+                        hint: "Where the resize overlay is drawn within the surface."),
             settingsToggleRow("Transparent title bar", transparentTitlebarToggle),
             settingsToggleRow("Status line", showStatusLineToggle),
             settingsToggleRow("Sidebar", sidebarVisibleToggle),
@@ -992,11 +1027,23 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         notifStatusBlock.spacing = 10
         refreshNotificationStatus()
         commandFinishedThresholdField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        let notificationsGroup = settingsGroup("Notifications", [
-            settingsToggleRow("Agent notifications", systemNotificationsToggle),
-            settingsToggleRow("Command finished", commandFinishedToggle),
-            settingsRow("Threshold (seconds)", commandFinishedThresholdField,
-                        hint: "Only commands that ran at least this long trigger the notification."),
+        // "Which events notify me" — one row per NotificationEvent, in enum order. The
+        // command-finished row carries its runtime threshold as a sub-row. State/target are
+        // already wired in `configureControls` (the authoritative seed, so a flush can never
+        // clobber settings with unseeded toggles); here we only lay out the rows.
+        var eventRows: [NSView] = []
+        for event in NotificationEvent.allCases {
+            guard let toggle = eventToggles[event] else { continue }
+            eventRows.append(settingsToggleRow(event.title, toggle, hint: event.detail))
+            if event == .commandFinished {
+                eventRows.append(settingsRow("Threshold (seconds)", commandFinishedThresholdField,
+                                             hint: "Only commands that ran at least this long trigger the notification."))
+            }
+        }
+        let notifyGroup = settingsGroup("Notify me about", eventRows)
+        // "How notifications are delivered" — the two global channel toggles + permission status.
+        let deliveryGroup = settingsGroup("Delivery", [
+            settingsToggleRow("macOS banner", systemNotificationsToggle),
             settingsToggleRow("Sound", notificationSoundToggle),
             notifStatusBlock,
         ])
@@ -1028,8 +1075,8 @@ final class SettingsViewController: NSViewController, NSFontChanging {
 
         let stack = NSStackView(views: [
             header,
-            buildACPAgentsGroup(),
-            notificationsGroup,
+            notifyGroup,
+            deliveryGroup,
             notchGroup,
             settingsGroup("Detection & hooks", [detectionBox]),
             settingsGroup("Set up via your IDE", [promptBox]),
@@ -1176,8 +1223,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyUpOrDown
         // Brand mark when one exists, else a tinted monogram (e.g. Aider) — never a blank slot.
-        icon.image = AgentIconRenderer.templateImage(for: kind, size: 18)
-            ?? AgentIconRenderer.monogramTemplate(kind.chip, size: 18)
+        icon.image = AgentIconRenderer.templateOrMonogramImage(for: kind, size: 18)
         icon.contentTintColor = NSColor.fromHex(colorHex) ?? c.textSecondary
         icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 20).isActive = true
@@ -1338,13 +1384,16 @@ final class SettingsViewController: NSViewController, NSFontChanging {
             let binaryPath = resolveBinaryPath(executables) ?? executables.first ?? kind.rawValue
             // Don't duplicate
             if !configs.contains(where: { $0.name == kind.displayName }) {
-                let config = AgentConfig(name: kind.displayName, binaryPath: binaryPath, args: [])
+                let config = AgentConfig(name: kind.displayName, binaryPath: binaryPath, args: ["--acp"])
                 configs.append(config)
             }
+            store.save(configs)
+            Toast.show("\(kind.displayName) enabled for Chat", in: view)
         } else {
             configs.removeAll { $0.name == kind.displayName }
+            store.save(configs)
+            Toast.show("\(kind.displayName) removed from Chat", in: view)
         }
-        store.save(configs)
     }
 
     /// Find the first executable on $PATH from the given list.
@@ -1367,10 +1416,28 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     private var advValues: [String: String] = [:]
     private enum AdvKind { case toggle, segment, field }
     private var advOptKeys: [ObjectIdentifier: (key: String, kind: AdvKind)] = [:]
+    /// Whether the last `loadAdvancedValues` reached the daemon. False = the overlaid values are
+    /// builtin defaults, NOT the live daemon state — so the page warns and disables its controls
+    /// (a change couldn't be applied) instead of silently presenting defaults as if real.
+    private var advDaemonReachable = true
+    /// The daemon-backed controls (set-option surface), disabled when the daemon is unreachable.
+    /// Excludes the performance toggles, which write local settings and stay usable offline.
+    private var advDaemonControls: [NSControl] = []
 
     private func buildAdvancedPage() -> NSView {
         let header = pageHeader(title: "Advanced", trailing: nil)
+        advDaemonControls.removeAll() // repopulated by the adv* factories below
+        // The adv* controls are rebuilt on every Advanced-page show, so the prior batch's identifiers
+        // are stale (keyed by ObjectIdentifier of freed controls). Clear the map alongside the control
+        // list, otherwise it grows unbounded across reopens.
+        advOptKeys.removeAll()
         loadAdvancedValues()
+        // The performance toggles are member controls (not rebuilt by the adv* factories), so unlike
+        // the daemon-backed controls they don't get refreshed by `loadAdvancedValues`. Re-read their
+        // state from settings here so a rebuilt page reflects changes made since the last build.
+        let perfSettings = SessionCoordinator.shared.settings
+        offMainPipelineToggle.state = perfSettings.offMainParserFramePipeline ? .on : .off
+        liveResizeReflowToggle.state = perfSettings.liveResizeReflow ? .on : .off
 
         let statusGroup = settingsGroup("Status bar", [
             settingsCaption("Format the bottom status bar (FormatString tokens like #{cwd_basename}, #{git_branch}, #{time:%H:%M}). The on/off switch is in Appearance ▸ Window."),
@@ -1418,12 +1485,24 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         let performanceGroup = settingsGroup("Performance", [
             settingsToggleRow("Off-main render pipeline", offMainPipelineToggle,
                               hint: "Parse + build frames off the main thread. On is recommended."),
+            settingsToggleRow("Real-time resize", liveResizeReflowToggle,
+                              hint: "Reflow and redraw the running program live while dragging the "
+                                  + "window edge, instead of on release. On is recommended."),
         ])
 
         let intro = settingsCaption("Power-user options shared with the harness-cli set-option command surface. Changes apply globally and persist immediately.")
-        let stack = NSStackView(views: [
-            header,
-            intro,
+        // When the daemon is unreachable these groups show builtin defaults, NOT the live state, and
+        // a change can't be applied — so disable the daemon-backed controls and warn inline at the
+        // top. The performance toggles (local settings) stay usable. Re-checked each time the page is
+        // shown (see `showPage`). The set-option surface depends on the daemon, so it's gated here.
+        if !advDaemonReachable {
+            for control in advDaemonControls { control.isEnabled = false }
+        }
+        var views: [NSView] = [header, intro]
+        if !advDaemonReachable {
+            views.append(advUnreachableBanner())
+        }
+        views.append(contentsOf: [
             performanceGroup,
             statusGroup,
             inputGroup,
@@ -1433,6 +1512,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
             lifecycleGroup,
             borderGroup,
         ])
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 18
@@ -1440,11 +1520,42 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         return scrollWrap(stack)
     }
 
+    /// Inline warning shown atop the Advanced page when the daemon is unreachable: the controls
+    /// below show builtin defaults, not live state, and edits can't be applied. Uses the chrome's
+    /// danger color so it reads as a real warning, consistent with the rest of Settings.
+    private func advUnreachableBanner() -> NSView {
+        let banner = NSView()
+        banner.wantsLayer = true
+        banner.layer?.cornerRadius = 6
+        banner.layer?.backgroundColor = HarnessChrome.current.danger.withAlphaComponent(0.12).cgColor
+        banner.layer?.borderWidth = 1
+        banner.layer?.borderColor = HarnessChrome.current.danger.withAlphaComponent(0.35).cgColor
+        let label = NSTextField(wrappingLabelWithString:
+            "Daemon unreachable — showing defaults; changes can't be applied.")
+        label.font = .systemFont(ofSize: 11.5, weight: .medium)
+        label.textColor = HarnessChrome.current.danger
+        label.translatesAutoresizingMaskIntoConstraints = false
+        banner.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: banner.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: banner.trailingAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: banner.topAnchor, constant: 9),
+            label.bottomAnchor.constraint(equalTo: banner.bottomAnchor, constant: -9),
+        ])
+        return banner
+    }
+
     private func loadAdvancedValues() {
         advValues.removeAll()
         for (key, value) in OptionStore.builtinDefaults { advValues[key] = value.stringValue }
+        // `requestDaemon` returns nil when the daemon is unreachable. Distinguish that from a real
+        // empty-options reply: only overlay (and mark reachable) on an actual `.options` response,
+        // so an unreachable daemon renders builtin defaults that the page flags as not-live.
         if case let .options(entries)? = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)) {
             for entry in entries where entry.scope == "global" { advValues[entry.key] = entry.value }
+            advDaemonReachable = true
+        } else {
+            advDaemonReachable = false
         }
     }
 
@@ -1455,6 +1566,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         toggle.target = self
         toggle.action = #selector(advChanged(_:))
         advOptKeys[ObjectIdentifier(toggle)] = (key, .toggle)
+        advDaemonControls.append(toggle)
         return toggle
     }
 
@@ -1465,6 +1577,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         segment.target = self
         segment.action = #selector(advChanged(_:))
         advOptKeys[ObjectIdentifier(segment)] = (key, .segment)
+        advDaemonControls.append(segment)
         return segment
     }
 
@@ -1476,6 +1589,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         field.target = self
         field.action = #selector(advChanged(_:))
         advOptKeys[ObjectIdentifier(field)] = (key, .field)
+        advDaemonControls.append(field)
         return field
     }
 
@@ -1939,20 +2053,23 @@ final class SettingsViewController: NSViewController, NSFontChanging {
 
     // MARK: - Live apply
 
+    // The four continuous sliders apply live on every drag tick but persist only once on commit
+    // (`onCommit`, wired in setup), so scrubbing never spams a JSON encode + atomic write per frame.
+
     @objc private func opacityDidChange() {
         opacityLabel.stringValue = formatPercent(Float(opacitySlider.doubleValue))
-        flushAndApply()
+        applySettingsLive()
     }
 
     @objc private func blurDidChange() {
         let rounded = Int(blurSlider.doubleValue.rounded())
         blurLabel.stringValue = formatBlur(rounded)
-        flushAndApply()
+        applySettingsLive()
     }
 
     @objc private func windowBorderOpacityDidChange() {
         windowBorderOpacityLabel.stringValue = formatPercent(Float(windowBorderOpacitySlider.doubleValue))
-        flushAndApply()
+        applySettingsLive()
     }
 
     @objc private func themeDidChange() {
@@ -1980,6 +2097,22 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         }
     }
 
+    private func resizeOverlayPositionTitle(_ position: ResizeOverlayPosition) -> String {
+        switch position {
+        case .center: return "Center"
+        case .topRight: return "Top right"
+        case .bottomRight: return "Bottom right"
+        }
+    }
+
+    private func resizeOverlayPositionValue(_ title: String?) -> ResizeOverlayPosition {
+        switch title {
+        case "Top right": return .topRight
+        case "Bottom right": return .bottomRight
+        default: return .center
+        }
+    }
+
     private func updateMinContrastLabel() {
         let value = minContrastSlider.doubleValue
         minContrastLabel.stringValue = value <= 1.01 ? "Off" : String(format: "%.1f:1", value)
@@ -1987,7 +2120,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
 
     @objc private func minContrastChanged() {
         updateMinContrastLabel()
-        appearanceTextDidCommit()
+        applySettingsLive()
     }
 
     /// Enable/disable auto light/dark and apply it. Both theme names are set together (seeding from
@@ -2169,6 +2302,24 @@ final class SettingsViewController: NSViewController, NSFontChanging {
 
     @objc private func appearanceTextDidCommit() {
         flushAndApply()
+        // A hex field that committed non-empty-but-invalid text wrote `nil` (drop to theme) into
+        // settings, yet the field still shows the rejected red text. Re-sync every hex field to the
+        // resolved on-disk state so the UI never silently disagrees with what was actually saved.
+        resyncColorFieldsFromSettings()
+    }
+
+    /// Write each color field back from the resolved setting it produced, then refresh its swatch.
+    /// Invalid input resolved to `nil` → the field clears (the override dropped to the theme); valid
+    /// input round-trips to its normalized form. Keeps the form honest after a commit.
+    private func resyncColorFieldsFromSettings() {
+        let settings = SessionCoordinator.shared.settings
+        for binding in colorBindings {
+            let resolved = settings[keyPath: binding.keyPath] ?? ""
+            if binding.field.stringValue != resolved {
+                binding.field.stringValue = resolved
+            }
+            refreshColorBinding(binding)
+        }
     }
 
     @objc private func appearanceTextDidChange(_ note: Notification) {
@@ -2235,7 +2386,24 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         coordinator.applySettingsToHosts()
     }
 
+    /// Modal confirm for a destructive, instantly-applied reset. Mirrors the sidebar's delete/close
+    /// alerts. Returns true only when the user explicitly confirms.
+    private func confirmDestructive(message: String, info: String, confirmTitle: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = info
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     @objc private func resetAgentColors() {
+        guard confirmDestructive(
+            message: "Reset agent colors?",
+            info: "All custom agent color overrides will be removed. This can't be undone.",
+            confirmTitle: "Reset"
+        ) else { return }
         let coordinator = SessionCoordinator.shared
         coordinator.settings.agentColorOverrides.removeAll()
         for (kind, well) in agentColorWells {
@@ -2277,13 +2445,17 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         themeTerminalOutputToggle.state = settings.applyThemeToTerminalOutput ? .on : .off
         ligaturesToggle.state = settings.ligatures ? .on : .off
         offMainPipelineToggle.state = settings.offMainParserFramePipeline ? .on : .off
+        liveResizeReflowToggle.state = settings.liveResizeReflow ? .on : .off
         resizeOverlaySegment.selectItem(withTitle: resizeOverlayTitle(settings.resizeOverlay))
+        resizeOverlayPositionSegment.selectItem(withTitle: resizeOverlayPositionTitle(settings.resizeOverlayPosition))
         paddingBalanceToggle.state = settings.windowPaddingBalance ? .on : .off
         minContrastSlider.doubleValue = settings.minimumContrast
         updateMinContrastLabel()
         pasteProtectionToggle.state = settings.pasteProtection ? .on : .off
         boldIsBrightToggle.state = settings.boldIsBright ? .on : .off
-        commandFinishedToggle.state = settings.commandFinishedNotifications ? .on : .off
+        for (event, toggle) in eventToggles {
+            toggle.state = settings.isEventEnabled(event) ? .on : .off
+        }
         commandFinishedThresholdField.stringValue = String(settings.commandFinishedThresholdSeconds)
         let autoThemeOn = settings.lightThemeName != nil && settings.darkThemeName != nil
         autoThemeToggle.state = autoThemeOn ? .on : .off
@@ -2329,6 +2501,11 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     }
 
     @objc private func resetToDefaults() {
+        guard confirmDestructive(
+            message: "Reset appearance to defaults?",
+            info: "Colors, palette, font, padding, and other visual settings will be restored to their defaults. This can't be undone.",
+            confirmTitle: "Reset"
+        ) else { return }
         SessionCoordinator.shared.settings.resetToImportedConfig(imported: TerminalConfigImporter.load())
         syncAppearanceControlsFromSettings()
         flushAndApply()
@@ -2349,6 +2526,15 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     /// to the live terminal/window. Called from every control's action so the
     /// settings window behaves entirely live.
     private func flushAndApply() {
+        applySettingsLive()
+        try? SessionCoordinator.shared.settings.save()
+    }
+
+    /// Push every field into HarnessSettings and apply it to the live surfaces, but DO NOT persist.
+    /// Used on continuous slider drag ticks (60–120 Hz) so scrubbing never triggers a JSON encode +
+    /// atomic write per tick; persistence happens once on the gesture's commit (`onCommit`). Every
+    /// other control still goes through `flushAndApply`, which saves.
+    private func applySettingsLive() {
         let coordinator = SessionCoordinator.shared
         coordinator.settings.backgroundOpacity = HarnessSettings.clampedOpacity(Float(opacitySlider.doubleValue))
         coordinator.settings.backgroundBlur = HarnessSettings.clampedBlur(Int(blurSlider.doubleValue.rounded()))
@@ -2364,9 +2550,9 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         coordinator.settings.sidebarVisible = sidebarVisibleToggle.state == .on
         coordinator.settings.sidebarOnRight = sidebarOnRightToggle.state == .on
         coordinator.settings.restoreWindowSize = restoreWindowSizeToggle.state == .on
-        coordinator.settings.windowPaddingX = Float(paddingXField.stringValue) ?? 12
-        coordinator.settings.windowPaddingY = Float(paddingYField.stringValue) ?? 12
-        coordinator.settings.fontSize = Float(fontSizeField.stringValue) ?? 14
+        coordinator.settings.windowPaddingX = HarnessSettings.clampedPadding(Float(paddingXField.stringValue) ?? 12)
+        coordinator.settings.windowPaddingY = HarnessSettings.clampedPadding(Float(paddingYField.stringValue) ?? 12)
+        coordinator.settings.fontSize = HarnessSettings.clampedFontSize(Float(fontSizeField.stringValue) ?? 14)
         coordinator.settings.fontFamily = fontFamilyField.stringValue
         coordinator.settings.defaultShell = shellField.stringValue
         coordinator.settings.defaultCWD = cwdField.stringValue
@@ -2384,36 +2570,57 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         coordinator.settings.ligatures = ligaturesToggle.state == .on
         coordinator.settings.showPromptGutter = promptGutterToggle.state == .on
         coordinator.settings.offMainParserFramePipeline = offMainPipelineToggle.state == .on
+        coordinator.settings.liveResizeReflow = liveResizeReflowToggle.state == .on
         coordinator.settings.resizeOverlay = resizeOverlayValue(resizeOverlaySegment.titleOfSelectedItem)
+        coordinator.settings.resizeOverlayPosition = resizeOverlayPositionValue(resizeOverlayPositionSegment.titleOfSelectedItem)
         coordinator.settings.windowPaddingBalance = paddingBalanceToggle.state == .on
         coordinator.settings.minimumContrast = HarnessSettings.clampedContrast(minContrastSlider.doubleValue)
         coordinator.settings.pasteProtection = pasteProtectionToggle.state == .on
         coordinator.settings.boldIsBright = boldIsBrightToggle.state == .on
-        coordinator.settings.commandFinishedNotifications = commandFinishedToggle.state == .on
+        for (event, toggle) in eventToggles {
+            coordinator.settings.setEventEnabled(event, toggle.state == .on)
+        }
         coordinator.settings.commandFinishedThresholdSeconds = max(1, Int(commandFinishedThresholdField.stringValue) ?? 10)
+        // Reflect every clamped numeric field back into the UI so typing an out-of-range value
+        // (fontSize "2", threshold "0", …) doesn't leave the field showing one number while the
+        // setting — and the live terminals — silently use the clamped one. Non-numeric entries
+        // reset to the persisted value the same way.
+        reflectClamped(commandFinishedThresholdField, String(coordinator.settings.commandFinishedThresholdSeconds))
+        reflectClamped(fontSizeField, String(format: "%.0f", coordinator.settings.fontSize))
+        reflectClamped(paddingXField, String(format: "%.0f", coordinator.settings.windowPaddingX))
+        reflectClamped(paddingYField, String(format: "%.0f", coordinator.settings.windowPaddingY))
+        reflectClamped(scrollbackField, String(coordinator.settings.scrollbackLines))
         coordinator.settings.experienceMode = selectedExperienceMode
         coordinator.settings.prefixKeyEnabled = selectedPrefixEnabled
         coordinator.settings.statusLineEnabled = selectedStatusLineEnabled
-        try? coordinator.settings.save()
 
-        // Theme switching (and its color seeding) is handled by themeDidChange, so
-        // flushAndApply only ever pushes the current settings to the live surfaces —
-        // scrubbing a slider never fires a setTheme IPC.
+        // Theme switching (and its color seeding) is handled by themeDidChange, so this only ever
+        // pushes the current settings to the live surfaces — scrubbing a slider never fires a
+        // setTheme IPC. Persistence is the caller's job (`flushAndApply` saves; drag ticks don't).
         coordinator.applySettingsToHosts()
         NotchPanelController.shared.refreshVisibility()
         updateFontReadout()
     }
 
-    /// When presented inline, the host sets this so custom dismissal can save first.
-    var onClose: (() -> Void)?
+    /// Rewrite a numeric field only when its committed text differs from the clamped setting —
+    /// the UI must never show a value the terminals aren't actually using.
+    private func reflectClamped(_ field: NSTextField, _ clamped: String) {
+        if field.stringValue != clamped { field.stringValue = clamped }
+    }
 
-    @objc private func closeWindow() {
+    /// Safety net for the apply-only/persist-on-commit split (#89): continuous sliders apply live on
+    /// every drag tick but only persist in `HarnessSlider.mouseUp → onCommit`. If a drag never gets
+    /// its mouse-up (window closed programmatically mid-drag, a modal steals the gesture, the app
+    /// deactivates mid-track), the live-applied value would never be saved. Flushing on teardown
+    /// guarantees the visible state is the persisted state. `flushAndApply` is idempotent (read
+    /// controls → settings → save), so a redundant call after a normal commit is harmless.
+    func persistPendingState() {
         flushAndApply()
-        if let onClose {
-            onClose()
-        } else {
-            view.window?.close()
-        }
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        persistPendingState()
     }
 
     // MARK: - Font picker (Terminal page)
@@ -2565,6 +2772,9 @@ final class SettingsSidebarButton: NSControl {
 @MainActor
 enum SettingsWindowController {
     private static var window: NSWindow?
+    /// Retained for the window's lifetime so its `windowWillClose` flush actually fires (NSWindow
+    /// holds the delegate weakly). Closing the prior window drops the old proxy.
+    private static var closeProxy: SettingsWindowCloseProxy?
 
     static func show(page: Int = 0) {
         window?.close()
@@ -2579,6 +2789,12 @@ enum SettingsWindowController {
         win.isReleasedWhenClosed = false
         win.minSize = NSSize(width: 840, height: 600)
         win.setContentSize(NSSize(width: 940, height: 680))
+        // Persist on close (incl. via the titlebar button) so a slider drag that never got its
+        // mouse-up still saves its live-applied value (#89). Mirrors `viewWillDisappear`; both are
+        // safe to fire because `persistPendingState` is idempotent.
+        let proxy = SettingsWindowCloseProxy { [weak controller] in controller?.persistPendingState() }
+        win.delegate = proxy
+        closeProxy = proxy
         window = win
         // Match the active theme's light/dark so the native titlebar + any system-colored
         // text track the themed chrome (mirrors MainWindowController).
@@ -2588,4 +2804,15 @@ enum SettingsWindowController {
         NSApp.activate(ignoringOtherApps: true)
         if page != 0 { controller.showPage(page) }
     }
+}
+
+/// Thin `NSWindowDelegate` that flushes the settings controller's pending state when the settings
+/// window closes. Kept separate from the view controller so the controller doesn't have to be the
+/// window's delegate (it isn't responsible for window lifecycle), and retained by
+/// `SettingsWindowController` since NSWindow holds its delegate weakly.
+@MainActor
+final class SettingsWindowCloseProxy: NSObject, NSWindowDelegate {
+    private let onWillClose: () -> Void
+    init(onWillClose: @escaping () -> Void) { self.onWillClose = onWillClose }
+    func windowWillClose(_ notification: Notification) { onWillClose() }
 }

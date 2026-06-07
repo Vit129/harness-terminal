@@ -26,6 +26,12 @@ Trigger: the prefix key (default `ctrl-a`, configurable via `settings.prefixKey`
 | `l` | `select-pane -l` (last / most-recently-active pane) |
 | `Left` / `Right` / `Up` / `Down` | `select-pane -L` / `-R` / `-U` / `-D` |
 | `S-Left` / `S-Right` / `S-Up` / `S-Down` | `resize-pane -L 5` / `-R 5` / `-U 3` / `-D 3` (repeatable — hold under the prefix) |
+
+> **Repeatable bindings (`bind -r`):** a binding created with `bind-key -r` keeps the prefix
+> armed after it fires, so the key repeats without re-pressing the prefix (the resize bindings
+> above ship this way). The window is the `repeat-time` option (ms, default `500`):
+> `:set-option -g repeat-time 750`. Bind your own from the `:` prompt or `keybindings.json`,
+> e.g. `:bind-key -r -T prefix C-j resize-pane -D 5`.
 | `q` | `display-panes` (overlay numbers; press a digit to jump) |
 | `m` / `M` | mark / unmark the active pane (`join-pane` source) |
 | `j` | `join-pane` (join the marked pane into the active one) |
@@ -60,7 +66,7 @@ Copy mode is fully rebindable via `bind-key -T copy-mode <spec> <command>`. Defa
 | `p` | Paste most recent buffer into the surface; exit |
 | `q` / `Escape` | Exit copy mode |
 
-Copy-mode is rebindable: `bind-key -T copy-mode <key> <command>` where `<command>` is `copy-mode -X <action>` (e.g. `copy-pipe "pbcopy"`).
+Copy-mode is rebindable: `bind-key -T copy-mode <key> <command>` (or `-T copy-mode-vi`, an alias) where `<command>` is `copy-mode -X <action>` (e.g. `copy-pipe "pbcopy"`).
 
 ## Global menu shortcuts
 

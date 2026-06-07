@@ -29,16 +29,25 @@ hosts `HarnessTerminalSurfaceView` (a `CAMetalLayer` view) driving `HarnessTermi
 (VT parser + screen/scrollback), `HarnessTheme` (490-theme catalog + `.harnesstheme`), and
 `HarnessTerminalRenderer` (CoreText atlas + Metal). Features: themed translucent canvas with
 untouched program output (`applyThemeToTerminalOutput` toggles theme-colored output), balanced
-window padding (centered grid) + a live resize HUD, cursor styles + blink (a hollow box when the
-window is unfocused), word/line (double/triple-click) + Option-rectangle text selection + copy /
-paste (bracketed-paste aware, with paste protection) / copy-on-select / right-click menu, mouse
+window padding (centered grid) + a live resize HUD, cursor styles + blink (DECSCUSR; `0` / a
+bare `CSI SP q` resets to the *user-configured* style — the Ghostty/kitty semantics, not a hard
+blinking block — and a hollow box when the window is unfocused; a blink toggle re-encodes ≤1 row,
+pinned by test), word/line (double/triple-click)
++ Option-rectangle text selection + copy /
+paste (bracketed-paste aware, with paste protection) / copy-on-select / right-click menu —
+selection, find highlights, and IME preedit ride damage-driven rendering via the cell-overlay
+pass (see invariants below) instead of forcing per-frame full rebuilds, mouse
 reporting (SGR 1006), pixel-smooth scrollback (wheel / Shift+PageUp/Down; trackpad scrolls by
 sub-line fractions — `scrollFraction` renders as a whole-device-pixel vertex `scrollPx` uniform
 over the unchanged row-instance cache, with a display-only peek row appended to scrolled frames
-and a grid-box scissor; consumers stay line-based on the integer `scrollOffset`), reflow on
+and a grid-box scissor; consumers stay line-based on the integer `scrollOffset`; OUTPUT scrolls
+report a whole-viewport `TerminalDamage.scroll` hint so streaming `cat`/build frames shift-copy
+the moved band instead of re-resolving the grid), reflow on
 resize (drag repaints reuse the renderer row cache under the frozen origin — empty damage when
-`lastPresentedResultIsRendererCoherent`, `encodedRows == 0` per sub-cell tick — and output/tick
-presents defer to the layout repaint while `presentsWithTransaction` is on; cell-boundary
+`lastPresentedResultIsRendererCoherent`, `encodedRows == 0` per sub-cell tick — while mid-drag
+PTY output presents live through the scheduler inside explicit `CATransaction`s under real-time
+reflow; only the reflow-off escape hatch and the main-confined pipeline keep the legacy
+defer-to-the-layout-repaint hold; cell-boundary
 crossings build their re-wrap preview ASYNC on the emulator queue — latest-wins preview token,
 landed via `presentResizePreview` with generation/token/target stale-drop guards — so a boundary
 tick costs main no more than a sub-cell tick, and the renderer salvages content-identical rows
@@ -94,14 +103,35 @@ users moving in keep their colors/font — kept by product decision.
   256-entry LUT (bit-identical to the `Float(i)/255` divide it replaces).
 - **Resize:** `HarnessTerminalSurfaceView.updateGridSize` *rounds* the drawable (no edge seam
   under `.topLeft`) and `layout()` renders synchronously inside a `CATransaction` (no stretch
-  flicker). The drawable resizes every frame, but the **grid reflow + PTY `SIGWINCH` are
-  coalesced** (`scheduleResizeCommit`, ~60ms debounce, kept in lockstep via `commitGridSize`):
-  a sidebar slide / window drag calls `layout()` per frame, and firing the reflow + SIGWINCH
-  each time storms the shell — fish/zsh redraw their prompt faster than they coalesce, leaving
-  overlapping garbage in the pane. The first sizing commits immediately (no open-flash).
-  `TerminalScreen.resize` *reflows* the primary screen — rejoin soft-wrapped rows via a per-row
-  wrap flag, re-wrap to the new width (wide chars never split), map the cursor; the alternate
-  screen just clamps (TUIs redraw on SIGWINCH). The PTY env sets `COLORTERM=truecolor`.
+  flicker). The drawable resizes every frame; the authoritative **grid reflow + PTY `SIGWINCH`**
+  fire per path:
+  - **Real-time (default, Ghostty parity, `liveResizeReflow` on):** during a window-edge drag
+    (`presentsWithTransaction`), `requestLiveResizeCommit` commits the reflow + SIGWINCH at every
+    cell boundary so interactive programs redraw live. The reflow target is staged queue-side
+    (`SurfaceEmulatorState.pendingResize`) and materialized by the NEXT output/commit build to
+    run — builds coalesce latest-wins (the `renderNowOffMain` frame token), and the staging is
+    what lets a superseding output build carry the resize forward instead of stranding the grid
+    at a pre-vote size when it cancels an in-flight commit build. Mid-drag PTY output presents
+    live (each landing flushes its own explicit `CATransaction`, so no layout pass is needed when
+    the pointer holds still), the PTY vote coalesces per-fd (`TerminalHostView.resize` epoch) +
+    to distinct cell counts (`lastSentPTYSize`), and there is no main-thread generation bump —
+    the builder caches are cleared on the queue when the resize applies, so `repaintLastFrame`
+    keeps stretching the cached frame between boundaries with no synchronous rebuild.
+  - **Animated / escape-hatch (`liveResizeReflow` off, or sidebar slide / tiling):** the reflow +
+    SIGWINCH are **coalesced** (`scheduleResizeCommit`, ~60ms debounce, kept in lockstep via
+    `commitGridSize`) and the non-mutating `previewViewportReflow` shows a live re-wrap; firing
+    the reflow + SIGWINCH every frame of an *animation* storms the shell. `viewDidEndLiveResize`
+    flushes the settled commit at release.
+
+  The first sizing commits immediately (no open-flash). `TerminalScreen.resize` *reflows* the
+  primary screen — rejoin soft-wrapped rows via a per-row wrap flag, re-wrap to the new width
+  (wide chars never split), map the cursor; the alternate screen just clamps (TUIs redraw on
+  SIGWINCH). The rewrap is a streaming pass (`rewrapRows`): source rows arrive by reference
+  through a closure (history arrays are never gather-copied), logical lines are tracked as row
+  extents + effective lengths, and lines without wide glyphs — the overwhelming majority —
+  re-wrap as `nc`-sized bulk slice copies (~10ms per width change at the 10k-line scrollback
+  cap, 3× the per-cell predecessor; wide-bearing lines keep the per-cell stepping loop, byte-
+  identical against the `ReflowGolden/` corpus). The PTY env sets `COLORTERM=truecolor`.
 - **Decorations** (underline/strike/overline) are pixel-snapped for crisp 1–2px lines.
 - **Glyph baseline** is pixel-snapped at rasterization: `GlyphRasterizer.render` draws each glyph
   with its pen origin (baseline + left edge) on integer device pixels, so every glyph shares the
@@ -123,6 +153,42 @@ users moving in keep their colors/font — kept by product decision.
   outline regardless of style (full alpha — `bgPipeline` has `blending: false`, so a dim-via-alpha
   approach would be a no-op), and a hollow block does not invert its glyph
   (`CursorCacheKey.invertsGlyph` folds in `!hollow`, dirtying the cursor row on a focus change).
+- **Cell-overlay pass (selection / find / IME never disable damage-driven rendering):** the live
+  view (`scrollOffset == 0`) ALWAYS builds clean — incremental, damage-driven, with
+  `lastPlainFrame`/`lastViewportFrame` kept warm — and the overlay rows of a COPY are re-shaded
+  per present via `FrameBuilder.applyHighlights` (which re-runs the exact same private
+  `appendRow` the baked path uses, so shaded rows are **byte-identical by construction**; IME
+  preedit applies after via `applyPreedit` as before). Per-row overlay FINGERPRINTS
+  (`HarnessTerminalSurfaceView.overlayRowKeys`, geometry-hashed — no cell walks; stored
+  queue-side in `SurfaceEmulatorState.lastOverlayKeys`) diff against the previous build and
+  union exactly the changed rows into the render damage: a selection drag re-encodes the rows it
+  crossed, a static highlight adds zero per-frame work, clearing dirties exactly the old rows.
+  Scrolled views (offset > 0) and copy mode keep the baked full-rebuild path; the legacy
+  main-confined pipeline is deliberately unoptimized (still correct — see the damage hint below).
+- **Whole-viewport scroll damage hint (`TerminalDamage.scroll` + `scrolledRows`) — purely
+  additive:** `rows` stays COMPLETE (the moved band is still listed), so hint-unaware consumers
+  (compositor, CLI attach, the main-confined pipeline) redraw exactly what they did before the
+  hint existed; only opted-in consumers shift-copy. `TerminalScreen` moves pre-scroll content
+  marks WITH the content (damage is always current-coordinate), accumulates whole-viewport
+  shifts arithmetically (SU then SD composes soundly), and POISONS the hint — degrading to the
+  old whole-region mark — for anything it can't describe (sub-region scrolls, a net shift
+  covering the grid, full damage). `FrameBuilder.buildShifted(freshRows:)` re-resolves the fresh
+  band and shift-copies the rest; the renderer rotates its row-instance cache via the same
+  `scrollShift` machinery scrollback scrolls use. Differentially pinned byte-identical
+  (`testBuildShiftedWithFreshRowsMatchesFullBuildOnOutputScroll`).
+- **Occlusion gating:** `RenderScheduler.isOccluded` (ANDed into `hasPendingWork` and the
+  `presentNow` echo gate) holds every present while the hosting window is covered/minimized —
+  the display link pauses even under output flood; parsing and dirty marks continue, and
+  un-occlusion presents the accumulated damage as one fresh frame. Driven by
+  `NSWindow.didChangeOcclusionStateNotification` with **no attach-time seed** (a window never
+  ordered on screen reads as non-visible — every headless test window — so seeding would wrongly
+  gate those); `forceRender` stays ungated and `scheduler.stop()` resets the flag on re-host.
+- **Frame pacing / telemetry:** on variable-refresh (ProMotion) panels the render display link
+  requests the panel's full rate via `preferredFrameRateRange` (min 60 so the system can adapt
+  down; re-applied on backing-property changes; the link still pauses at idle).
+  `FrameSignposter` flush lines report p50/p95/**p99**/max and split dropped presents by cause
+  (`nilDrawable` = pool exhaustion vs `encodeFailure`) — `presentFrame` returns a
+  `PresentAttempt`, not a `Bool`.
 - **Minimum contrast** (`CellColorResolver.minimumContrast`, default 1 = off, byte-identical):
   after faint / before inverse, the foreground is lifted toward black/white until it meets the WCAG
   ratio (symmetric, so it survives an inverse swap; conceal still wins). Imported from a source
@@ -354,7 +420,7 @@ PaneNode tree ──PaneRectSolver──▶ [PaneRect] ────┤
 | `dividerHex`, `statusLineHex` | Chrome accents (nil → derive from theme) |
 | `selection*Hex`, `boldColorHex`, `cursorTextHex`, `paletteHex[16]` | Terminal colors; seeded by theme preset, applied by the native renderer |
 | `agentColorOverrides` | Per-agent brand color overrides |
-| `systemNotificationsEnabled` | Push banner when an agent stops or needs input (in-window bell still updates) |
+| `systemNotificationsEnabled` | Delivery channel: show a macOS banner for an enabled notification event (in-window bell still updates). *Which* events notify is gated per-event by `notificationEvents` |
 | `notificationSoundEnabled` | Chime with agent alerts; banner carries the sound, or an in-app `NSSound` chime when banners are off |
 | `importedConfigSignature` | Fingerprint of last imported terminal config (migration) |
 | `transparentTitlebar`, `sidebarVisible` | Chrome |
@@ -364,7 +430,8 @@ PaneNode tree ──PaneRectSolver──▶ [PaneRect] ────┤
 | `minimumContrast` | WCAG fg/bg contrast floor (1 = off … 21); imported from `minimum-contrast`, enforced by `CellColorResolver` |
 | `lightThemeName`, `darkThemeName` | Both set ⇒ the active theme follows the macOS appearance (KVO on `NSApp.effectiveAppearance` in `SessionCoordinator`); the window then follows the system appearance |
 | `pasteProtection` | Confirm pastes containing newlines / control chars when bracketed paste is off (default on) |
-| `commandFinishedNotifications`, `commandFinishedThresholdSeconds` | Notify when a command that ran longer than the threshold (OSC 133 timing) finishes in an unfocused pane (default off / 10s) |
+| `commandFinishedThresholdSeconds` | Minimum runtime (OSC 133 timing) for the `commandFinished` notification to fire in an unfocused pane (default 10s) |
+| `notificationEvents` | Sparse per-event banner gating keyed by `NotificationEvent` (`agentWaiting`, `agentFinished`, `bell`, `commandFinished`); an absent key uses the event's default. Picks *which* events notify; `systemNotificationsEnabled` / `notificationSoundEnabled` pick *how*. Read via `isEventEnabled(_:)`. The old `commandFinishedNotifications` bool migrates into `notificationEvents["commandFinished"]` |
 
 **Terminal config import** (`TerminalConfigImporter`): reads a compatible source terminal config so users migrating in keep their colors/font. The font **face** is imported but the font **size** is not — `fontSize` is Harness-owned (default 16); `makeDefaults`/`applyImportedDefaults`/`resetToImportedConfig` deliberately don't pull `font-size` from the source terminal (a terminal's size preference doesn't carry over). **Do not strip `#` in values** — only lines starting with `#` are comments. Re-import via Settings or `source-config` / prefix `r`. `minimumContrast` is imported into `settings.json` and enforced by the renderer (`CellColorResolver`).
 
@@ -391,11 +458,11 @@ harness-cli notify --surface "$HARNESS_SURFACE" --body "Approval required"
 
 Per-agent guides: [docs/agent-hooks/](docs/agent-hooks/). Daemon hooks (`hooks.json`): `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pane`, `after-kill-pane`, `after-resize-pane`, `pane-exited`, `client-attached`, `client-detached`, `agent-state-changed`, `notification-posted` (full list in [docs/COMMANDS.md](docs/COMMANDS.md)).
 
-**UI:** `SessionCardRowView`, `TabPillView`, **`AgentChipView`** in sidebar/session rows when agent kind is detected or inferred (static chip, not activity-gated), `NotificationBellButton` / `NotificationDropdownPanelView`, `Cmd+Shift+U` jump to notification (skips still-`working` agents). OS banners gated by `systemNotificationsEnabled` and presented even in-foreground via `DesktopNotifier`'s `ForegroundPresenter` (`UNUserNotificationCenterDelegate`).
+**UI:** `SessionCardRowView`, `TabPillView`, **`AgentChipView`** in sidebar/session rows when agent kind is detected or inferred (static chip, not activity-gated), `NotificationBellButton` / `NotificationDropdownPanelView`, `Cmd+Shift+U` jump to notification (skips still-`working` agents). OS banners gated per-event by `notificationEvents` then by `systemNotificationsEnabled`, and presented even in-foreground via `DesktopNotifier`'s `ForegroundPresenter` (`UNUserNotificationCenterDelegate`).
 
 **Agent Notch HUD:** `NotchPanelController` + `AgentNotchRootView` (`UI/Notch/`) show at-a-glance agent rows on Macs with a notch; data from `AgentNotchProjection` in `HarnessCore/Notch/`. Click a row → `SessionCoordinator` focuses that session/tab.
 
-**Notification delivery (one path):** `SessionCoordinator.deliverAgentAlert(title:body:)` is the single sink honoring both toggles — banner (`systemNotificationsEnabled`) and chime (`notificationSoundEnabled`). Two triggers feed it: (1) the explicit `harness-cli notify` path (`pushNewRemoteNotifications`, rich message, owns `.waiting` tabs), and (2) a **hook-independent** path (`pushAgentActivityNotifications`) that fires on the agent-activity `working → idle/awaiting` edge — i.e. the AI stopped producing output — so a ping lands for **any detected agent under any shell** with no hook install. The activity path skips `.waiting` tabs (so the two never double-fire), skips the pane you're actively watching, and has a 30s per-surface cooldown so a streaming agent can't spam.
+**Notification delivery (one path):** `SessionCoordinator.deliverAgentAlert(event:title:body:)` is the single sink. It first gates on the per-event "which events notify me" choice (`settings.isEventEnabled(event)`, backed by `notificationEvents`), then honors the two delivery toggles — banner (`systemNotificationsEnabled`) and chime (`notificationSoundEnabled`). The `NotificationEvent` cases and their sites: `.agentWaiting` — the explicit `harness-cli notify` path (`pushNewRemoteNotifications`, rich message, owns `.waiting` tabs) plus `terminalHostDidRequestDesktopNotification`; `.agentFinished` — the **hook-independent** `pushAgentActivityNotifications` path firing on the agent-activity `working → idle/awaiting` edge (the AI stopped producing output), so a ping lands for **any detected agent under any shell** with no hook install; `.bell` — `terminalHostDidRingBell`; `.commandFinished` — `terminalHostDidFinishCommand`. The activity path skips `.waiting` tabs (so the two never double-fire), skips the pane you're actively watching, and has a 30s per-surface cooldown so a streaming agent can't spam. Only the OS banner is gated by these settings — the in-app sidebar ring/waiting state (`requestDaemon(.notify)`) is independent.
 
 **Chrome icon buttons (one source of truth):** every circular chrome button — `NotificationBellButton`, the sidebar toggle, footer gear/＋/palette, tab-strip ＋/overflow (all `SoftIconButton`) — paints through **`HarnessDesign.applyIconButtonChrome(to:bounds:isHovered:)`**: a subtle `surfaceElevated` disc + `borderStrong` rim (the same as the adjacent search field), flat (no drop shadow), hover lifts toward foreground. They follow the theme like the session cards instead of floating as opaque near-black discs. The **active top-tab pill** (`TabPillView.applyChrome`) is painted identically to the **selected session card** (`SessionCardRowView`): accent-tinted fill + accent rim + `elevation1` + card radius, so the tab strip and the side tab read as one system.
 
@@ -462,7 +529,7 @@ Per-agent guides: [docs/agent-hooks/](docs/agent-hooks/). Daemon hooks (`hooks.j
 ## Build and test
 
 ```bash
-make build | preview | preview-stop | preview-clean | release | package | dmg | smoke-dmg | sign | appcast | finalize | hotfix-release | icon | clean
+make build | preview | preview-stop | preview-clean | release | release-notes | package | dmg | smoke-dmg | sign | appcast | finalize | hotfix-release | icon | clean
 xcodegen generate
 swift test                                    # fast, deterministic
 HARNESS_LIVE_DAEMON_TESTS=1 swift test        # + real shell / socket tests
@@ -471,6 +538,8 @@ HARNESS_LIVE_DAEMON_TESTS=1 swift test        # + real shell / socket tests
 `make package` is an alias for `make release`. Optional marketing video targets (`video-dev`, `video-render`, …) live in the Makefile and run under `marketing/video` — see [marketing/README.md](marketing/README.md).
 
 **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): **Build & test (macOS)** on `macos-15` (Xcode 16) — full `swift test` + non-blocking benchmarks; **Build & test (Linux, headless daemon)** — daemon/CLI/core/engine only (no GUI/renderer/compositor).
+
+**Release prep:** after updating CHANGELOG.md, run `make release-notes` — it regenerates `GeneratedReleaseNotes.swift` (the post-update "what's new" terminal banner) from the top changelog block. `ReleaseNotesGuardTests` and a `package-app.sh` guard fail on stale notes.
 
 **Release order (do not reorder):** `make release` → `make sign` → `make dmg` → `Scripts/finalize-release.sh`. `dmg`/`sign` operate on the **existing** `Harness.app` and must NOT re-run `release` (a rebuild would clobber the signature with an unsigned bundle). `package-app.sh` resolves + verifies `Sparkle.framework` and **fails** the build if it's missing (the app links Sparkle and would crash when the menu touches the updater). `sign-and-notarize.sh` fails loud when notarization creds are absent (unless `--sign-only`) and `codesign --verify --deep --strict` after signing/stapling; `finalize-release.sh` single-sources the version/TAG from the built `Info.plist`, reads the signing identity back from the signed app, auto-detects the repo via `gh`, and never masks the `spctl` Gatekeeper check.
 
@@ -561,6 +630,7 @@ Global menu shortcuts are defined in `MainMenuBuilder`, not `KeyTableSet.root` (
 | Dragging a tab moves the whole window | the tab strip sits in the `.fullSizeContentView` titlebar drag region and AppKit treats a pill drag as a window move | `TabPillView.mouseDownCanMoveWindow = false` — pills reorder via their own `mouseDragged` → `onDragChanged`; the empty tab-bar background keeps the default `true` so it still drags the window |
 | Sidebar won't fully collapse | Divider min clamped at 200 | Set `SplitChromeDelegate.allowFullCollapse` during the programmatic collapse so the divider can reach 0 |
 | No agent chip | Proc-tree miss | `AgentTitleInference` |
+| First-run tour / what's-new banner missing or repeating | `version-state.json` out of sync, or banner suppressed | One-shot per build: daemon records the build in `version-state.json` when the first *user-created* surface consumes it (`SurfaceRegistry.injectVersionBannerIfPending`; rendered by `TerminalBanner`, notes from `GeneratedReleaseNotes.swift`). Delete the file to re-show; `update-banner off` option suppresses. Only `HarnessDaemonMain` enables it (`DaemonServer(enableVersionBanner: true)`) — embedded/test registries never banner |
 | Xcode build fails | Stale project | `xcodegen generate` |
 
 ---

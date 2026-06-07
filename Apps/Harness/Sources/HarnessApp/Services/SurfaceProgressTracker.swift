@@ -14,6 +14,23 @@ final class SurfaceProgressTracker {
     /// surface that goes 15s without a report is treated as no longer reporting.
     static let staleTimeout: TimeInterval = 15
 
+    /// Test seams: the shared instance uses the 15s Ghostty window, the real main-queue timer,
+    /// and the app-wide metadata nudge; unit tests capture the nudge (instead of dragging
+    /// `SessionCoordinator.shared` and its daemon connection into the test process) and the
+    /// scheduled work items (so the stale sweep is driven deterministically — wall-clock sleeps
+    /// flaked on loaded CI runners).
+    private let staleWindow: TimeInterval
+    private let onVisibilityChange: (@MainActor () -> Void)?
+    private let scheduleStale: (@MainActor (DispatchWorkItem, TimeInterval) -> Void)?
+
+    init(staleTimeout: TimeInterval = SurfaceProgressTracker.staleTimeout,
+         onVisibilityChange: (@MainActor () -> Void)? = nil,
+         scheduleStale: (@MainActor (DispatchWorkItem, TimeInterval) -> Void)? = nil) {
+        self.staleWindow = staleTimeout
+        self.onVisibilityChange = onVisibilityChange
+        self.scheduleStale = scheduleStale
+    }
+
     private var reports: [SurfaceID: TerminalProgressReport] = [:]
     private var staleTimers: [SurfaceID: DispatchWorkItem] = [:]
 
@@ -67,11 +84,19 @@ final class SurfaceProgressTracker {
             self.nudgeMetadataRefresh()
         }
         staleTimers[id] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.staleTimeout, execute: work)
+        if let scheduleStale {
+            scheduleStale(work, staleWindow)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + staleWindow, execute: work)
+        }
     }
 
     /// Same metadata-only nudge the rest of the app uses to refresh tab pills in place.
     private func nudgeMetadataRefresh() {
+        if let onVisibilityChange {
+            onVisibilityChange()
+            return
+        }
         NotificationCenter.default.post(
             name: NotificationBus.shared.snapshotChanged,
             object: nil,

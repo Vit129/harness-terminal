@@ -32,12 +32,17 @@ public enum CommandExecutionError: Error, CustomStringConvertible {
     case daemonError(String)
     case unsupportedInThisContext(String)
     case noActiveSurface
+    /// A `-t`/`-s` spec named something that doesn't exist (strict resolution).
+    /// Carries the raw spec so the message points at what the user typed.
+    case targetNotFound(String?)
 
     public var description: String {
         switch self {
         case let .daemonError(message): return "daemon: \(message)"
         case let .unsupportedInThisContext(message): return message
         case .noActiveSurface: return "no active surface"
+        case let .targetNotFound(raw):
+            return raw.map { "target not found: '\($0)'" } ?? "target not found"
         }
     }
 }

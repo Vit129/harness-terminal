@@ -226,11 +226,45 @@ final class EngineConformanceTests: XCTestCase {
         term.feed("\u{1b}[2 q") // steady block
         XCTAssertEqual(term.readGrid()!.cursor.shape, .block)
         XCTAssertEqual(term.readGrid()!.cursor.blinking, false)
-        term.feed("\u{1b}[0 q") // 0 = blinking block (DEC default cursor), not a reset
+        term.feed("\u{1b}[0 q") // 0 = reset to the user default (Ghostty/kitty/xterm de-facto)
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .default)
+        XCTAssertNil(term.readGrid()!.cursor.blinking)
+        term.feed("\u{1b}[1 q") // 1 = blinking block (explicit, unlike 0)
         XCTAssertEqual(term.readGrid()!.cursor.shape, .block)
         XCTAssertEqual(term.readGrid()!.cursor.blinking, true)
         // The honor-user-setting state is the initial one (before any program sets a shape).
         XCTAssertEqual(HarnessGridTerminal(cols: 4, rows: 1)!.readGrid()!.cursor.shape, .default)
+    }
+
+    /// The TUI exit-reset path: a program sets an explicit shape, then resets with `CSI 0 SP q`
+    /// (or the parameter-less `CSI SP q`, which parses as 0). Both must return `.default` so the
+    /// renderer resolves the user's configured style — a leaked hard block here was permanent,
+    /// because attach replays the raw scrollback tail (reset sequence included) at every launch.
+    func testDECSCUSRResetReturnsToDefault() {
+        let term = HarnessGridTerminal(cols: 10, rows: 2)!
+        term.feed("\u{1b}[2 q") // steady block (vim normal mode, etc.)
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .block)
+        term.feed("\u{1b}[0 q")
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .default)
+        XCTAssertNil(term.readGrid()!.cursor.blinking)
+        term.feed("\u{1b}[5 q") // blinking bar
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .bar)
+        term.feed("\u{1b}[ q") // bare reset: missing Ps defaults to 0
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .default)
+        XCTAssertNil(term.readGrid()!.cursor.blinking)
+    }
+
+    /// Replay shape: attach does RIS then re-feeds the persisted byte tail. A tail that ends in
+    /// the standard exit-reset must leave the cursor on the user default, not a stale program shape.
+    func testDECSCUSRReplayedTailEndsOnDefault() {
+        let tail = "\u{1b}[2 q" + "some output" + "\u{1b}[0 q"
+        let term = HarnessGridTerminal(cols: 20, rows: 2)!
+        term.feed(tail)
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .default)
+        term.feed("\u{1b}c") // RIS (what attach sends before the replay)
+        term.feed(tail)      // replayed scrollback bytes
+        XCTAssertEqual(term.readGrid()!.cursor.shape, .default)
+        XCTAssertNil(term.readGrid()!.cursor.blinking)
     }
 
     func testOSC8HyperlinkStampsCellsAndSurvivesSGRReset() {
@@ -472,5 +506,119 @@ final class EngineConformanceTests: XCTestCase {
         let grid = term.readGrid()!
         // Row 0 (outside region) must stay untouched/blank.
         XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0)
+    }
+
+    func testInvalidDECSTBMIsNoOpAndPreservesRegionAndCursor() {
+        // After a valid region (rows 2..3), an invalid DECSTBM must be a complete no-op in
+        // xterm/Ghostty: it must NOT reset the region to full screen or home the cursor.
+        // `ESC[1;1r` (top==bottom) and `ESC[5;3r` (top>bottom) are both degenerate.
+        for bad in ["\u{1b}[1;1r", "\u{1b}[5;3r"] {
+            let term = HarnessGridTerminal(cols: 10, rows: 4)!
+            term.feed("\u{1b}[2;3r")        // valid region rows 2..3 -> homes cursor
+            term.feed("\u{1b}[3;4HX")       // place cursor + a sentinel inside the region
+            term.feed(bad)                  // degenerate DECSTBM — must be ignored
+            // Force a scroll inside the region; row 0 must stay blank if containment held.
+            term.feed("\u{1b}[2;1HA\r\nB\r\nC")
+            let grid = term.readGrid()!
+            XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0,
+                           "region clobbered by invalid DECSTBM \(bad)")
+        }
+    }
+
+    func testBareDECSTBMResetsToFullScreenAndHomes() {
+        // `ESC[r` (params absent) is the legitimate reset: full-screen region + home. The
+        // invalid-DECSTBM no-op fix must NOT regress this path.
+        let term = HarnessGridTerminal(cols: 10, rows: 4)!
+        term.feed("\u{1b}[2;3r")        // shrink region first
+        term.feed("\u{1b}[3;5H")        // move cursor away from home
+        term.feed("\u{1b}[r")           // reset region -> full screen + home
+        var grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.row, 0)
+        XCTAssertEqual(grid.cursor.col, 0)
+        // Region is now the full screen: place a sentinel on row 0, then scroll the whole
+        // screen. The sentinel must move off row 0 (it is no longer pinned outside a region).
+        term.feed("\u{1b}[1;1HZ")       // sentinel on row 0
+        term.feed("\u{1b}[4;1H\n")      // line feed at bottom -> full-screen scroll up
+        grid = term.readGrid()!
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0,
+                       "row 0 should have scrolled when the region is full-screen")
+    }
+
+    func testBareDECSTBMHomesOnSingleRowGrid() {
+        // Regression: on a 1-row grid the full-screen identity degenerates to top==bottom==0,
+        // so a `t < b` guard would silently drop the `ESC[r` cursor-home. 1-row grids are
+        // reachable (status-line panes, single-row splits). The reset must still home.
+        let term = HarnessGridTerminal(cols: 10, rows: 1)!
+        term.feed("\u{1b}[1;5H")        // move cursor to col 4 (1-based col 5)
+        var grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.col, 4, "precondition: cursor parked at col 4")
+        term.feed("\u{1b}[r")           // bare DECSTBM -> full-screen reset must home
+        grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.row, 0)
+        XCTAssertEqual(grid.cursor.col, 0, "ESC[r must home the cursor on a 1-row grid")
+    }
+
+    func testExplicitDegenerateDECSTBMNoOpsOnSingleRowGrid() {
+        // `ESC[2;2r` on a 1-row grid is an explicit degenerate request (top==bottom==row 1),
+        // NOT the full-screen identity (which arrives as top=0,bottom=rows-1). It clamps to
+        // (0,0) but must still no-op: the cursor must stay put, unlike bare `ESC[r`.
+        let term = HarnessGridTerminal(cols: 10, rows: 1)!
+        term.feed("\u{1b}[1;5H")        // move cursor to col 4
+        term.feed("\u{1b}[2;2r")        // explicit degenerate region -> must be ignored
+        let grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.row, 0)
+        XCTAssertEqual(grid.cursor.col, 4, "explicit degenerate DECSTBM must not home")
+    }
+
+    func testDECRCWithoutPriorSaveRestoresDefaultPen() {
+        // `ESC[31m ESC[2;6H ESC8 X` with no prior DECSC: xterm/Ghostty home the cursor AND
+        // reset the SGR pen, so X prints at (0,0) with the DEFAULT (no) foreground, not red.
+        let grid = read("\u{1b}[31m\u{1b}[2;6H\u{1b}8X", cols: 80, rows: 24)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("X"))
+        // Fully qualify: a bare `.none` would resolve to Optional.none, not TerminalGridColor.none.
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.foreground, TerminalGridColor.none)
+    }
+
+    func testDECRCWithoutPriorSaveClearsBoldPen() {
+        // Same no-save path, bold instead of color: the restored default pen must clear bold.
+        let grid = read("\u{1b}[1m\u{1b}[2;6H\u{1b}8Y", cols: 80, rows: 24)
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("Y"))
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.bold, false)
+    }
+
+    func testRISClearsSavedCursor() {
+        // `ESC[31m ESC[5;5H ESC7 ESCc ESC8 X`: DECSC saves (4,4)+red, then RIS (ESCc) must
+        // drop that save. The following DECRC therefore restores defaults — X prints at (0,0)
+        // with the DEFAULT (no) foreground, not back at (4,4) in red.
+        let grid = read("\u{1b}[31m\u{1b}[5;5H\u{1b}7\u{1b}c\u{1b}8X", cols: 80, rows: 24)
+        XCTAssertEqual(grid.cursor.row, 0)
+        XCTAssertEqual(grid.cursor.col, 1)   // home + one cell advanced by the printed X
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, codepoint("X"))
+        // Fully qualify: a bare `.none` would resolve to Optional.none, not TerminalGridColor.none.
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.foreground, TerminalGridColor.none)
+    }
+
+    func testDECSTBMInvalidRegionOnTwoRowGrid() {
+        // `ESC[2;1r` on a 2-row grid is an explicit inverted request (pre-clamp top=1,bottom=0),
+        // NOT the full-screen identity. It must be a complete no-op: region + cursor unchanged.
+        // `ESC[r` on the same grid must still home, mirroring the 1-row conformance tests.
+        let term = HarnessGridTerminal(cols: 10, rows: 2)!
+        term.feed("\u{1b}[2;5H")        // move cursor to row 1, col 4 (1-based 2;5)
+        term.feed("\u{1b}[2;1r")        // inverted region -> must be ignored
+        var grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.row, 1, "inverted DECSTBM must not home")
+        XCTAssertEqual(grid.cursor.col, 4, "inverted DECSTBM must not home")
+        // Region untouched: place a sentinel on row 0, scroll the full screen; row 0 must move.
+        term.feed("\u{1b}[1;1HZ")       // sentinel on row 0
+        term.feed("\u{1b}[2;1H\n")      // line feed at bottom -> full-screen scroll up
+        grid = term.readGrid()!
+        XCTAssertEqual(grid.cell(row: 0, col: 0)?.codepoint, 0,
+                       "region clobbered: row 0 should have scrolled (full-screen region)")
+        // Bare `ESC[r` on the 2-row grid still homes.
+        term.feed("\u{1b}[2;5H")        // park cursor away from home
+        term.feed("\u{1b}[r")           // bare DECSTBM -> full-screen reset must home
+        grid = term.readGrid()!
+        XCTAssertEqual(grid.cursor.row, 0)
+        XCTAssertEqual(grid.cursor.col, 0, "ESC[r must home the cursor on a 2-row grid")
     }
 }

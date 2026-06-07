@@ -9,6 +9,10 @@ public struct SessionGroup: Codable, Sendable, Identifiable, Equatable {
     /// older snapshots (without the key) decode via synthesized Codable to nil.
     public var lastActiveTabID: TabID?
     public var sortOrder: Int
+    /// tmux grouped sessions (`new-session -t <session>`): members share one window
+    /// list (windows created/killed in one member propagate to all) while each keeps
+    /// its own active window. nil = not grouped. Additive — older snapshots decode nil.
+    public var groupID: UUID?
     /// Pin this session to survive a clean GUI quit even when the global
     /// `keepSessionsOnQuit` is off (Plain mode). A session survives iff
     /// `keepSessionsOnQuit || persistent` — so when keep-on-quit is on (Persistent/Full/Agent,
@@ -23,6 +27,7 @@ public struct SessionGroup: Codable, Sendable, Identifiable, Equatable {
         activeTabID: TabID? = nil,
         lastActiveTabID: TabID? = nil,
         sortOrder: Int = 0,
+        groupID: UUID? = nil,
         persistent: Bool = false
     ) {
         self.id = id
@@ -31,6 +36,7 @@ public struct SessionGroup: Codable, Sendable, Identifiable, Equatable {
         self.activeTabID = activeTabID ?? self.tabs.first?.id
         self.lastActiveTabID = lastActiveTabID
         self.sortOrder = sortOrder
+        self.groupID = groupID
         self.persistent = persistent
     }
 
@@ -45,6 +51,7 @@ public struct SessionGroup: Codable, Sendable, Identifiable, Equatable {
         activeTabID = try c.decodeIfPresent(TabID.self, forKey: .activeTabID) ?? tabs.first?.id
         lastActiveTabID = try c.decodeIfPresent(TabID.self, forKey: .lastActiveTabID)
         sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+        groupID = try c.decodeIfPresent(UUID.self, forKey: .groupID)
         persistent = try c.decodeIfPresent(Bool.self, forKey: .persistent) ?? false
     }
 
@@ -56,5 +63,18 @@ public struct SessionGroup: Codable, Sendable, Identifiable, Equatable {
     public mutating func setActiveTab(_ tabID: TabID) {
         if let current = activeTabID, current != tabID { lastActiveTabID = current }
         activeTabID = tabID
+    }
+}
+
+extension SessionSnapshot {
+    /// Display name for a session's group (`#{session_group}`): the first member's
+    /// non-empty name in sort order, else a short stable id. nil when ungrouped.
+    public func groupName(of session: SessionGroup) -> String? {
+        guard let groupID = session.groupID else { return nil }
+        let members = workspaces.flatMap(\.sessions)
+            .filter { $0.groupID == groupID }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        return members.first(where: { !$0.name.isEmpty })?.name
+            ?? String(groupID.uuidString.prefix(8))
     }
 }

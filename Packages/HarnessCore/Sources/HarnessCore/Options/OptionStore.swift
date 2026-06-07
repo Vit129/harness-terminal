@@ -52,7 +52,16 @@ public final class OptionStore: @unchecked Sendable {
         }
     }
 
-    public func get(_ key: String, scope: Scope = .global, target: String? = nil) -> Value? {
+    /// tmux option-name aliases mapped onto the Harness option they correspond to.
+    /// `default-terminal` would set TERM in tmux; Harness pins TERM and exposes the
+    /// terminal-identity option (TERM_PROGRAM/XTVERSION) as the adjustable identity.
+    private static let keyAliases: [String: String] = [
+        "default-terminal": TerminalIdentity.optionKey,
+    ]
+    private static func canonical(_ key: String) -> String { keyAliases[key] ?? key }
+
+    public func get(_ rawKey: String, scope: Scope = .global, target: String? = nil) -> Value? {
+        let key = Self.canonical(rawKey)
         lock.lock(); defer { lock.unlock() }
         // Walk scopes from most specific to global.
         let preferred = ScopedKey(scope: scope, target: target, key: key)
@@ -65,14 +74,18 @@ public final class OptionStore: @unchecked Sendable {
         return Self.builtinDefaults[key]
     }
 
-    public func set(_ value: Value, key: String, scope: Scope = .global, target: String? = nil) {
+    public func set(_ value: Value, key rawKey: String, scope: Scope = .global, target: String? = nil) {
+        let key = Self.canonical(rawKey)
         lock.lock()
         values[Self.encodeKey(ScopedKey(scope: scope, target: target, key: key))] = value
         lock.unlock()
         save()
     }
 
-    public func unset(key: String, scope: Scope = .global, target: String? = nil) {
+    public func unset(key rawKey: String, scope: Scope = .global, target: String? = nil) {
+        // Same alias mapping as get/set — unsetting `default-terminal` must clear
+        // the canonical key, not leave the stored value reachable by both names.
+        let key = Self.canonical(rawKey)
         lock.lock()
         values.removeValue(forKey: Self.encodeKey(ScopedKey(scope: scope, target: target, key: key)))
         lock.unlock()
@@ -109,6 +122,10 @@ public final class OptionStore: @unchecked Sendable {
         "pane-base-index": .int(0),
         // When on, tab indices are renumbered contiguously after a tab closes.
         "renumber-windows": .bool(false),
+        // One-shot first-run / what's-new terminal banner — read by the daemon's
+        // `injectVersionBannerIfPending`. Off suppresses the output but still records
+        // the build as seen (the banner never resurrects when re-enabled).
+        "update-banner": .bool(true),
         // Title behavior: `allow-rename` (global) lets a program set the title via
         // OSC; `automatic-rename` (per-tab, defaults on) is turned off by a manual
         // `rename-tab` so the chosen name sticks.
@@ -145,6 +162,16 @@ public final class OptionStore: @unchecked Sendable {
         // Claude Code enable Kitty-keyboard / Shift+Enter immediately; `harness` reports the true
         // name. Read by the daemon (env, via `TerminalIdentity`) and the app (XTVERSION reply).
         TerminalIdentity.optionKey: .string(TerminalIdentity.Mode.compatible.rawValue),
+        // How long display-message / status flashes stay visible (ms). Read by the GUI
+        // message overlay and the attach-window compositor.
+        "display-time": .int(750),
+        // When on, attach clients set the OUTER terminal's title (OSC 2) to the rendered
+        // `set-titles-string`. The GUI keeps its native window title handling.
+        "set-titles": .bool(false),
+        "set-titles-string": .string("#{session_name}:#{window_name} — Harness"),
+        // When the attached session is destroyed: `on` (default, tmux) detaches the
+        // attach-window client; `off` re-targets the most recently active surviving session.
+        "detach-on-destroy": .bool(true),
     ]
 
     /// Values that shipped as defaults in an earlier build and have since been

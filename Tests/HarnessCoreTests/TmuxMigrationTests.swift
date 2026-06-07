@@ -36,10 +36,17 @@ final class TmuxMigrationTests: XCTestCase {
         XCTAssertTrue(repeatable)
     }
 
-    func testOptionLinesAreNotCommands() {
-        // Options aren't `Command`s — a tmux user sets them with `harness-cli set-option`
-        // (IPC), not by sourcing them. Asserting the boundary keeps MIGRATION.md honest.
-        XCTAssertThrowsError(try CommandParser.parse("set -g status-left ' #S '"))
-        XCTAssertThrowsError(try CommandParser.parse("set-option -g base-index 1"))
+    func testOptionLinesAreCommands() throws {
+        // Deliberate reversal of the old boundary ("options aren't Commands"): a sourced
+        // .tmux.conf's `set`/`setw` lines now parse and run like any other command, so the
+        // whole config migrates through one mechanism. Keeps MIGRATION.md honest.
+        XCTAssertEqual(
+            try CommandParser.parse("set -g status-left ' #S '"),
+            .setOption(scope: "global", target: nil, key: "status-left", rawValue: " #S ")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-option -g base-index 1"),
+            .setOption(scope: "global", target: nil, key: "base-index", rawValue: "1")
+        )
     }
 }

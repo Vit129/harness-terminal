@@ -3,6 +3,7 @@ import Foundation
 import HarnessCore
 import HarnessTerminalEngine
 import HarnessTerminalKit
+import HarnessTheme
 import UserNotifications
 
 @MainActor
@@ -110,8 +111,7 @@ final class SessionCoordinator: NSObject {
     }
 
     @objc private func notificationPosted(_ note: Notification) {
-        guard let notification = note.userInfo?["notification"] as? AgentNotification else { return }
-        _ = notification
+        guard note.userInfo?["notification"] is AgentNotification else { return }
         NotificationCenter.default.post(name: NotificationBus.shared.tabStatusChanged, object: nil)
     }
 
@@ -183,6 +183,17 @@ final class SessionCoordinator: NSObject {
         lastRevision = remote.revision
         if structureChanged {
             structureRevision += 1
+            // Drop hosts for surfaces the daemon no longer knows: killPane / remote closes remount
+            // the pane UI but never told the registry, so dead TerminalHostViews (and their Metal
+            // surfaces) accumulated for the life of the app. Hosts are only ever registered while
+            // building panes from a snapshot, so anything outside the latest snapshot is gone for
+            // good — explicit close paths still removeHost() eagerly for the common case.
+            let live = Set(remote.workspaces.flatMap { ws in
+                ws.sessions.flatMap { session in
+                    session.tabs.flatMap { $0.rootPane.allSurfaceIDs() }
+                }
+            })
+            terminalHosts.prune(keeping: live)
         }
         pushNewRemoteNotifications(from: remote)
         pushAgentActivityNotifications(from: remote)
@@ -307,6 +318,7 @@ final class SessionCoordinator: NSObject {
             applyTerminalIdentity(to: host)
             pushBorderColors(to: host)
         }
+        adoptSynchronizeOptions()
         refreshSyncSiblings()
         reassertMarkedPane()
     }
@@ -344,6 +356,11 @@ final class SessionCoordinator: NSObject {
                     else { continue }
                     let key = "\(surfaceID.uuidString)|\(text)"
                     guard !pushedNotificationKeys.contains(key) else { continue }
+                    // Gate on the per-event preference *before* marking the key pushed, so toggling
+                    // "Agent needs input" off then back on during the same waiting episode still
+                    // fires once — a disabled event must not consume the dedup key. (Same reason as
+                    // the watched-pane deferral below: don't mark pushed when we aren't delivering.)
+                    guard settings.isEventEnabled(.agentWaiting) else { continue }
                     // Always surface the waiting ring; but don't fire a banner for the pane you're
                     // actively watching — its output + the ring already show it. Defer (don't mark
                     // pushed) so it still fires once you look away, matching the activity path.
@@ -351,7 +368,7 @@ final class SessionCoordinator: NSObject {
                     pushedNotificationKeys.insert(key)
                     let agentLabel = effectiveAgentKind(for: tab)?.displayName ?? "Harness"
                     let title = "\(agentLabel) · \(tab.title.isEmpty ? "Terminal" : tab.title)"
-                    deliverAgentAlert(title: title, body: text)
+                    deliverAgentAlert(event: .agentWaiting, title: title, body: text)
                 }
             }
         }
@@ -399,13 +416,17 @@ final class SessionCoordinator: NSObject {
                     if tab.status == .waiting { continue }
                     // Don't nag for the pane you're already watching.
                     if NSApp.isActive, surfaceID == activeSurfaceID { continue }
+                    // Gate on the per-event preference *before* the cooldown, so a disabled
+                    // "Agent finished" doesn't arm the 30s window and suppress a later
+                    // (re-enabled) stop. `lastAgentActivity` above still tracks the edge.
+                    guard settings.isEventEnabled(.agentFinished) else { continue }
                     // Cooldown so a flapping stream can't spam.
                     if let last = lastStopNotifyAt[key], Date().timeIntervalSince(last) < 30 { continue }
                     lastStopNotifyAt[key] = Date()
 
                     let folder = HarnessDesign.pathDisplayName(tab.cwd)
                     let title = "\(agent.kind.displayName) · \(folder)"
-                    deliverAgentAlert(title: title, body: "Finished — waiting for you")
+                    deliverAgentAlert(event: .agentFinished, title: title, body: "Finished — waiting for you")
                 }
             }
         }
@@ -413,11 +434,13 @@ final class SessionCoordinator: NSObject {
         lastStopNotifyAt = lastStopNotifyAt.filter { live.contains($0.key) }
     }
 
-    /// Single delivery point for agent alerts, honoring the two Settings toggles:
+    /// Single delivery point for agent alerts. First gates on the per-event "which events
+    /// notify me" choice (`isEventEnabled`); then honors the two delivery toggles:
     /// `systemNotificationsEnabled` (push banner) and `notificationSoundEnabled` (chime).
     /// Banner-on carries the sound; banner-off-but-chime-on still plays an in-app chime,
-    /// so an agent stopping is audible even when banners are suppressed.
-    private func deliverAgentAlert(title: String, body: String) {
+    /// so an enabled event is audible even when banners are suppressed.
+    private func deliverAgentAlert(event: NotificationEvent, title: String, body: String) {
+        guard settings.isEventEnabled(event) else { return }
         let wantBanner = settings.systemNotificationsEnabled
         let wantChime = settings.notificationSoundEnabled
         guard wantBanner || wantChime else { return }
@@ -481,7 +504,7 @@ final class SessionCoordinator: NSObject {
         let workspace = snapshot.activeWorkspace
         let session = workspace?.activeSession
         let tab = workspace?.activeTab
-        return FormatContext(
+        var context = FormatContext(
             paneID: activeSurfaceID?.uuidString,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -496,6 +519,21 @@ final class SessionCoordinator: NSObject {
             gitBranch: tab?.gitBranch,
             clientName: "Harness.app"
         )
+        // Extended tmux-parity fields derivable from the snapshot (PTY-backed values —
+        // pane_pid, pane_width, history_bytes — are daemon vantage; left nil here).
+        context.paneCurrentCommand = tab?.currentCommand
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        context.sessionGroup = session.flatMap { snapshot.groupName(of: $0) }
+        // Same expression as the daemon's builder so `#{window_flags}` agrees between
+        // GUI display-message and CLI/hook output.
+        context.windowFlags = tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
+        return context
     }
 
     /// Apply a theme. By default this seeds the full editable color set from the
@@ -520,6 +558,52 @@ final class SessionCoordinator: NSObject {
             try? settings.save()
         }
         requestDaemon(.setTheme(name: name))
+        syncFromDaemon()
+    }
+
+    /// Apply an imported `.harnesstheme` document. Custom themes aren't in the static catalog,
+    /// so the colors are seeded straight from the document (not resolved by name like `setTheme`).
+    /// Any appearance knobs the document carries (opacity/blur/font/padding/terminal-output sync)
+    /// are applied too; absent keys leave the current setting untouched. `themeName` is set on the
+    /// daemon so the canvas + chrome adopt the imported name.
+    func applyImportedTheme(_ document: ThemeDocument) {
+        let colors = document.colors
+        settings.customBackgroundHex = colors.background.hexString
+        settings.customForegroundHex = colors.foreground.hexString
+        settings.customCursorHex = colors.cursor?.hexString
+        settings.cursorTextHex = colors.cursorText?.hexString
+        settings.selectionBackgroundHex = colors.selectionBackground?.hexString
+        settings.selectionForegroundHex = colors.selectionForeground?.hexString
+        settings.boldColorHex = colors.bold?.hexString
+        settings.paletteHex = HarnessSettings.normalizedPalette(colors.palette.map { $0.hexString })
+        // Chrome accents re-derive from the imported colors unless re-set by the user.
+        settings.dividerHex = nil
+        settings.statusLineHex = nil
+        if let appearance = document.appearance {
+            if let opacity = appearance.backgroundOpacity {
+                settings.backgroundOpacity = HarnessSettings.clampedOpacity(Float(opacity))
+            }
+            if let blur = appearance.backgroundBlur {
+                settings.backgroundBlur = HarnessSettings.clampedBlur(blur)
+            }
+            if let family = appearance.fontFamily, !family.isEmpty {
+                settings.fontFamily = family
+            }
+            if let size = appearance.fontSize {
+                settings.fontSize = HarnessSettings.clampedFontSize(Float(size))
+            }
+            if let px = appearance.windowPaddingX {
+                settings.windowPaddingX = HarnessSettings.clampedPadding(Float(px))
+            }
+            if let py = appearance.windowPaddingY {
+                settings.windowPaddingY = HarnessSettings.clampedPadding(Float(py))
+            }
+            if let applyToOutput = appearance.applyToTerminalOutput {
+                settings.applyThemeToTerminalOutput = applyToOutput
+            }
+        }
+        try? settings.save()
+        requestDaemon(.setTheme(name: document.name))
         syncFromDaemon()
     }
 
@@ -1166,8 +1250,31 @@ final class SessionCoordinator: NSObject {
         guard let tab = snapshot.activeWorkspace?.activeTab else { return }
         let nowOn = on ?? !synchronizedTabIDs.contains(tab.id)
         if nowOn { synchronizedTabIDs.insert(tab.id) } else { synchronizedTabIDs.remove(tab.id) }
+        // Write the per-tab option through (tmux: synchronize-panes IS a window
+        // option), so `setw -t <tab> synchronize-panes` and the GUI toggle are one
+        // state — the compositor honors the same option for the same tab.
+        requestDaemon(.setOption(
+            scope: "tab", target: tab.id.uuidString,
+            key: "synchronize-panes", rawValue: nowOn ? "on" : "off"
+        ))
         refreshSyncSiblings()
         DisplayMessage.show(nowOn ? "synchronize-panes: on" : "synchronize-panes: off")
+    }
+
+    /// Adopt per-tab `synchronize-panes` options written outside the GUI (`setw`,
+    /// the compositor toggle) into the local mirror. Called from metadata sync.
+    func adoptSynchronizeOptions() {
+        guard case let .options(entries)? = requestDaemon(.showOptions(scope: "tab")) else { return }
+        var changed = false
+        for entry in entries where entry.key == "synchronize-panes" {
+            guard let target = entry.target, let tabID = TabID(uuidString: target) else { continue }
+            let on = entry.value == "on" || entry.value == "true" || entry.value == "1"
+            if on != synchronizedTabIDs.contains(tabID) {
+                if on { synchronizedTabIDs.insert(tabID) } else { synchronizedTabIDs.remove(tabID) }
+                changed = true
+            }
+        }
+        if changed { refreshSyncSiblings() }
     }
 
     /// Push each live host its sibling surface ids when its tab is synchronized
@@ -1495,7 +1602,7 @@ final class SessionCoordinator: NSObject {
         return nil
     }
 
-    func handleNotification(for surfaceID: SurfaceID, title: String, body: String) {
+    func handleNotification(for surfaceID: SurfaceID, event: NotificationEvent, title: String, body: String) {
         let key = "\(surfaceID.uuidString)|\(body)"
         // Already pinged for this exact surface+message and it's still pending: just re-assert the
         // ring and return. A program spamming the bell (body is the constant "Bell") would
@@ -1512,7 +1619,7 @@ final class SessionCoordinator: NSObject {
         ))
         pushedNotificationKeys.insert(key)
         if NSApp.isActive == false {
-            deliverAgentAlert(title: title, body: body)
+            deliverAgentAlert(event: event, title: title, body: body)
         }
         syncFromDaemon()
     }
@@ -1683,24 +1790,37 @@ extension SessionCoordinator: TerminalHostDelegate {
     }
 
     func terminalHostDidChangeFocus(_ focused: Bool, surfaceID: SurfaceID) {
-        if focused {
-            setActiveSurface(surfaceID)
-            clearNotification(for: surfaceID)
-        }
+        guard focused else { return }
+        setActiveSurface(surfaceID)
+        // Focus-in now fires on every click-into / ⌘-Tab-back (not only tab switches), so
+        // gate the clear on the local `.waiting` state: `clearNotification` does a main-thread
+        // `requestDaemon` + full `syncFromDaemon`, and there's nothing to clear on a pane with
+        // no badge. The snapshot lookup is cheap and keeps the hot path off the daemon.
+        guard tabIsWaiting(forSurface: surfaceID) else { return }
+        clearNotification(for: surfaceID)
+    }
+
+    /// Whether the tab owning `surfaceID` currently shows a `.waiting` notification, read from
+    /// the local snapshot (no daemon round-trip).
+    private func tabIsWaiting(forSurface surfaceID: SurfaceID) -> Bool {
+        snapshot.workspaces
+            .flatMap { workspace in workspace.sessions.flatMap { $0.tabs } }
+            .first { $0.rootPane.allSurfaceIDs().contains(surfaceID) }?
+            .status == .waiting
     }
 
     func terminalHostDidRingBell(surfaceID: SurfaceID) {
-        handleNotification(for: surfaceID, title: "Terminal", body: "Bell")
+        handleNotification(for: surfaceID, event: .bell, title: "Terminal", body: "Bell")
     }
 
     func terminalHostDidFinishCommand(duration: TimeInterval, exitCode: Int?, surfaceID: SurfaceID) {
-        guard settings.commandFinishedNotifications,
+        guard settings.isEventEnabled(.commandFinished),
               duration >= Double(max(0, settings.commandFinishedThresholdSeconds)) else { return }
         // Only notify when this pane isn't the one being actively watched.
         if NSApp.isActive, surfaceID == activeSurfaceID { return }
         let code = exitCode ?? 0
         let status = code == 0 ? "succeeded" : "failed (exit \(code))"
-        deliverAgentAlert(title: "Command \(status)", body: "Ran for \(Self.formatDuration(duration)).")
+        deliverAgentAlert(event: .commandFinished, title: "Command \(status)", body: "Ran for \(Self.formatDuration(duration)).")
     }
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {
@@ -1713,7 +1833,7 @@ extension SessionCoordinator: TerminalHostDelegate {
     }
 
     func terminalHostDidRequestDesktopNotification(title: String, body: String, surfaceID: SurfaceID) {
-        handleNotification(for: surfaceID, title: title, body: body)
+        handleNotification(for: surfaceID, event: .agentWaiting, title: title, body: body)
     }
 
     func terminalHostDidClose(surfaceID: SurfaceID) {

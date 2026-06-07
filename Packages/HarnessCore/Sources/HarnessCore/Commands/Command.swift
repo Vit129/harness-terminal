@@ -15,7 +15,10 @@ public indirect enum Command: Codable, Sendable, Equatable {
     case killPane
     case zoomPane
     case selectPane(target: PaneTarget)
-    case swapPane(target: PaneTarget)
+    // tmux `swap-pane [-s src] [-t dst]`: `source` is the `-s` pane (nil = the
+    // caller's active pane); an absolute `-t` rides `.targeted`, a relative one
+    // rides `target`. Optional so pre-`-s` keybindings.json payloads still decode.
+    case swapPane(target: PaneTarget, source: TargetSpec?)
     case resizePane(direction: ResizeDirection, amount: Int)
     case markPane(set: Bool)                       // select-pane -m / -M
     case joinPane(direction: SplitDirection)       // join-pane -h/-v (marked → active)
@@ -97,6 +100,38 @@ public indirect enum Command: Codable, Sendable, Equatable {
     case displayPopup(command: String?)            // display-popup [-E <command>]
     case displayMenu(items: [MenuItem])            // display-menu -T title <name> <key> <command> …
 
+    // MARK: Config / buffer / hook verbs
+    // Bindable forms of the harness-cli subcommands (same IPC underneath), so bind-key,
+    // the `:` prompt, hooks, and source-file can drive configuration like tmux.
+    /// `set-option [-g|-w|-s|-t|-p] [-T <target>] <key> <value>`. Unlike the CLI form
+    /// (which requires `-T` for scoped writes), a scoped set without `-T` resolves
+    /// against the caller's focus chain at translate time — tmux behavior.
+    case setOption(scope: String, target: String?, key: String, rawValue: String)
+    case showOptions(scope: String?)               // show-options [-g|-w|-s|-t|-p]
+    /// `set-environment [-g] [-u] <key> [value]`. tmux semantics: default scope is the
+    /// focused session (resolved at translate time); `-g` writes the global table;
+    /// `-u`/nil value unsets.
+    case setEnvironment(global: Bool, key: String, value: String?)
+    case showEnvironment(global: Bool)             // show-environment [-g]
+    case setBuffer(name: String?, text: String)    // set-buffer [-b <name>] <text>
+    case pasteBuffer(name: String?)                // paste-buffer [-b <name>] → focused pane
+    case deleteBuffer(name: String)                // delete-buffer [-b] <name>
+    case listBuffers                               // list-buffers
+    case showBuffer(name: String?)                 // show-buffer [-b <name>]
+    case setHook(event: String, source: String, condition: String?) // set-hook <event> "<cmd>"
+    case showHooks(event: String?)                 // show-hooks [<event>]
+    case unbindHook(id: UUID)                      // unbind-hook <id>
+    /// `find-window [-N|-C|-T] <pattern>` — fnmatch against window name/title (and pane
+    /// content with `-C`), then focus the match. Default matches name + title, like tmux.
+    case findWindow(pattern: String, matchName: Bool, matchContent: Bool, matchTitle: Bool)
+    /// `refresh-client [-S]`: re-pull options/snapshot and repaint. The GUI re-syncs;
+    /// the compositor re-reads options, re-solves, and rewrites the frame.
+    case refreshClient
+    /// `respawn-window [-k]`: respawn every pane in the focused (or targeted) window.
+    case respawnWindow(keepHistory: Bool)
+    /// `show-messages`: the daemon's recent display-message log.
+    case showMessages
+
     // MARK: Targeting
     /// Run `command` as if the client's focus were `spec`'s resolved target
     /// (tmux's universal `-t session:window.pane`). Resolved centrally in
@@ -106,6 +141,9 @@ public indirect enum Command: Codable, Sendable, Equatable {
     public enum PaneTarget: String, Codable, Sendable, Equatable {
         case left, right, up, down
         case next, previous, last
+        /// The caller's active pane — `swap-pane -s X` with no `-t` (tmux: the
+        /// source swaps with the *current* pane).
+        case current
     }
 
     public enum ChooseScope: String, Codable, Sendable, Equatable {
@@ -133,7 +171,8 @@ extension Command {
         case .killPane: return "kill-pane"
         case .zoomPane: return "zoom-pane"
         case let .selectPane(target): return "select-pane \(target.rawValue)"
-        case let .swapPane(target): return "swap-pane \(target.rawValue)"
+        case let .swapPane(target, source):
+            return "swap-pane\(source.map { " -s \($0.raw)" } ?? "") \(target.rawValue)"
         case let .resizePane(direction, amount): return "resize-pane -\(direction.rawValue.prefix(1).uppercased()) \(amount)"
         case let .markPane(set): return set ? "select-pane -m" : "select-pane -M"
         case let .joinPane(direction): return "join-pane -\(direction == .horizontal ? "v" : "h")"
@@ -196,6 +235,26 @@ extension Command {
         case .unlinkWindow: return "unlink-window"
         case let .displayPopup(command): return command.map { "display-popup -E '\($0)'" } ?? "display-popup"
         case let .displayMenu(items): return "display-menu (\(items.count) items)"
+        case let .setOption(scope, target, key, rawValue):
+            let scopeFlag = ["workspace": " -w", "session": " -s", "tab": " -t", "pane": " -p"][scope] ?? ""
+            return "set-option\(scopeFlag)\(target.map { " -T \($0)" } ?? "") \(key) \(rawValue)"
+        case let .showOptions(scope): return "show-options\(scope.map { " (\($0))" } ?? "")"
+        case let .setEnvironment(global, key, value):
+            return "set-environment\(global ? " -g" : "")\(value == nil ? " -u" : "") \(key)\(value.map { " \($0)" } ?? "")"
+        case let .showEnvironment(global): return "show-environment\(global ? " -g" : "")"
+        case let .setBuffer(name, _): return "set-buffer\(name.map { " -b \($0)" } ?? "")"
+        case let .pasteBuffer(name): return "paste-buffer\(name.map { " -b \($0)" } ?? "")"
+        case let .deleteBuffer(name): return "delete-buffer \(name)"
+        case .listBuffers: return "list-buffers"
+        case let .showBuffer(name): return "show-buffer\(name.map { " -b \($0)" } ?? "")"
+        case let .setHook(event, source, _): return "set-hook \(event) '\(source)'"
+        case let .showHooks(event): return "show-hooks\(event.map { " \($0)" } ?? "")"
+        case let .unbindHook(id): return "unbind-hook \(id.uuidString)"
+        case let .findWindow(pattern, _, content, _):
+            return "find-window\(content ? " -C" : "") \(pattern)"
+        case .refreshClient: return "refresh-client"
+        case let .respawnWindow(keep): return keep ? "respawn-window" : "respawn-window -k"
+        case .showMessages: return "show-messages"
         case let .targeted(spec, command):
             return "\(command.shortDescription)\(spec.raw.isEmpty ? "" : " -t \(spec.raw)")"
         }

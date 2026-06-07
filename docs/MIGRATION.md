@@ -64,6 +64,7 @@ See the [multiplexer guide](MULTIPLEXER_GUIDE.md) for the full command and short
 | `prefix :` command-prompt | Same `:` prompt |
 | `tmux a` (attach) | `harness-cli attach-window` (full layout, incl. ssh) |
 | `tmux send-keys` | `harness-cli send-keys --surface <id> --keys "…"` |
+| `tmux bind -T copy-mode-vi` | `bind -T copy-mode-vi …` (alias for the vi table; `copy-mode` and `copy-mode-vi` are interchangeable everywhere) |
 | `tmux capture-pane` | `harness-cli capture-pane --surface <id>` (`-S/-E/-e/-J`) |
 | `$TMUX` set inside a pane | `$HARNESS` (and `$HARNESS_SURFACE` for the pane id) |
 
@@ -71,17 +72,31 @@ The default prefix differs (`Ctrl-A` vs `Ctrl-B`) — change it in Settings if y
 
 ### Bringing your `.tmux.conf` over
 
-Two mechanisms, split by what the line *is* (verified by `TmuxMigrationTests`):
-
-**Commands and bindings** run through the same parser as the command prompt. Put your `bind`
-lines (and any one-shot commands) in a file and `source-file` it — `#` comments are skipped:
+One mechanism: every line runs through the same parser as the command prompt (verified by
+`TmuxMigrationTests`). Put your `bind` lines, `set`/`setw` options, environment, and one-shot
+commands in a file and `source-file` it — `#` comments are skipped:
 
 ```tmux
-# ~/.harness.conf  — commands + bindings only
+# ~/.harness.conf  — bindings + options + commands
 bind | split-window -h
 bind - split-window -v
 bind -r H resize-pane -L 2
+set  -g status-left " #{session_name} "
+set  -g base-index 1
+setw monitor-activity on
+setenv -g EDITOR vim
 ```
+
+Scope flags in options:
+- `-g` = global (like tmux)
+- `-s` = session (tmux uses `-s` for the SERVER scope; Harness's global ≈ tmux's server)
+- `-w` = workspace (Harness-specific; above the session level)
+- `-t` = tab (Harness's windows are tabs; tmux: window scope)
+- `-p` = pane (like tmux)
+
+`setw` is tab-scoped everywhere. From a source file or `:` prompt, a scoped set without `-T`
+resolves against the caller's focus chain; in the CLI it resolves the calling pane's tab via
+`$HARNESS_SURFACE` (outside a Harness pane, pass `-T <target>` explicitly).
 
 ```
 :source-file ~/.harness.conf      # from the command prompt (prefix :)
@@ -90,9 +105,9 @@ bind -r H resize-pane -L 2
 Persistent key bindings also live in `keybindings.json` (merged over the defaults); set them
 with `harness-cli bind-key` / `unbind-key`, or edit the file directly.
 
-**Options** (`status-left`, `base-index`, mouse, …) are *not* commands — set them with
-`harness-cli set-option` (`setw` for window scope), which is the same store the Settings ▸
-Advanced page edits:
+Options write the same store the Settings ▸ Advanced page and `harness-cli set-option` edit —
+the CLI form requires `-T <target>` for scoped writes, while the command form (`:` prompt or source-file) resolves a
+missing target against the focused workspace/session/tab/pane like tmux. Unresolvable targets (bad names in `-t`) fail loudly rather than silently falling back to focus.
 
 ```bash
 harness-cli set-option -g status-left  " #{session_name} "

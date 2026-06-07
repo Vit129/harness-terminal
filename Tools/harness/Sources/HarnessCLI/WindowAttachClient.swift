@@ -128,8 +128,11 @@ private final class WindowSession: @unchecked Sendable {
     private let client: DaemonClient
     private let configuration: WindowAttachClient.Configuration
     private var tab: Tab
-    private let workspaceID: WorkspaceID?
-    private let sessionID: SessionID
+    /// var: re-pinned together with `sessionID` when `detach-on-destroy off`
+    /// re-targets a surviving session in another workspace.
+    private var workspaceID: WorkspaceID?
+    /// var: `detach-on-destroy off` re-targets a surviving session on destroy.
+    private var sessionID: SessionID
     /// Merged prefix/copy-mode key tables (defaults + `keybindings.json`), so the
     /// compositor honors the exact same bindings — and user overrides — as the GUI.
     private let keyTables: KeyTableSet
@@ -155,6 +158,16 @@ private final class WindowSession: @unchecked Sendable {
     /// A transient status override (e.g. `display-message`), shown briefly.
     private var statusOverride: String?
     private var statusOverrideToken = 0
+    /// `display-time` (ms): how long a status flash stays up. Refreshed with the options.
+    private var displayTimeMS = 750
+    /// `set-titles` + rendered `set-titles-string`: when on, the OUTER terminal's title
+    /// follows the attached window (OSC 2). Cleared on detach via restoreOuterTitle.
+    private var setTitles = false
+    private var setTitlesString = ""
+    private var lastOuterTitle: String?
+    /// `detach-on-destroy off`: when the attached session dies, re-target the most recently
+    /// active surviving session instead of detaching (tmux semantics).
+    private var detachOnDestroy = true
     /// Current composited dimensions (kept for status-line right-alignment).
     private var cols = 80
     private var rows = 24
@@ -274,18 +287,20 @@ private final class WindowSession: @unchecked Sendable {
                 // OSC 52 from a pane → set the client's own clipboard (gated on set-clipboard)
                 // and mirror into the daemon buffer so other clients see it.
                 term.onSetClipboard = { [weak self] text in self?.handleProgramClipboard(text, surface: sid) }
-                // Seed with scrollback, subscribe, then vote this pane's PTY size on the
-                // subscription fd — a one-shot resize request loses its vote when its socket
-                // closes, so it can't hold the smallest-size contract while we stay attached.
-                if case let .text(text)? = try? client.request(.replayScrollback(surfaceID: sid, fromSequence: nil), timeout: 5),
-                   !text.isEmpty {
-                    term.feed(text)
-                }
-                if let sub = try? client.subscribeSurfaceOutput(surfaceID: sid, label: configuration.label, onData: { [weak self] data, _ in
-                    self?.ingest(surface: sid, data: data)
-                }, onEnd: { [weak self] in
-                    self?.scheduleStructureCheck()
-                }) {
+                // Gap-free seed: subscribe FIRST (buffering live output), replay scrollback, then
+                // flush the buffered frames deduped against the replay boundary — closing the window
+                // where output appended between the old replay snapshot and the separate subscribe
+                // was dropped. Replay and live frames both feed the pane via `ingest` (the serial
+                // render queue), so the replayed history lands before any live byte. Then vote this
+                // pane's PTY size on the subscription fd (a one-shot resize loses its vote on close).
+                if let sub = try? client.attachReplayingSurfaceOutput(
+                    surfaceID: sid, label: configuration.label,
+                    onReplay: { [weak self] text in
+                        if !text.isEmpty, let data = text.data(using: .utf8) { self?.ingest(surface: sid, data: data) }
+                    },
+                    onData: { [weak self] data, _ in self?.ingest(surface: sid, data: data) },
+                    onEnd: { [weak self] in self?.scheduleStructureCheck() }
+                ) {
                     subscriptions[sid] = sub
                     sub.resize(sid, rows: UInt16(rect.rows), cols: UInt16(rect.cols))
                 }
@@ -436,8 +451,8 @@ private final class WindowSession: @unchecked Sendable {
     private func mainStatusLine(ctx: FormatContext) -> [StyledSegment] {
         let leftSegs = FormatString.evaluateStyled(statusOptions["status-left"] ?? "", context: ctx)
         let rightSegs = FormatString.evaluateStyled(statusOptions["status-right"] ?? "", context: ctx)
-        let leftWidth = leftSegs.reduce(0) { $0 + $1.text.unicodeScalars.count }
-        let rightWidth = rightSegs.reduce(0) { $0 + $1.text.unicodeScalars.count }
+        let leftWidth = StatusLineWidth.displayWidth(of: leftSegs)
+        let rightWidth = StatusLineWidth.displayWidth(of: rightSegs)
         if leftWidth + rightWidth >= cols { return clipSegments(leftSegs, to: cols) }
         var out = leftSegs
         out.append(StyledSegment(text: String(repeating: " ", count: cols - leftWidth - rightWidth)))
@@ -451,22 +466,9 @@ private final class WindowSession: @unchecked Sendable {
         clipSegments(FormatString.evaluateStyled(format, context: ctx), to: cols)
     }
 
-    /// Truncate styled segments to a total scalar `width`, cutting the last that overflows.
+    /// Truncate styled segments to a total *display* `width`, cutting the last that overflows.
     private func clipSegments(_ segs: [StyledSegment], to width: Int) -> [StyledSegment] {
-        var out: [StyledSegment] = []
-        var used = 0
-        for seg in segs {
-            let count = seg.text.unicodeScalars.count
-            if used + count <= width { out.append(seg); used += count; continue }
-            let remain = width - used
-            if remain > 0 {
-                var s = seg
-                s.text = String(String.UnicodeScalarView(seg.text.unicodeScalars.prefix(remain)))
-                out.append(s)
-            }
-            break
-        }
-        return out
+        StatusLineWidth.clipSegments(segs, to: width)
     }
 
     private func currentTarget() -> CommandTarget {
@@ -483,7 +485,7 @@ private final class WindowSession: @unchecked Sendable {
         let order = target.paneOrder
         let paneIndex = activePaneID.flatMap { order.firstIndex(of: $0) }
         let tabIndex = target.session?.tabs.firstIndex(where: { $0.id == tab.id })
-        return FormatContext(
+        var context = FormatContext(
             paneID: activePaneID?.uuidString,
             paneTitle: tab.title,
             paneCwd: tab.cwd,
@@ -498,6 +500,8 @@ private final class WindowSession: @unchecked Sendable {
             clientName: configuration.label,
             windowFlags: windowFlags()
         )
+        fillExtendedContext(&context, session: target.session)
+        return context
     }
 
     /// Format context for a *specific* pane (for `pane-border-format`): its index in the
@@ -507,7 +511,7 @@ private final class WindowSession: @unchecked Sendable {
         let target = currentTarget()
         let paneIndex = target.paneOrder.firstIndex(of: rect.paneID)
         let tabIndex = target.session?.tabs.firstIndex(where: { $0.id == tab.id })
-        return FormatContext(
+        var context = FormatContext(
             paneID: rect.paneID.uuidString,
             paneTitle: tab.title,
             paneCwd: tab.cwd,
@@ -522,6 +526,34 @@ private final class WindowSession: @unchecked Sendable {
             clientName: configuration.label,
             windowFlags: windowFlags()
         )
+        fillExtendedContext(&context, session: target.session)
+        // The compositor sized this pane itself — the rect IS the pane's cell geometry.
+        context.paneWidth = rect.cols
+        context.paneHeight = rect.rows
+        return context
+    }
+
+    /// Extended tmux-parity fields visible from the attach client: snapshot metadata plus
+    /// this client's own tty facts (the daemon fills PTY-backed values on its side).
+    private func fillExtendedContext(_ context: inout FormatContext, session: SessionGroup?) {
+        context.paneCurrentCommand = tab.currentCommand
+        context.paneDead = tab.exitStatus != nil
+        context.paneExitStatus = tab.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab.rootPane.allPaneIDs().count
+        if let session { context.windowActive = tab.id == session.activeTabID }
+        if let session, let snapshot = latestSnapshot {
+            context.sessionGroup = snapshot.groupName(of: session)
+        }
+        // The compositor knows the agent state from the snapshot like the GUI does.
+        context.agentKind = context.agentKind ?? tab.agent?.kind.rawValue
+        context.agentActivity = context.agentActivity ?? tab.agent?.activity.rawValue
+        context.clientWidth = cols
+        context.clientHeight = rows
+        if let tty = ttyname(STDIN_FILENO) { context.clientTTY = String(cString: tty) }
+        context.clientTermname = ProcessInfo.processInfo.environment["TERM"]
     }
 
     private func windowFlags() -> String {
@@ -536,9 +568,7 @@ private final class WindowSession: @unchecked Sendable {
     }
 
     private func clip(_ string: String, to width: Int) -> String {
-        let scalars = Array(string.unicodeScalars)
-        guard scalars.count > width else { return string }
-        return String(String.UnicodeScalarView(scalars.prefix(max(0, width))))
+        StatusLineWidth.clip(string, to: width)
     }
 
     /// Show a transient message on the status row for ~2s, then revert.
@@ -548,7 +578,9 @@ private final class WindowSession: @unchecked Sendable {
         statusOverride = message
         compositor.invalidate()
         composeAndWrite()
-        renderQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // `display-time` (ms, tmux) bounds the flash; floor keeps a sub-100ms setting readable.
+        let seconds = max(Double(displayTimeMS) / 1000, 0.1)
+        renderQueue.asyncAfter(deadline: .now() + seconds) { [weak self] in
             guard let self, self.statusOverrideToken == token else { return }
             self.statusOverride = nil
             self.compositor.invalidate()
@@ -596,6 +628,40 @@ private final class WindowSession: @unchecked Sendable {
             let on = entry.value == "on" || entry.value == "true" || entry.value == "1"
             if on != mouseEnabled { mouseEnabled = on; setOuterMouseTracking(on) }
         }
+        for entry in entries where entry.key == "display-time" {
+            displayTimeMS = Int(entry.value) ?? displayTimeMS
+        }
+        for entry in entries where entry.key == "detach-on-destroy" {
+            detachOnDestroy = !(entry.value == "off" || entry.value == "false" || entry.value == "0")
+        }
+        // `synchronize-panes` as a window option (tmux setw): the option is authoritative
+        // when set per-tab; the toggle command writes the same option through, so the
+        // store is the single truth and a snapshot push never reverts a local toggle.
+        for entry in entries where entry.key == "synchronize-panes" && entry.scope == "tab" && entry.target == tab.id.uuidString {
+            synchronize = entry.value == "on" || entry.value == "true" || entry.value == "1"
+        }
+        for entry in entries where entry.key == "set-titles" {
+            setTitles = entry.value == "on" || entry.value == "true" || entry.value == "1"
+        }
+        for entry in entries where entry.key == "set-titles-string" { setTitlesString = entry.value }
+        applyOuterTitle()
+    }
+
+    /// OSC 2 to the outer terminal when `set-titles` is on (tmux behavior); restores an
+    /// empty title on detach so the user's shell title machinery takes back over.
+    private func applyOuterTitle() {
+        guard setTitles else {
+            if lastOuterTitle != nil { writeOut("\u{1b}]2;\u{07}"); lastOuterTitle = nil }
+            return
+        }
+        let format = setTitlesString.isEmpty
+            ? (OptionStore.builtinDefaults["set-titles-string"]?.stringValue ?? "")
+            : setTitlesString
+        let rendered = FormatString.evaluate(format, context: formatContext(target: currentTarget()))
+        guard rendered != lastOuterTitle else { return }
+        lastOuterTitle = rendered
+        // OSC 2 (window title); BEL terminator for maximum outer-terminal compatibility.
+        writeOut("\u{1b}]2;\(rendered)\u{07}")
     }
 
     /// Enable/disable SGR mouse tracking on the *outer* terminal so the compositor receives
@@ -999,6 +1065,13 @@ private final class WindowSession: @unchecked Sendable {
 
     private func toggleSynchronize(_ set: Bool?) {
         synchronize = set ?? !synchronize
+        // Write the per-tab option through (tmux: synchronize-panes IS a window
+        // option) so the next snapshot push re-reads the value just toggled instead
+        // of silently reverting it — option store and local state stay one truth.
+        _ = try? client.request(.setOption(
+            scope: "tab", target: tab.id.uuidString,
+            key: "synchronize-panes", rawValue: synchronize ? "on" : "off"
+        ), timeout: 1)
         flashStatus(synchronize ? "synchronize-panes on" : "synchronize-panes off")
     }
 
@@ -1158,12 +1231,27 @@ private final class WindowSession: @unchecked Sendable {
         )
         switch CommandIPCTranslator.translate(command, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex) {
         case let .requests(requests):
-            for request in requests { _ = try? client.request(request, timeout: 2) }
+            for request in requests {
+                // Surface daemon validation errors (unknown hook event, bad option
+                // scope, …) in the status line — never a silent no-op. First error
+                // aborts the remainder, like the GUI and CLI.
+                if case let .error(message)? = try? client.request(request, timeout: 2) {
+                    flashStatus(message)
+                    break
+                }
+            }
             checkStructure()
         case let .clientLocal(local):
             handleLocalCommand(local, target: target)
         case .unresolved:
-            break
+            // Loud, like the GUI prompt and control mode: a typo'd `-t` (or a command
+            // with no resolvable focus) must never read as a silent success.
+            // find-window's no-match reads as a search result, like the -C path.
+            if case let .findWindow(pattern, _, _, _) = command {
+                flashStatus("find-window: no matches for '\(pattern)'")
+            } else {
+                flashStatus("no resolvable target for command")
+            }
         }
     }
 
@@ -1202,6 +1290,58 @@ private final class WindowSession: @unchecked Sendable {
         case .showCheatsheet, .sourceConfig, .reloadKeybindings, .bindKey, .unbindKey, .listKeys,
              .renameWindow, .renameSession, .runShell, .ifShell:
             break
+        case let .showOptions(scope):
+            if case let .options(items)? = try? client.request(.showOptions(scope: scope), timeout: 1) {
+                flashStatus(items.isEmpty ? "no options set"
+                    : "\(items.count) options · " + items.prefix(3).map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+            }
+        case let .showEnvironment(global):
+            let sessionID = global ? nil : self.sessionID
+            if case let .options(items)? = try? client.request(.showEnvironment(sessionID: sessionID), timeout: 1) {
+                flashStatus(items.isEmpty ? "no environment entries"
+                    : items.prefix(4).map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+            }
+        case .listBuffers:
+            if case let .buffers(buffers)? = try? client.request(.listBuffers, timeout: 1) {
+                flashStatus(buffers.isEmpty ? "no buffers"
+                    : buffers.prefix(3).map { "\($0.name)(\($0.byteCount)B)" }.joined(separator: " "))
+            }
+        case let .showBuffer(name):
+            if case let .buffer(buffer)? = try? client.request(.getBuffer(name: name), timeout: 1) {
+                flashStatus(buffer.preview.isEmpty ? "buffer is empty" : buffer.preview)
+            } else {
+                flashStatus("no such buffer")
+            }
+        case let .showHooks(event):
+            if case let .hooks(hooks)? = try? client.request(.listHooks(event: event), timeout: 1) {
+                flashStatus(hooks.isEmpty ? "no hooks bound"
+                    : hooks.prefix(2).map { "\($0.event)→\($0.commandSource)" }.joined(separator: " · "))
+            }
+        case .refreshClient:
+            refreshStatusOptions()
+            scheduleStructureCheck()
+            compositor.invalidate()
+            composeAndWrite()
+        case .showMessages:
+            if case let .text(log)? = try? client.request(.showMessages, timeout: 1) {
+                flashStatus(log.isEmpty ? "no messages" : (log.split(separator: "\n").last.map(String.init) ?? log))
+            }
+        case let .findWindow(pattern, name, content, title):
+            // Only the -C form reaches here (non-content translated to selectTab upstream).
+            _ = content
+            let snapshot = latestSnapshot ?? SessionSnapshot()
+            let match = FindWindowMatcher.firstMatch(
+                snapshot, pattern: pattern, name: name, title: title
+            ) { surfaceID in
+                guard case let .text(text)? = try? client.request(
+                    .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 1) else { return nil }
+                return text
+            }
+            if let match {
+                _ = try? client.request(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID), timeout: 1)
+            } else {
+                flashStatus("find-window: no matches for '\(pattern)'")
+            }
         default:
             break
         }
@@ -1238,7 +1378,23 @@ private final class WindowSession: @unchecked Sendable {
         guard case let .snapshot(snapshot)? = try? client.request(.getSnapshot, timeout: 1) else { return }
         latestSnapshot = snapshot
         guard let session = WindowAttachClient.session(snapshot, id: sessionID) else {
-            requestDetach()   // session destroyed
+            // Session destroyed. tmux `detach-on-destroy off` jumps to another session
+            // instead of detaching; the most recently saved active chain is the best analog.
+            if !detachOnDestroy,
+               let fallback = snapshot.activeWorkspace?.activeSession ?? snapshot.workspaces.flatMap(\.sessions).first,
+               let fallbackTab = fallback.activeTab ?? fallback.tabs.first {
+                sessionID = fallback.id
+                tab = fallbackTab
+                // Re-pin the workspace too: currentTarget()/status/titles resolve
+                // against it, and the fallback session may live elsewhere.
+                if let owner = snapshot.workspaces.first(where: { ws in ws.sessions.contains { $0.id == fallback.id } }) {
+                    workspaceID = owner.id
+                }
+                rebuildLayout(initial: false)
+                flashStatus("session closed — switched to \(fallback.name.isEmpty ? "another session" : fallback.name)")
+                return
+            }
+            requestDetach()
             return
         }
         // Follow the session's focused window (or fall back to its first tab).
@@ -1329,6 +1485,9 @@ private final class WindowSession: @unchecked Sendable {
         renderQueue.sync {
             tornDown = true
             if mouseEnabled { setOuterMouseTracking(false) }
+            // Restore an empty outer title (set-titles): the user's shell title
+            // machinery takes back over after detach.
+            if lastOuterTitle != nil { writeOut("\u{1b}]2;\u{07}"); lastOuterTitle = nil }
             writeOut("\u{1b}[0m\u{1b}[?25h\u{1b}[2J\u{1b}[H") // reset SGR, show cursor, clear frame
         }
         if wakeRead >= 0 { close(wakeRead) }

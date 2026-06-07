@@ -9,6 +9,10 @@ model, compositor, and CLI are first-party Harness components. The naming is
 familiar where it helps: a Harness tab is the same idea as a tmux window, and a
 Harness pane is a split terminal.
 
+For the exact parity status — what matches tmux, what is adapted to Harness's
+daemon-owned design, and what is deliberately rejected — see
+[TMUX_PARITY.md](TMUX_PARITY.md).
+
 ## 1. Five-minute setup
 
 Use this path for a fresh install.
@@ -173,6 +177,7 @@ Useful CLI commands:
 ```bash
 harness-cli new-workspace --name api
 harness-cli new-session --workspace Default --cwd ~/Code/project
+harness-cli new-session --name mirror --group-with project   # grouped session: shared window list
 harness-cli new-tab --workspace Default --cwd ~/Code/project
 harness-cli rename-session --session <uuid> --name backend
 harness-cli list-sessions
@@ -191,6 +196,17 @@ Persistence:
 harness-cli promote-session --session <uuid>
 harness-cli demote-session --session <uuid>
 ```
+
+**Grouped sessions** (tmux `new-session -t`): a grouped member shares the target's window
+list — tabs created or killed in one member appear/disappear in all of them, while each
+member keeps its own focused tab (and may diverge in split layout per tab). Create one with
+`harness-cli new-session --group-with <session>` or `:new-session -t <session>` from the
+prompt. `#{session_group}` renders the group's name in formats.
+
+**Find a window:** `:find-window <pattern>` focuses the first tab whose name or title
+matches; add `-C` to also search live pane contents (`:find-window -C "error 42"`). No
+match reports loudly. There is no default key binding — bind one with
+`:bind-key f command-prompt -p find "find-window %%"` if you want tmux's `prefix f`.
 
 ## 6. Copy mode, search, and paste buffers
 
@@ -278,7 +294,17 @@ key bindings and hooks:
 :display-message "#{session_name}:#{window_index}.#{pane_index}"
 :bind-key C-x x kill-pane
 :bind-key -T copy-mode y copy-mode -X copy-selection-and-cancel
+:find-window -N api
+:set-hook session-created "display-message 'new session: #{session_name}'"
+:set-hook --if "#{?pane_active,1,}" after-split-pane "display-message split!"
+:show-hooks
 ```
+
+Hook events cover the full lifecycle (`session-created/renamed/closed`,
+`window-renamed/linked/unlinked/layout-changed`, `alert-*`, `client-attached/detached`,
+`pane-exited`, and the `after-*` command events) — the hook's format tokens describe the
+event's subject, e.g. `#{session_name}` in a `session-closed` hook names the closed session.
+See [COMMANDS.md](COMMANDS.md#hooks) for the full list.
 
 From a shell:
 
@@ -287,7 +313,11 @@ harness-cli send-keys --surface "$HARNESS_SURFACE" --keys "git status Enter"
 harness-cli capture-pane --surface "$HARNESS_SURFACE"
 harness-cli pipe-pane --surface "$HARNESS_SURFACE" "tee pane.log"
 harness-cli display-message '#{cwd_basename}'
+harness-cli display-message '#{session_group}'  # grouped session name
+harness-cli display-message '#{window_flags}'  # window state flags
+harness-cli display-message '#{client_name}'  # current client name
 harness-cli wait-for -S build-ready
+harness-cli show-messages  # recent display-message log (client- and hook-fired)
 ```
 
 ## 9. Key binding customization
@@ -341,7 +371,20 @@ harness-cli set-option -g mode-keys vi
 harness-cli set-option -g history-limit 20000
 harness-cli set-option -g base-index 1
 harness-cli set-option -g pane-base-index 1
+harness-cli setw synchronize-panes on        # tab-scoped (window) option for the calling pane's tab
+harness-cli set-option -g set-titles on      # OSC 2 titles on attach clients
 ```
+
+Server administration:
+
+```bash
+harness-cli start-server   # ensure the daemon is running (launchctl kickstart)
+harness-cli kill-server    # SIGTERM the daemon; launchd KeepAlive respawns it with sessions restored
+```
+
+`kill-server` verifies the recorded PID is really a HarnessDaemon before signalling, and
+both verbs refuse `--host` (start/stop a remote daemon on the host itself). To replace a
+window's panes wholesale, use `:respawn-window [-k]` from the prompt (`-k` clears history).
 
 Common options:
 
@@ -355,6 +398,11 @@ Common options:
 | `history-limit` | `10000` | Scrollback cap. |
 | `base-index` | `0` | First tab index. |
 | `pane-base-index` | `0` | First pane index. |
+| `set-titles` | `off` | OSC 2 pane titles for attach clients. |
+| `set-titles-string` | `#{session_name}:#{window_name} — Harness` | Title format. |
+| `display-time` | `750` | Status message display duration (ms). |
+| `detach-on-destroy` | `on` | Detach client when its window is destroyed. |
+| `remain-on-exit` | `on` | Keep pane visible when its command exits. |
 
 ## 11. Shell integration
 

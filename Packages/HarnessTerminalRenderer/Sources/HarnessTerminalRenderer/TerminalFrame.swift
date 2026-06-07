@@ -1,3 +1,4 @@
+import Foundation
 import HarnessCore
 import HarnessTerminalEngine
 import HarnessTheme
@@ -459,12 +460,13 @@ public struct FrameBuilder {
                              cursor: cursor, images: images, promptGutter: promptGutter)
     }
 
-    /// Scroll-delta rebuild: the viewport window moved by `shift` rows over otherwise-unchanged
-    /// content (a pure scrollback scroll — no output, no overlays), so every surviving row of the
-    /// previous frame is still byte-identical at its new position. Copies the surviving band from
-    /// `previous` (fixing each cell's baked `row` index) and re-resolves only the newly-exposed
-    /// rows from the snapshot — the resolver/color work that dominates `build` is skipped for the
-    /// whole kept band.
+    /// Scroll-delta rebuild: the viewport's content moved by `shift` rows (a pure scrollback
+    /// scroll, or an output scroll reported via `TerminalDamage.scroll`), so every surviving row
+    /// of the previous frame is still byte-identical at its new position. Copies the surviving
+    /// band from `previous` (fixing each cell's baked `row` index) and re-resolves only the
+    /// newly-exposed rows — plus any `freshRows` (rows the engine marked as genuinely new content:
+    /// writes, the scroll's blank band, cursor rows) — from the snapshot. The resolver/color work
+    /// that dominates `build` is skipped for the whole kept band.
     ///
     /// `shift` is in viewport rows: positive = the window moved up into history (scrolled back;
     /// previous row r now displays at r + shift, new content enters at the top), negative = the
@@ -473,11 +475,13 @@ public struct FrameBuilder {
     /// either side draws images — placements are window-relative and not worth shifting) so the
     /// caller falls back to a full build. The result is byte-identical to
     /// `build(snapshot, region: nil)` — pinned by the differential tests; the caller owns the
-    /// "content didn't change" predicate (no output since `previous`, same builder config).
+    /// "unlisted content didn't change" predicate (`previous` reflects the pre-shift grid, same
+    /// builder config).
     public func buildShifted(
         _ snapshot: TerminalGridSnapshot,
         reusing previous: TerminalFrame,
-        shift: Int
+        shift: Int,
+        freshRows: IndexSet = []
     ) -> TerminalFrame? {
         let cols = snapshot.cols
         let rows = snapshot.rows
@@ -490,7 +494,7 @@ public struct FrameBuilder {
         cells.reserveCapacity(cols * rows)
         for row in 0 ..< rows {
             let sourceRow = row - shift // where this viewport row lived in the previous frame
-            if sourceRow >= 0, sourceRow < rows {
+            if sourceRow >= 0, sourceRow < rows, !freshRows.contains(row) {
                 let base = cells.count
                 cells.append(contentsOf: previous.cells[(sourceRow * cols) ..< ((sourceRow + 1) * cols)])
                 for i in base ..< cells.count { cells[i].row = row } // fix the baked row index
@@ -509,6 +513,33 @@ public struct FrameBuilder {
         let promptGutter = promptGutterEnabled ? resolvePromptGutter(snapshot.marks) : [:]
         return TerminalFrame(columns: cols, rows: rows, cells: cells,
                              cursor: cursor, images: [], promptGutter: promptGutter)
+    }
+
+    /// Re-shade `rows` of an already-built **plain** frame with selection/search highlights —
+    /// the cell-overlay pass. The touched rows are byte-identical to what
+    /// `build(snapshot, region:searchHighlights:)` would have produced for them, because they
+    /// run the exact same `appendRow`; untouched rows keep their plain cells. Lets a caller
+    /// keep the clean frame cached for damage-driven reuse and pay O(highlighted rows) per
+    /// frame for the shading instead of an O(grid) rebuild that also poisons the reuse caches.
+    /// `frame` must be a plain build of `snapshot` (same geometry, no baked shading).
+    public func applyHighlights(
+        into frame: inout TerminalFrame,
+        from snapshot: TerminalGridSnapshot,
+        region: SelectionRegion?,
+        searchHighlights: [TerminalSelection],
+        rows: IndexSet
+    ) {
+        guard region != nil || !searchHighlights.isEmpty else { return }
+        let cols = snapshot.cols
+        guard frame.columns == cols, frame.cells.count >= cols * min(frame.rows, snapshot.rows) else { return }
+        var rowCells = [RenderCell]()
+        rowCells.reserveCapacity(cols)
+        for row in rows where row >= 0 && row < min(frame.rows, snapshot.rows) {
+            rowCells.removeAll(keepingCapacity: true)
+            appendRow(row, snapshot: snapshot, region: region, searchHighlights: searchHighlights,
+                      into: &rowCells)
+            frame.cells.replaceSubrange((row * cols) ..< ((row + 1) * cols), with: rowCells)
+        }
     }
 
     /// Build the `RenderCell`s for one viewport row (appending in column order). A row's cells

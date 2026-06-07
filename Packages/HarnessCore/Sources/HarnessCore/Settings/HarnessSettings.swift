@@ -57,6 +57,9 @@ public enum ResizeOverlayPosition: String, Codable, Sendable, CaseIterable {
 
 private enum LegacyHarnessSettingsCodingKeys: String, CodingKey {
     case tmuxControlsEnabled
+    /// Removed in favor of the per-event `notificationEvents` map; still read here to migrate
+    /// an existing on/off choice into `notificationEvents[.commandFinished]`.
+    case commandFinishedNotifications
 }
 
 public struct HarnessSettings: Codable, Sendable, Equatable {
@@ -117,10 +120,10 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     public var windowBorderHex: String?
     /// Opacity of the window-edge hairline, 0–1. 0 hides it entirely.
     public var windowBorderOpacity: Float
-    /// Fire a macOS system notification when an agent transitions to `waiting`
-    /// (e.g. Codex needs approval, Claude completed a task). When false, the
-    /// in-window bell badge still updates but the OS notification banner is
-    /// suppressed.
+    /// Delivery channel: show a macOS banner for an enabled notification event (which events
+    /// notify is decided per-event by `notificationEvents` / `isEventEnabled(_:)`). When false,
+    /// the in-window bell badge still updates but the OS banner is suppressed; an enabled event
+    /// can still chime if `notificationSoundEnabled` is on.
     public var systemNotificationsEnabled: Bool
     /// Play a sound ("chime") with agent notifications. When `systemNotificationsEnabled`
     /// is on, the banner carries the sound; when banners are off but this is on, Harness
@@ -132,17 +135,28 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     public var notchOpenOnHover: Bool
     /// Terminal color interpretation. `.accurate` is the authored sRGB identity path.
     /// `.vivid` opts into Display-P3 conversion plus a capped saturation lift.
+    ///
+    /// INVARIANT: `colorRendering` and the legacy `vividColors` bool are deliberately kept in lockstep
+    /// by their mutual `didSet`s (vivid ⇔ true) so the new enum and the old on-disk bool always agree
+    /// — old configs/callers keep working while new code reads the explicit mode. The `!=` guard in
+    /// each setter is what stops the two `didSet`s from recursing forever; never drop it.
     public var colorRendering: TerminalColorRenderingMode {
         didSet {
             let legacyValue = colorRendering == .vivid
             if vividColors != legacyValue { vividColors = legacyValue }
         }
     }
-    /// Stored for future gamut policy. Accurate mode currently resolves to sRGB; vivid mode
-    /// resolves to Display-P3.
+    /// INVARIANT: stored and round-tripped through Codable for forward/migration compatibility, but
+    /// NOT consulted by gamut resolution today — `TerminalColorGamut.resolved` derives the gamut
+    /// purely from `colorRendering` (accurate → sRGB, vivid → Display-P3). Kept so a future policy
+    /// can honor an explicit request without a schema break; don't remove it just because it's unread.
     public var colorGamut: TerminalColorGamut
     /// Text antialiasing coverage mode. This only maps to glyph coverage gamma; it never
     /// participates in RGB conversion.
+    ///
+    /// INVARIANT: paired with the legacy `linearBlending` bool the same way `colorRendering`/`vividColors`
+    /// are — the mutual `didSet`s keep them in sync (crisp ⇔ true) for on-disk back-compat, and the
+    /// `!=` guard breaks the otherwise-infinite write loop. `.native`/`.soft` both map to `false`.
     public var textRendering: TerminalTextRenderingMode {
         didSet {
             let legacyValue = textRendering == .crisp
@@ -180,6 +194,12 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// `queue.sync`), stale builds are dropped by a render-generation tag, and the row-reuse cache
     /// is queue-owned. An explicitly stored `false` is honored (opt-out).
     public var offMainParserFramePipeline: Bool
+    /// Real-time (Ghostty-style) live resize: while dragging the window edge, reflow the grid and
+    /// signal the running program (`SIGWINCH`) at every cell boundary, so interactive programs
+    /// (vim/htop/tmux) redraw continuously instead of waiting for the drag to end. **Default on.**
+    /// An explicitly stored `false` reverts to the legacy defer-to-release behavior (the authoritative
+    /// reflow + `SIGWINCH` fire once, when the drag ends).
+    public var liveResizeReflow: Bool
     /// Draw the OSC 133 prompt gutter — a per-row stripe in the left margin marking shell
     /// prompts (green = success, red = failure). Off by default; the marks still power
     /// jump-to-prompt either way, so this only controls the stripe's visibility.
@@ -223,10 +243,15 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// Confirm before pasting text containing newlines / control characters when the program has
     /// not enabled bracketed paste — guards against blind multi-line command execution.
     public var pasteProtection: Bool
-    /// Post a desktop notification when a command that ran longer than
-    /// `commandFinishedThresholdSeconds` finishes in an unfocused pane (uses OSC 133 timing).
-    public var commandFinishedNotifications: Bool
+    /// Minimum runtime (seconds) for the `commandFinished` notification — only commands that
+    /// ran at least this long fire it (uses OSC 133 timing).
     public var commandFinishedThresholdSeconds: Int
+    /// Per-event desktop-banner gating, keyed by `NotificationEvent.rawValue`. A sparse map:
+    /// an absent key falls back to the event's `defaultEnabled`, so older `settings.json` files
+    /// decode to today's behavior. The two global channel toggles (`systemNotificationsEnabled`
+    /// = show banner, `notificationSoundEnabled` = play chime) still decide *how* an enabled
+    /// event is delivered; this map decides *which* events notify. Read via `isEventEnabled(_:)`.
+    public var notificationEvents: [String: Bool]
     /// Map bold + palette colors 0–7 to their bright variants 8–15 (classic terminal
     /// behavior, Ghostty `bold-is-bright`). Off keeps the theme's exact colors for bold text.
     public var boldIsBright: Bool
@@ -313,6 +338,7 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         applyThemeToTerminalOutput: Bool = false,
         ligatures: Bool = true,
         offMainParserFramePipeline: Bool = true,
+        liveResizeReflow: Bool = true,
         showPromptGutter: Bool = false,
         showStatusLine: Bool = true,
         // Fresh installs default to the simplest experience — a fast native terminal.
@@ -329,13 +355,13 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         lightThemeName: String? = nil,
         darkThemeName: String? = nil,
         pasteProtection: Bool = true,
-        commandFinishedNotifications: Bool = false,
         commandFinishedThresholdSeconds: Int = 10,
+        notificationEvents: [String: Bool] = [:],
         boldIsBright: Bool = true,
         lspAutoStart: Bool = false,
         lspServers: [String: String] = [:]
     ) {
-        self.fontSize = fontSize
+        self.fontSize = HarnessSettings.clampedFontSize(fontSize)
         self.fontFamily = fontFamily
         self.defaultShell = defaultShell
         self.defaultCWD = defaultCWD
@@ -345,8 +371,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.restoreWindowSize = restoreWindowSize
         self.backgroundOpacity = backgroundOpacity
         self.backgroundBlur = backgroundBlur
-        self.windowPaddingX = windowPaddingX
-        self.windowPaddingY = windowPaddingY
+        self.windowPaddingX = HarnessSettings.clampedPadding(windowPaddingX)
+        self.windowPaddingY = HarnessSettings.clampedPadding(windowPaddingY)
         self.customBackgroundHex = customBackgroundHex
         self.customForegroundHex = customForegroundHex
         self.customCursorHex = customCursorHex
@@ -380,6 +406,7 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.applyThemeToTerminalOutput = applyThemeToTerminalOutput
         self.ligatures = ligatures
         self.offMainParserFramePipeline = offMainParserFramePipeline
+        self.liveResizeReflow = liveResizeReflow
         self.showPromptGutter = showPromptGutter
         self.showStatusLine = showStatusLine
         self.experienceMode = experienceMode
@@ -393,8 +420,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.lightThemeName = lightThemeName
         self.darkThemeName = darkThemeName
         self.pasteProtection = pasteProtection
-        self.commandFinishedNotifications = commandFinishedNotifications
         self.commandFinishedThresholdSeconds = max(0, commandFinishedThresholdSeconds)
+        self.notificationEvents = notificationEvents
         self.boldIsBright = boldIsBright
         self.lspAutoStart = lspAutoStart
         self.lspServers = lspServers
@@ -427,6 +454,18 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
 
     public func agentColorHex(for kind: AgentKind) -> String {
         agentColorOverrides[kind.rawValue] ?? "#\(kind.dotHex.uppercased())"
+    }
+
+    /// Whether `event` is allowed to fire a notification. Falls back to the event's
+    /// `defaultEnabled` when the user hasn't made an explicit choice, so the sparse
+    /// `notificationEvents` map stays small and old configs behave as before.
+    public func isEventEnabled(_ event: NotificationEvent) -> Bool {
+        notificationEvents[event.rawValue] ?? event.defaultEnabled
+    }
+
+    /// Record an explicit per-event notification choice.
+    public mutating func setEventEnabled(_ event: NotificationEvent, _ enabled: Bool) {
+        notificationEvents[event.rawValue] = enabled
     }
 
     /// Reset visual fields to either the user's imported terminal config or the source terminal's
@@ -468,7 +507,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         let imported = TerminalConfigImporter.load()
         let fallback = HarnessSettings.makeDefaults(imported: imported)
 
-        fontSize = try container.decodeIfPresent(Float.self, forKey: .fontSize) ?? fallback.fontSize
+        fontSize = HarnessSettings.clampedFontSize(
+            try container.decodeIfPresent(Float.self, forKey: .fontSize) ?? fallback.fontSize)
         fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily) ?? fallback.fontFamily
         defaultShell = try container.decodeIfPresent(String.self, forKey: .defaultShell) ?? fallback.defaultShell
         defaultCWD = try container.decodeIfPresent(String.self, forKey: .defaultCWD) ?? fallback.defaultCWD
@@ -478,8 +518,10 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         restoreWindowSize = try container.decodeIfPresent(Bool.self, forKey: .restoreWindowSize) ?? fallback.restoreWindowSize
         backgroundOpacity = try container.decodeIfPresent(Float.self, forKey: .backgroundOpacity) ?? fallback.backgroundOpacity
         backgroundBlur = try container.decodeIfPresent(Int.self, forKey: .backgroundBlur) ?? fallback.backgroundBlur
-        windowPaddingX = try container.decodeIfPresent(Float.self, forKey: .windowPaddingX) ?? fallback.windowPaddingX
-        windowPaddingY = try container.decodeIfPresent(Float.self, forKey: .windowPaddingY) ?? fallback.windowPaddingY
+        windowPaddingX = HarnessSettings.clampedPadding(
+            try container.decodeIfPresent(Float.self, forKey: .windowPaddingX) ?? fallback.windowPaddingX)
+        windowPaddingY = HarnessSettings.clampedPadding(
+            try container.decodeIfPresent(Float.self, forKey: .windowPaddingY) ?? fallback.windowPaddingY)
         customBackgroundHex = try container.decodeIfPresent(String.self, forKey: .customBackgroundHex) ?? fallback.customBackgroundHex
         customForegroundHex = try container.decodeIfPresent(String.self, forKey: .customForegroundHex) ?? fallback.customForegroundHex
         customCursorHex = try container.decodeIfPresent(String.self, forKey: .customCursorHex) ?? fallback.customCursorHex
@@ -524,6 +566,9 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         // Default on when the key is absent (existing installs get the fast path); an explicitly
         // stored `false` is honored as an opt-out.
         offMainParserFramePipeline = try container.decodeIfPresent(Bool.self, forKey: .offMainParserFramePipeline) ?? true
+        // Default on when the key is absent (existing installs get real-time resize); an explicitly
+        // stored `false` is honored as an opt-out to the legacy defer-to-release behavior.
+        liveResizeReflow = try container.decodeIfPresent(Bool.self, forKey: .liveResizeReflow) ?? true
         showPromptGutter = try container.decodeIfPresent(Bool.self, forKey: .showPromptGutter) ?? fallback.showPromptGutter
         showStatusLine = try container.decodeIfPresent(Bool.self, forKey: .showStatusLine) ?? fallback.showStatusLine
         // Behavior-preserving migration: a settings file that predates modes was written by a
@@ -548,10 +593,16 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         lightThemeName = try container.decodeIfPresent(String.self, forKey: .lightThemeName)
         darkThemeName = try container.decodeIfPresent(String.self, forKey: .darkThemeName)
         pasteProtection = try container.decodeIfPresent(Bool.self, forKey: .pasteProtection) ?? fallback.pasteProtection
-        commandFinishedNotifications =
-            try container.decodeIfPresent(Bool.self, forKey: .commandFinishedNotifications) ?? fallback.commandFinishedNotifications
         commandFinishedThresholdSeconds =
             try container.decodeIfPresent(Int.self, forKey: .commandFinishedThresholdSeconds) ?? fallback.commandFinishedThresholdSeconds
+        var decodedEvents = try container.decodeIfPresent([String: Bool].self, forKey: .notificationEvents) ?? [:]
+        // One-time migration: fold the legacy standalone `commandFinishedNotifications` bool into the
+        // per-event map, unless the map already carries an explicit choice for it.
+        if decodedEvents[NotificationEvent.commandFinished.rawValue] == nil,
+           let legacyCommandFinished = try legacyContainer.decodeIfPresent(Bool.self, forKey: .commandFinishedNotifications) {
+            decodedEvents[NotificationEvent.commandFinished.rawValue] = legacyCommandFinished
+        }
+        notificationEvents = decodedEvents
         boldIsBright = try container.decodeIfPresent(Bool.self, forKey: .boldIsBright) ?? fallback.boldIsBright
         lspAutoStart = try container.decodeIfPresent(Bool.self, forKey: .lspAutoStart) ?? fallback.lspAutoStart
         lspServers = try container.decodeIfPresent([String: String].self, forKey: .lspServers) ?? fallback.lspServers
@@ -594,6 +645,14 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
             if clampedOpacity != settings.backgroundOpacity { settings.backgroundOpacity = clampedOpacity; didMutate = true }
             let clampedBlur = HarnessSettings.clampedBlur(settings.backgroundBlur)
             if clampedBlur != settings.backgroundBlur { settings.backgroundBlur = clampedBlur; didMutate = true }
+            // Recover hand-edited or runaway font sizes that would overflow the glyph atlas (huge)
+            // or balloon the grid allocation (tiny). 8–32 matches the Cmd+/- zoom policy.
+            let clampedFontSize = HarnessSettings.clampedFontSize(settings.fontSize)
+            if clampedFontSize != settings.fontSize { settings.fontSize = clampedFontSize; didMutate = true }
+            let clampedPaddingX = HarnessSettings.clampedPadding(settings.windowPaddingX)
+            if clampedPaddingX != settings.windowPaddingX { settings.windowPaddingX = clampedPaddingX; didMutate = true }
+            let clampedPaddingY = HarnessSettings.clampedPadding(settings.windowPaddingY)
+            if clampedPaddingY != settings.windowPaddingY { settings.windowPaddingY = clampedPaddingY; didMutate = true }
             // One-shot color-fidelity migration: explicit vividColors/colorRendering keys
             // are the user's gamut choice. Older files that lack both never made one, so
             // land them on accurate sRGB.
@@ -658,6 +717,19 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// Minimum-contrast WCAG ratio bounds. 1 = off (no adjustment); 21 = maximum (black on white).
     public static func clampedContrast(_ value: Double) -> Double {
         max(1, min(21, value))
+    }
+
+    /// Font-size bounds (points), matching the Cmd+/- zoom policy in `SessionCoordinator.applyFontSize`.
+    /// Out-of-range values are a footgun: ≥~500 overflows the glyph atlas page (invisible text),
+    /// ≤~1 forces a multi-hundred-megabyte grid allocation. Clamp at every persistence boundary.
+    public static func clampedFontSize(_ value: Float) -> Float {
+        max(8, min(32, value))
+    }
+
+    /// Window padding (points) is never negative. The renderer already neutralizes negatives, so
+    /// this is belt-and-braces — it keeps the persisted value sane regardless of the read site.
+    public static func clampedPadding(_ value: Float) -> Float {
+        max(0, value)
     }
 
     public func save() throws {

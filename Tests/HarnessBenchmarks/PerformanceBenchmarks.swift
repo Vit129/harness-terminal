@@ -690,6 +690,109 @@ final class PerformanceBenchmarks: XCTestCase {
         ])
     }
 
+    /// Per-tick frame-build cost while OUTPUT scrolls the live view (`cat`/build streaming): the
+    /// pre-hint path re-resolves the whole viewport per tick (the engine marked every region row
+    /// dirty); the `TerminalDamage.scroll` hint shift-copies the moved band and re-resolves only
+    /// the fresh rows. 200×60, two lines per tick — the streaming steady state. This is the
+    /// measurement gate for the output-scroll damage hint.
+    func testOutputScrollHintBuildCost() throws {
+        try skipUnlessEnabled()
+        let cols = 200, rows = 60
+        let theme = HarnessThemeCatalog.theme(named: "Dracula")!
+        let builder = FrameBuilder(theme: theme)
+        let ticks = 200
+
+        // `syntheticStream` ends near a clear+home, leaving the cursor high on the screen; the
+        // settle lines walk it back to the bottom row so every timed tick actually scrolls.
+        let settle = (0 ..< rows).map { "settle \($0)\r\n" }.joined()
+
+        // Baseline: hint ignored — exactly the pre-hint consumer (damage.rows = whole viewport).
+        let fullTerm = HarnessGridTerminal(cols: cols, rows: rows)!
+        fullTerm.feed(syntheticStream(targetBytes: 256 * 1024))
+        fullTerm.feed(settle)
+        _ = fullTerm.consumeDamage()
+        var fullPrev = builder.build(fullTerm.readGrid()!)
+        let fullNanos = timedNanos {
+            for i in 0 ..< ticks {
+                fullTerm.feed("stream line \(i) with some trailing content\r\nand a second one \(i)\r\n")
+                let damage = fullTerm.consumeDamage()
+                fullPrev = builder.build(fullTerm.readGrid()!, region: nil,
+                                         reusing: fullPrev, damage: damage)
+            }
+        }
+
+        // Hint path: shift-copy the moved band, re-resolve only the fresh rows (the surface
+        // view's off-main plain-path logic).
+        let hintTerm = HarnessGridTerminal(cols: cols, rows: rows)!
+        hintTerm.feed(syntheticStream(targetBytes: 256 * 1024))
+        hintTerm.feed(settle)
+        _ = hintTerm.consumeDamage()
+        var hintPrev = builder.build(hintTerm.readGrid()!)
+        var hintTicks = 0
+        let hintNanos = timedNanos {
+            for i in 0 ..< ticks {
+                hintTerm.feed("stream line \(i) with some trailing content\r\nand a second one \(i)\r\n")
+                let damage = hintTerm.consumeDamage()
+                let snap = hintTerm.readGrid()!
+                if damage.scroll != 0, !damage.full, !damage.scrolledRows.isEmpty,
+                   let shifted = builder.buildShifted(
+                       snap, reusing: hintPrev, shift: damage.scroll,
+                       freshRows: damage.rows.subtracting(damage.scrolledRows)) {
+                    hintPrev = shifted
+                    hintTicks += 1
+                } else {
+                    hintPrev = builder.build(snap, region: nil, reusing: hintPrev, damage: damage)
+                }
+            }
+        }
+        XCTAssertEqual(hintTicks, ticks, "every streaming tick should ride the hint")
+        printBenchmark("output_scroll_full_resolve", nanos: fullNanos, fields: [("ticks", "\(ticks)")])
+        printBenchmark("output_scroll_hint_reuse", nanos: hintNanos, fields: [
+            ("ticks", "\(ticks)"),
+            ("speedup", String(format: "%.1fx", Double(fullNanos) / Double(max(1, hintNanos)))),
+        ])
+    }
+
+    /// Per-tick frame-build cost while DRAGGING a selection over static content: the pre-overlay
+    /// path rebuilt the whole frame per drag event (selection baked into cells, reuse disabled);
+    /// the cell-overlay pass reuses the clean cached frame and re-shades only the selected rows.
+    /// 200×60, head walking down one row per tick — the drag steady state.
+    func testSelectionDragBuildCost() throws {
+        try skipUnlessEnabled()
+        let cols = 200, rows = 60
+        let term = HarnessGridTerminal(cols: cols, rows: rows)!
+        term.feed(syntheticStream(targetBytes: 256 * 1024))
+        _ = term.consumeDamage()
+        let builder = FrameBuilder(
+            theme: theme, selectionBackground: RGBColor(red: 60, green: 80, blue: 200)
+        )
+        let snap = term.readGrid()!
+        let ticks = 200
+
+        let bakedNanos = timedNanos {
+            for i in 0 ..< ticks {
+                let head = (i % (rows - 1)) + 1
+                _ = builder.build(snap, region: .linear(TerminalSelection((0, 4), (head, 12))))
+            }
+        }
+
+        let clean = builder.build(snap)
+        let overlayNanos = timedNanos {
+            for i in 0 ..< ticks {
+                let head = (i % (rows - 1)) + 1
+                let region = SelectionRegion.linear(TerminalSelection((0, 4), (head, 12)))
+                var frame = clean
+                builder.applyHighlights(into: &frame, from: snap, region: region,
+                                        searchHighlights: [], rows: IndexSet(0 ... head))
+            }
+        }
+        printBenchmark("selection_drag_baked_rebuild", nanos: bakedNanos, fields: [("ticks", "\(ticks)")])
+        printBenchmark("selection_drag_overlay_pass", nanos: overlayNanos, fields: [
+            ("ticks", "\(ticks)"),
+            ("speedup", String(format: "%.1fx", Double(bakedNanos) / Double(max(1, overlayNanos)))),
+        ])
+    }
+
     // MARK: - Scrollback append + replay (steady state, at the cap)
 
     func testScrollbackSteadyStateAtCap() throws {
@@ -1174,5 +1277,86 @@ final class PerformanceBenchmarks: XCTestCase {
             }
             runLookups(atlas)
         }
+    }
+
+    // MARK: - Width reflow (the live-resize per-boundary cost)
+
+    /// A deep-scrollback emulator: 10k history lines of prose with wrapped logical lines (every
+    /// 8th line is ~3 rows long at 150 cols) so the join→trim→re-wrap path does real work.
+    /// `cjk` interleaves wide glyphs into every line to exercise the wide-char stepping path.
+    private func deepScrollbackEmulator(cjk: Bool) -> TerminalEmulator {
+        let term = TerminalEmulator(cols: 150, rows: 48)
+        term.maxScrollbackLines = 10_000
+        let ascii = "the quick brown fox jumps over the lazy dog 0123456789"
+        let wide = "漢字テスト混在行で再折返しの幅広グリフ経路を踏む"
+        var stream = ""
+        stream.reserveCapacity(2_500_000)
+        for i in 0 ..< 10_500 { // overfill past the cap so history sits at exactly 10k lines
+            let stem = cjk ? "\(ascii) \(wide)" : ascii
+            let line = (i % 8 == 0) ? "L\(i) \(stem) \(stem) \(stem) \(stem)" : "L\(i) \(stem)"
+            stream += line + "\r\n"
+        }
+        term.feed(stream)
+        return term
+    }
+
+    /// The cost a live drag pays at EVERY cell-boundary crossing: a full history-wide width
+    /// reflow. Alternates 150↔137 so each measured iteration is a genuine width change (the
+    /// height-only fast path never triggers) and the content re-wraps both directions.
+    func testWidthReflowDeepScrollbackProse() throws {
+        try skipUnlessEnabled()
+        let term = deepScrollbackEmulator(cjk: false)
+        let iterations = 10
+        var flip = false
+        let nanos = timedNanos {
+            for _ in 0 ..< iterations {
+                term.resize(cols: flip ? 150 : 137, rows: 48)
+                flip.toggle()
+            }
+        }
+        printBenchmark("width_reflow_10k_prose", nanos: nanos / UInt64(iterations),
+                       fields: [("lines", "10000"), ("iterations", "\(iterations)")])
+        measure {
+            term.resize(cols: 141, rows: 48)
+            term.resize(cols: 150, rows: 48)
+        }
+    }
+
+    /// Same shape with wide (CJK) glyphs in every logical line — the per-cell stepping path.
+    func testWidthReflowDeepScrollbackCJK() throws {
+        try skipUnlessEnabled()
+        let term = deepScrollbackEmulator(cjk: true)
+        let iterations = 10
+        var flip = false
+        let nanos = timedNanos {
+            for _ in 0 ..< iterations {
+                term.resize(cols: flip ? 150 : 137, rows: 48)
+                flip.toggle()
+            }
+        }
+        printBenchmark("width_reflow_10k_cjk", nanos: nanos / UInt64(iterations),
+                       fields: [("lines", "10000"), ("iterations", "\(iterations)")])
+        measure {
+            term.resize(cols: 141, rows: 48)
+            term.resize(cols: 150, rows: 48)
+        }
+    }
+
+    /// The drag-preview cost at a boundary tick: O(visible) viewport re-wrap on the same deep
+    /// buffer. Stays cheap regardless of history depth; benched so a regression that quietly
+    /// re-couples it to history shows up as a step change.
+    func testPreviewViewportReflowDeepScrollback() throws {
+        try skipUnlessEnabled()
+        let term = deepScrollbackEmulator(cjk: false)
+        let iterations = 50
+        var flip = false
+        let nanos = timedNanos {
+            for _ in 0 ..< iterations {
+                _ = term.previewViewportReflow(cols: flip ? 150 : 137, rows: 48)
+                flip.toggle()
+            }
+        }
+        printBenchmark("preview_reflow_10k_prose", nanos: nanos / UInt64(iterations),
+                       fields: [("lines", "10000"), ("iterations", "\(iterations)")])
     }
 }

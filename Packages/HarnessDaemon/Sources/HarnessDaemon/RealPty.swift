@@ -66,6 +66,18 @@ public final class RealPty: @unchecked Sendable {
     /// `waitpid` claims it) — it reads this record to still deliver a real status to `onExit`.
     /// Guarded by `lifecycleLock`.
     private var reapedExit: (generation: UInt64, status: Int32?)?
+    /// Generations whose `waitpid` watcher has already returned (i.e. that child has been reaped
+    /// and its PID may now be recycled to an unrelated process). `reapedExit` is a SINGLE slot
+    /// overwritten on every reap, so it can't answer "was generation N reaped?" once a later
+    /// generation also dies — the SIGKILL escalation must consult this set instead, or it could
+    /// fall through to `kill(pid, …)` on a recycled PID. Generations are monotonic, so once a
+    /// generation older than every live escalation's `dyingGeneration` is recorded it can never
+    /// be queried again; the set is pruned to a small bound on insert. Guarded by `lifecycleLock`.
+    private var reapedGenerations: Set<UInt64> = []
+    /// Bound on `reapedGenerations`. Only generations with an outstanding kill-escalation timer
+    /// (≤ a handful at once) are ever queried, so a small cap can't drop a still-needed entry —
+    /// when over the cap we evict the lowest generations, which are necessarily the oldest/dead.
+    private static let maxReapedGenerationsTracked = 32
     private let lifecycleLock = NSLock()
 
     private let readQueue = DispatchQueue(label: "com.robert.harness.realpty.read")
@@ -94,6 +106,14 @@ public final class RealPty: @unchecked Sendable {
     /// semantics — while the daemon keeps serving everyone else. Serial ⇒ keystrokes stay ordered;
     /// no userspace buffering ⇒ no dropped input.
     private let writeQueue = DispatchQueue(label: "com.robert.harness.realpty.write")
+    /// Delayed-SIGKILL escalation timers (`scheduleKillEscalation`) run here, off every
+    /// hot path. A child that ignores SIGTERM+SIGHUP would otherwise leave the `watchForExit`
+    /// `waitpid(pid, …, 0)` blocked forever, leaking that thread for the daemon's lifetime.
+    private let killQueue = DispatchQueue(label: "com.robert.harness.realpty.kill")
+    /// Grace period after SIGTERM before escalating to SIGKILL. Long enough for a well-behaved
+    /// shell to drain and exit on its own (so we don't `SIGKILL` it mid-teardown), short enough
+    /// that a TERM-ignoring child is reaped promptly.
+    private let killGrace: DispatchTimeInterval = .milliseconds(2500)
 
     public var onOutput: ((Data) -> Void)?
     /// Fired once when the child for the current generation dies. Carries the decoded exit
@@ -143,6 +163,34 @@ public final class RealPty: @unchecked Sendable {
     /// pane keeps the exact shell it started with (not whatever `$SHELL` happens to be now).
     private let shell: String
     var launchedShellForTesting: String { shell }
+    /// The live child PID (lock-guarded read), exposed only so the SIGKILL-escalation tests can
+    /// assert a TERM-ignoring child is actually reaped within the grace window.
+    var childPIDForTesting: pid_t {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return childPID
+    }
+
+    /// Test hook: drive the reap-record bookkeeping deterministically (no PTY/timing) so the
+    /// respawn-then-both-die-within-grace sequence — where a later generation's reap overwrites
+    /// the single-slot `reapedExit` — can be asserted against the SET the escalation actually
+    /// consults. Mirrors what `watchForExit` records.
+    func recordReapedGenerationForTesting(_ gen: UInt64, status: Int32? = nil) {
+        lifecycleLock.lock()
+        reapedExit = (gen, status)
+        recordReapedGenerationLocked(gen)
+        lifecycleLock.unlock()
+    }
+
+    /// Test hook: the answer the SIGKILL escalation uses for "was `gen` reaped?".
+    func wasGenerationReapedForTesting(_ gen: UInt64) -> Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return reapedGenerations.contains(gen)
+    }
+
+    /// Test hook: current tracked-generation count, to assert the prune bound.
+    var reapedGenerationCountForTesting: Int {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return reapedGenerations.count
+    }
 
     /// `TERM_PROGRAM` / `TERM_PROGRAM_VERSION` exported to the child — the terminal-identity the
     /// daemon advertises so capability-detecting tools (Claude Code) recognize Harness and enable
@@ -268,6 +316,21 @@ public final class RealPty: @unchecked Sendable {
         watchForExit(pid: spawned.pid, generation: gen)
     }
 
+    /// No-spawn initializer for deterministic unit tests of the reap-record bookkeeping
+    /// (`recordReapedGenerationLocked` + the SIGKILL escalation's set lookup). Forks no shell
+    /// and binds no fd, so it runs in the normal `swift test` pass (outside the live-PTY gate).
+    /// `forTesting` is a required, otherwise-unused label so this can never be selected by
+    /// production call sites.
+    init(forTesting: Void) {
+        self.id = UUID().uuidString
+        self.termProgram = ""
+        self.termProgramVersion = ""
+        self.maxScrollbackBytes = 0
+        self.extraEnvironment = [:]
+        self.shell = "/bin/sh"
+        self.scrollbackFile = nil
+    }
+
     public func write(_ data: Data) {
         guard !data.isEmpty else { return }
         // Off the caller's thread (see `writeQueue`): the daemon must never block on a full PTY.
@@ -321,7 +384,10 @@ public final class RealPty: @unchecked Sendable {
         }
         // Advance the generation so the old child's exit-watcher and read-source
         // recognise they've been superseded and bail (instead of running close()/
-        // onExit against the shell we're about to spawn).
+        // onExit against the shell we're about to spawn). `dyingGeneration` is the
+        // pre-bump value the SIGTERM'd child was tagged with — used by the SIGKILL
+        // escalation so a TERM-ignoring old shell can't leak its blocked waitpid thread.
+        let dyingGeneration = generation
         generation &+= 1
         readSource = nil
         master = -1
@@ -332,7 +398,10 @@ public final class RealPty: @unchecked Sendable {
         // Probe the old child's cwd while it may still be alive — after SIGTERM the PID
         // disappears and proc_pidinfo fails, which would lose the directory the user was in.
         let inheritedCwd = oldPID > 0 ? Self.cwd(for: oldPID) : nil
-        if oldPID > 0 { kill(oldPID, SIGTERM) }
+        if oldPID > 0 {
+            kill(oldPID, SIGTERM)
+            scheduleKillEscalation(pid: oldPID, dyingGeneration: dyingGeneration)
+        }
         if let oldSource {
             oldSource.cancel()
         } else if oldFD >= 0 {
@@ -533,7 +602,105 @@ public final class RealPty: @unchecked Sendable {
     }
 
     public func currentWorkingDirectory() -> String? {
-        Self.cwd(for: deepestReadableDescendant(of: childPID) ?? childPID)
+        probeWorkingDirectory()?.cwd
+    }
+
+    /// The live child PID (`lifecycleLock`-guarded read). Returns -1 once closed/reaped.
+    /// Callers that probed cwd off-lock re-read this at commit time to confirm a respawn
+    /// didn't swap the child out from under them (committing the OLD child's cwd for the NEW one).
+    public var currentChildPID: pid_t {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return childPID
+    }
+
+    /// Like `currentWorkingDirectory()`, but also returns the PID the cwd was computed for so the
+    /// caller can detect a respawn between the (off-lock) probe and its commit. The PID is the
+    /// child generation snapshotted at probe time; `currentChildPID` may differ later.
+    public func probeWorkingDirectory() -> (pid: pid_t, cwd: String)? {
+        // `childPID` is `lifecycleLock`-guarded (class doc); snapshot it under the lock,
+        // then run the proc scan OUTSIDE the lock (it walks every system PID).
+        lifecycleLock.lock()
+        let pid = childPID
+        lifecycleLock.unlock()
+        guard pid > 0, let cwd = Self.cwd(for: deepestReadableDescendant(of: pid) ?? pid) else { return nil }
+        return (pid, cwd)
+    }
+
+    /// Name of the process that owns the terminal foreground (`#{pane_current_command}`):
+    /// `tcgetpgrp` on the master names the foreground process group, whose leader's PID
+    /// equals the group ID. Falls back to the spawned child when the ioctl fails (e.g. no
+    /// foreground job yet). Cheap (one ioctl + one name lookup) — safe both in the off-lock
+    /// metadata scan and at format-resolve time. Returns the *child* PID alongside so scan
+    /// callers can reuse the same respawn-commit guard as `probeWorkingDirectory`.
+    public func probeForegroundCommand() -> (pid: pid_t, command: String)? {
+        lifecycleLock.lock()
+        let fd = master
+        let child = childPID
+        lifecycleLock.unlock()
+        guard fd >= 0, child > 0 else { return nil }
+        let foreground = tcgetpgrp(fd)
+        guard let name = Self.processName(for: foreground > 0 ? foreground : child) else { return nil }
+        return (child, name)
+    }
+
+    /// Short process name (comm) for a PID, or nil when it can't be read (exited, denied).
+    private static func processName(for pid: pid_t) -> String? {
+        guard pid > 0 else { return nil }
+        #if canImport(Darwin)
+        var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
+        let length = proc_name(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(decoding: buffer.prefix(Int(length)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        #else
+        // /proc/<pid>/comm holds the thread name with a trailing newline.
+        guard let raw = try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+        #endif
+    }
+
+    /// The PTY's current size (`TIOCGWINSZ`), for `#{pane_width}`/`#{pane_height}`.
+    public func currentSize() -> (rows: Int, cols: Int)? {
+        lifecycleLock.lock()
+        let fd = master
+        lifecycleLock.unlock()
+        guard fd >= 0 else { return nil }
+        var rows: UInt16 = 0
+        var cols: UInt16 = 0
+        guard harness_pty_get_winsize(fd, &rows, &cols) == 0, rows > 0, cols > 0 else { return nil }
+        return (Int(rows), Int(cols))
+    }
+
+    /// Bytes currently held in the in-memory scrollback ring (`#{history_bytes}`).
+    public var historyBytes: Int {
+        scrollbackLock.lock(); defer { scrollbackLock.unlock() }
+        return scrollbackBytes
+    }
+
+    /// After SIGTERM, a child that traps/ignores TERM+HUP never exits, so the `watchForExit`
+    /// `waitpid(pid, …, 0)` blocks forever and that thread leaks for the daemon's lifetime
+    /// (and accumulates across repeated close/respawn). Escalate to SIGKILL after a grace.
+    ///
+    /// `dyingGeneration` is the generation the SIGTERM'd child was tagged with — i.e. the value
+    /// captured *before* close()/respawn() bumped `generation`. We only deliver SIGKILL when that
+    /// child is still the not-yet-reaped one: if `watchForExit` already recorded a reap for that
+    /// generation, the PID may have been recycled, so we must not signal it. We consult the
+    /// `reapedGenerations` SET — not the single-slot `reapedExit`, which a later generation's reap
+    /// overwrites, leaving a stale `dyingGeneration` mismatch that would wrongly fall through to
+    /// `kill(pid, …)` on a possibly-recycled PID. `watchForExit` stays the SOLE reaper — we never
+    /// `waitpid` here; SIGKILL just unblocks its pending `waitpid(…,0)`, which then returns and
+    /// reaps the zombie.
+    private func scheduleKillEscalation(pid: pid_t, dyingGeneration: UInt64) {
+        guard pid > 0 else { return }
+        killQueue.asyncAfter(deadline: .now() + killGrace) { [weak self] in
+            guard let self else { return }
+            self.lifecycleLock.lock()
+            let alreadyReaped = self.reapedGenerations.contains(dyingGeneration)
+            self.lifecycleLock.unlock()
+            // Already reaped ⇒ the watcher's waitpid returned and the PID may be recycled — don't
+            // signal it. Still unreaped but the process is gone (kill(pid,0)!=0) ⇒ nothing to do.
+            guard !alreadyReaped, kill(pid, 0) == 0 else { return }
+            kill(pid, SIGKILL)
+        }
     }
 
     public func close() {
@@ -543,6 +710,7 @@ public final class RealPty: @unchecked Sendable {
             return
         }
         isClosed = true
+        let dyingGeneration = generation
         generation &+= 1
         let pid = childPID
         let source = readSource
@@ -553,7 +721,10 @@ public final class RealPty: @unchecked Sendable {
         lifecycleLock.unlock()
 
         AgentDetector.unregisterRootPID(forSurfaceKey: id)
-        if pid > 0 { kill(pid, SIGTERM) }
+        if pid > 0 {
+            kill(pid, SIGTERM)
+            scheduleKillEscalation(pid: pid, dyingGeneration: dyingGeneration)
+        }
         if let source {
             source.cancel()
         } else if fd >= 0 {
@@ -720,6 +891,22 @@ public final class RealPty: @unchecked Sendable {
         return String(decoding: combined, as: UTF8.self)
     }
 
+    /// Replay text PLUS the sequence one past the last replayed byte (`nextSequence` at the
+    /// snapshot instant). A client that subscribed BEFORE calling this can use `endSequence` to
+    /// dedupe its buffered live frames — any frame whose sequence is `< endSequence` is already
+    /// inside this replay, closing the replay→subscribe gap without double-delivering the overlap.
+    /// Captured under the same lock as the snapshot so the boundary is exact (a chunk is appended
+    /// atomically, so `endSequence` always lands on a chunk boundary).
+    public func replayWithEndSequence(fromSequence: UInt64?) -> (text: String, endSequence: UInt64) {
+        scrollbackLock.lock()
+        let live = scrollback[scrollbackHead...] // skip the evicted dead prefix
+        let segments = live.map { ScrollbackReplaySegment(sequence: $0.sequence, data: $0.data) }
+        let endSequence = nextSequence
+        scrollbackLock.unlock()
+        let combined = Self.replayData(from: segments, fromSequence: fromSequence)
+        return (String(decoding: combined, as: UTF8.self), endSequence)
+    }
+
     static func replayData(from segments: [ScrollbackReplaySegment], fromSequence: UInt64?) -> Data {
         guard let fromSequence else {
             return segments.reduce(into: Data()) { output, segment in output.append(segment.data) }
@@ -749,6 +936,18 @@ public final class RealPty: @unchecked Sendable {
         subscribersLock.lock()
         if let token { subscribers.removeValue(forKey: token) } else { subscribers.removeAll() }
         subscribersLock.unlock()
+    }
+
+    /// Inject daemon-originated bytes into this surface's output stream. They flow through
+    /// the same path as PTY reads (`handleOutput`: scrollback ring + persisted file +
+    /// subscriber fan-out), so they render in every attached client and replay on reattach
+    /// exactly like real shell output. Hopped onto `readQueue` — the queue every read
+    /// wakeup runs on — so the injection serializes against live chunks instead of tearing
+    /// one, and `handleOutput`'s queue-confined state stays confined. Used for the one-shot
+    /// first-run / post-update banner.
+    public func injectSyntheticOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        readQueue.async { [weak self] in self?.handleOutput(data) }
     }
 
 
@@ -854,8 +1053,20 @@ public final class RealPty: @unchecked Sendable {
             // generation-tagged record instead, so the real status still reaches onExit.
             self.lifecycleLock.lock()
             self.reapedExit = (gen, decoded)
+            self.recordReapedGenerationLocked(gen)
             self.lifecycleLock.unlock()
             self.childEnded(generation: gen, exitStatus: decoded)
+        }
+    }
+
+    /// Mark `gen`'s child as reaped (its `waitpid` watcher returned), pruning to a bound. Caller
+    /// holds `lifecycleLock`. Generations are monotonic and only those with a live kill-escalation
+    /// timer are queried, so evicting the lowest entries over the cap is always safe.
+    private func recordReapedGenerationLocked(_ gen: UInt64) {
+        reapedGenerations.insert(gen)
+        while reapedGenerations.count > Self.maxReapedGenerationsTracked,
+              let lowest = reapedGenerations.min() {
+            reapedGenerations.remove(lowest)
         }
     }
 

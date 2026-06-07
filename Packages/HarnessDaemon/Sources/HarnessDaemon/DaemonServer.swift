@@ -9,7 +9,7 @@ import HarnessCore
 
 /// @unchecked Sendable: socket-accept and subscription state are confined to the serial `queue`.
 public final class DaemonServer: @unchecked Sendable {
-    public let registry = SurfaceRegistry()
+    public let registry: SurfaceRegistry
     private var listener: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.robert.harness.daemon")
     private var clientBuffers: [Int32: Data] = [:]
@@ -48,16 +48,34 @@ public final class DaemonServer: @unchecked Sendable {
     }
     private var clients: [Int32: ClientRecord] = [:]
     private var clientFDsByID: [UUID: Int32] = [:]
+    /// Lock-guarded mirror of `clients.count` for `#{session_attached}`. The registry's
+    /// format builder runs under its own lock on arbitrary threads, so it can't hop onto
+    /// `queue` (the daemon queue itself calls into the registry — `queue.sync` would
+    /// deadlock); it reads this counter instead.
+    private let registeredClientCount = CountBox()
+    private final class CountBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func update(_ count: Int) { lock.lock(); value = count; lock.unlock() }
+        func read() -> Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
     /// `wait-for` named channels (queue-confined, like the other connection state).
     private let waitForRegistry = WaitForRegistry()
     private let startedAt = Date()
 
-    public init() {
+    /// `enableVersionBanner` is passed by the real daemon entry point only (`main.swift`):
+    /// the first-run / what's-new banner is daemon policy, not something every embedded or
+    /// test registry should emit into freshly spawned PTYs.
+    public init(enableVersionBanner: Bool = false) {
+        registry = SurfaceRegistry(enableVersionBanner: enableVersionBanner)
         // Push layout changes to snapshot subscribers (the attach-window compositor),
         // replacing its old 0.5s poll. Hop onto the serial queue for FD-safe sends.
         registry.onSnapshotCommitted = { [weak self] revision in
             guard let self else { return }
             self.queue.async { [weak self] in self?.pushSnapshotRevision(revision) }
+        }
+        registry.attachedClientCountProvider = { [registeredClientCount] in
+            registeredClientCount.read()
         }
     }
 
@@ -159,6 +177,7 @@ public final class DaemonServer: @unchecked Sendable {
             guard let self else { close(clientFD); return }
             if let removed = self.clients.removeValue(forKey: clientFD) {
                 self.clientFDsByID.removeValue(forKey: removed.id)
+                self.registeredClientCount.update(self.clients.count)
                 self.registry.fireClientDetached(label: removed.label)
             }
             self.clientBuffers.removeValue(forKey: clientFD)
@@ -302,6 +321,7 @@ public final class DaemonServer: @unchecked Sendable {
             let record = ClientRecord(id: UUID(), label: label, connectedAt: Date())
             clients[fd] = record
             clientFDsByID[record.id] = fd
+            registeredClientCount.update(clients.count)
             registry.fireClientAttached(label: label)
             return .clientID(record.id)
         case .listClients:
@@ -489,6 +509,9 @@ public final class DaemonServer: @unchecked Sendable {
             // ones — without this, every real client (GUI, attach, attach-window) produced a
             // detached event with no matching attached.
             registry.fireClientAttached(label: record.label)
+            // Keep the off-queue mirror (`#{session_attached}`) in step with `clients` —
+            // GUI/attach clients register here, never through identifyClient.
+            registeredClientCount.update(clients.count)
         }
         send(.ok, to: fd)
     }
@@ -526,6 +549,8 @@ public final class DaemonServer: @unchecked Sendable {
             clientFDsByID[record.id] = fd
             // Pair with the cancel handler's client-detached (see handleSubscribe).
             registry.fireClientAttached(label: record.label)
+            // Mirror update, as in handleSubscribe — `#{session_attached}` reads this.
+            registeredClientCount.update(clients.count)
         }
         send(.ok, to: fd)
     }
