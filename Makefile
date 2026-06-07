@@ -3,6 +3,13 @@
 run:
 	./Scripts/run.sh app
 
+install:
+	swift build
+	Scripts/package-app.sh debug
+	codesign --force --sign - --deep Harness.app >/dev/null
+	cp -R Harness.app /Applications/Harness.app
+	@echo "✅ Installed to /Applications/Harness.app"
+
 build:
 	swift build
 
