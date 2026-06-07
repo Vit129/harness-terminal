@@ -325,16 +325,30 @@ final class MainSplitViewController: NSViewController {
 
     func updateSidebarPlacement() {
         let right = SessionCoordinator.shared.settings.sidebarOnRight
-        let subviews = split.subviews
-        guard subviews.count == 2, let sidebarContainer = sidebar.view.superview else { return }
+        guard split.subviews.count == 2, let sidebarContainer = sidebar.view.superview else { return }
 
-        let currentFirstIsSidebar = subviews[0] === sidebarContainer
-        if right && currentFirstIsSidebar {
+        let currentFirstIsSidebar = split.subviews[0] === sidebarContainer
+        let needsSwap = (right && currentFirstIsSidebar) || (!right && !currentFirstIsSidebar)
+        if needsSwap {
+            // Swap by removing just the sidebar and reinserting at the other end.
+            // This preserves the content view's frame/layer state.
+            let sidebarFrame = sidebarContainer.frame
+            let contentFrame = content.view.frame
             sidebarContainer.removeFromSuperview()
-            split.addSubview(sidebarContainer)
-        } else if !right && !currentFirstIsSidebar {
-            sidebarContainer.removeFromSuperview()
-            split.addSubview(sidebarContainer, positioned: .below, relativeTo: nil)
+            if right {
+                split.addSubview(sidebarContainer)
+            } else {
+                split.addSubview(sidebarContainer, positioned: .below, relativeTo: split.subviews.first)
+            }
+            // Restore frames so NSSplitView doesn't zero-size either pane.
+            if right {
+                content.view.frame = NSRect(x: 0, y: 0, width: contentFrame.width, height: contentFrame.height)
+                sidebarContainer.frame = NSRect(x: contentFrame.width, y: 0, width: sidebarFrame.width, height: sidebarFrame.height)
+            } else {
+                sidebarContainer.frame = NSRect(x: 0, y: 0, width: sidebarFrame.width, height: sidebarFrame.height)
+                content.view.frame = NSRect(x: sidebarFrame.width, y: 0, width: contentFrame.width, height: contentFrame.height)
+            }
+            split.adjustSubviews()
         }
         updateEdgeDividerConstraints(sidebarContainer: sidebarContainer)
         setSidebarVisible(SessionCoordinator.shared.settings.sidebarVisible, animated: false)
