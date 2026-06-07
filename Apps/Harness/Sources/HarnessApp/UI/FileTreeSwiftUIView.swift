@@ -38,6 +38,8 @@ struct FileTreeSwiftUIView: View {
     /// same repo (e.g. main vs feat/A) re-runs `loadRoot()`.
     let sessionID: SessionID?
     let watcher: FileTreeWatcher
+    /// Single-click on a file row — shows a read-only preview in the sidebar.
+    let onPreview: (FileNode) -> Void
     @State private var rootNodes: [FileTreeNode] = []
     @State private var gitBranch: String?
     /// Kept alive across expands so child nodes inherit the same status map.
@@ -51,7 +53,7 @@ struct FileTreeSwiftUIView: View {
                 branchChip(gitBranch)
             }
             ForEach(rootNodes) { node in
-                NodeRow(node: node, rootPath: rootPath, watcher: watcher, gitStatus: currentGitStatus)
+                NodeRow(node: node, rootPath: rootPath, watcher: watcher, gitStatus: currentGitStatus, onPreview: onPreview)
             }
         }
         .listStyle(.sidebar)
@@ -144,13 +146,14 @@ private struct NodeRow: View {
     let rootPath: String
     let watcher: FileTreeWatcher
     let gitStatus: [String: GitStatusType]
+    let onPreview: (FileNode) -> Void
     @State private var isExpanded = false
 
     var body: some View {
         if node.node.isDirectory {
             DisclosureGroup(isExpanded: $isExpanded) {
                 ForEach(node.children ?? []) { child in
-                    NodeRow(node: child, rootPath: rootPath, watcher: watcher, gitStatus: gitStatus)
+                    NodeRow(node: child, rootPath: rootPath, watcher: watcher, gitStatus: gitStatus, onPreview: onPreview)
                 }
             } label: {
                 rowLabel(systemImage: "folder")
@@ -162,7 +165,11 @@ private struct NodeRow: View {
             }
         } else {
             rowLabel(systemImage: "doc")
-                .onTapGesture(count: 2) { openFile() }
+                .contentShape(Rectangle())
+                .gesture(
+                    TapGesture(count: 2).onEnded { openFile() }
+                        .exclusively(before: TapGesture(count: 1).onEnded { onPreview(node.node) })
+                )
         }
     }
 

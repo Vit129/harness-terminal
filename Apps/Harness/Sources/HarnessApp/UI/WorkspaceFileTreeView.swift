@@ -18,18 +18,29 @@ final class WorkspaceFileTreeView: NSView {
     private var lastSessionID: SessionID?
     private let hostingView: NSHostingView<FileTreeSwiftUIView>
 
+    /// Single-click on a file row — set by the owning sidebar to show a preview.
+    /// Forwarded into the SwiftUI tree via a stable closure so updating it never
+    /// requires rebuilding `FileTreeSwiftUIView`.
+    var onFilePreview: ((FileNode) -> Void)?
+
     init(rootPath: String? = nil) {
         self.rootPath = rootPath
             ?? SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd
             ?? NSHomeDirectory()
         self.lastSessionID = SessionCoordinator.shared.snapshot.activeWorkspace?.activeSessionID
-        let swiftUIView = FileTreeSwiftUIView(
+        self.hostingView = NSHostingView(rootView: FileTreeSwiftUIView(
             rootPath: self.rootPath,
             sessionID: self.lastSessionID,
-            watcher: watcher
-        )
-        self.hostingView = NSHostingView(rootView: swiftUIView)
+            watcher: watcher,
+            onPreview: { _ in }
+        ))
         super.init(frame: .zero)
+        hostingView.rootView = FileTreeSwiftUIView(
+            rootPath: self.rootPath,
+            sessionID: self.lastSessionID,
+            watcher: watcher,
+            onPreview: { [weak self] node in self?.onFilePreview?(node) }
+        )
         setup()
     }
 
@@ -42,7 +53,12 @@ final class WorkspaceFileTreeView: NSView {
         guard path != rootPath || sessionID != lastSessionID else { return }
         rootPath = path
         lastSessionID = sessionID
-        hostingView.rootView = FileTreeSwiftUIView(rootPath: path, sessionID: sessionID, watcher: watcher)
+        hostingView.rootView = FileTreeSwiftUIView(
+            rootPath: path,
+            sessionID: sessionID,
+            watcher: watcher,
+            onPreview: { [weak self] node in self?.onFilePreview?(node) }
+        )
     }
 
     private func setup() {

@@ -32,6 +32,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
     private let sectionLabel = NSTextField(labelWithString: "Sessions")
     private let sessionTable = NSTableView()
     private let fileTreeView = WorkspaceFileTreeView()
+    private let fileViewerVC = FileViewerViewController()
     private let gitPanelView = GitPanelView()
     private let footer = NSView()
     /// Opens the Agent Inbox popover (every running agent, waiting first). Stored so
@@ -167,6 +168,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
         setupFooter()
         setupSessionList()
         setupFileTree()
+        setupFileViewer()
         setupGitPlaceholder()
         selectSidebarTab(index: 0)
         reload()
@@ -578,6 +580,33 @@ final class HarnessSidebarPanelViewController: NSViewController {
             fileTreeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             fileTreeView.bottomAnchor.constraint(equalTo: footer.topAnchor),
         ])
+        fileTreeView.onFilePreview = { [weak self] node in
+            guard let self else { return }
+            self.fileViewerVC.load(path: node.path)
+            self.fileTreeView.isHidden = true
+            self.fileViewerVC.view.isHidden = false
+        }
+    }
+
+    /// Hosted in the same area as the file tree; shown in its place when the
+    /// user clicks a file (back button restores the tree).
+    private func setupFileViewer() {
+        addChild(fileViewerVC)
+        let viewerView = fileViewerVC.view
+        viewerView.translatesAutoresizingMaskIntoConstraints = false
+        viewerView.isHidden = true
+        view.addSubview(viewerView)
+        NSLayoutConstraint.activate([
+            viewerView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            viewerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            viewerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            viewerView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+        ])
+        fileViewerVC.onBack = { [weak self] in
+            guard let self else { return }
+            self.fileViewerVC.view.isHidden = true
+            self.fileTreeView.isHidden = false
+        }
     }
 
     private func setupGitPlaceholder() {
@@ -596,7 +625,14 @@ final class HarnessSidebarPanelViewController: NSViewController {
 
     private func selectSidebarTab(index: Int) {
         sessionScroll?.isHidden = index != 0
-        fileTreeView.isHidden = index != 1
+        if index != 1 {
+            // Leaving the Files tab: collapse any open preview back to the tree
+            // so returning to Files always starts from the file list.
+            fileViewerVC.view.isHidden = true
+            fileTreeView.isHidden = true
+        } else {
+            fileTreeView.isHidden = fileViewerVC.view.isHidden == false
+        }
         gitPanelView.isHidden = index != 2
         switch index {
         case 1:

@@ -24,6 +24,13 @@
 - **v1.3.0** — IDE-like Sidebar (PBI-001): Files tab, Git tab, session tabs, recent projects
 - **v1.4.0** — Git panel: Commit ▼ menu (Tracked/Amend/Signoff), Sync button (Fetch From/Pull Rebase/Push To per-remote)
 
+## In Progress — P4 File View MVP (`worktree-p4-file-view`, 2026-06-07)
+✅ `FileViewerViewController` — read-only plain-text preview (NSTextView, 1MB guard, binary/non-UTF8 placeholder)
+✅ Single-click file in tree → preview replaces tree in sidebar; back arrow restores tree (double-click still opens in terminal editor)
+✅ Wired through `FileTreeSwiftUIView`/`WorkspaceFileTreeView`/`HarnessSidebarPanelViewController` via existing visibility-toggle pattern
+🔜 **Next:** redesign UX to browser-style tabs (open files in tabs instead of replacing the tree) — see `agent-memory/plans/p4-lsp-file-view.md`
+📋 Deferred: TreeSitter syntax highlighting, line numbers, Quick Look (images/PDF), LSP integration
+
 ## Architecture Notes
 - Sidebar: `HarnessSidebarPanelViewController` — tabs (Sessions/Files/Git) via NSSegmentedControl
 - File tree: `WorkspaceFileTreeView` — NSOutlineView with `FileTreeWatcher`

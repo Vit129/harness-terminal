@@ -1,8 +1,53 @@
 # P4 — LSP + File View (Code Preview in Sidebar)
 
-Status: **planned**  
+Status: **Track 1 MVP shipped (plain-text preview)** — see "Implementation Notes" below  
 Priority: **P1** — new feature  
 Depends on: none (sidebar infrastructure exists)  
+Branch: `worktree-p4-file-view`
+
+---
+
+## Implementation Notes (MVP — plain-text viewer)
+
+Shipped a reduced Track 1 slice: **plain-text preview that replaces the file
+tree in place** (no syntax highlighting / TreeSitter yet — descoped to avoid
+the ~2MB grammar bundle and SPM resource setup for the MVP).
+
+**New/changed files:**
+- `Apps/Harness/Sources/HarnessApp/UI/FileViewerViewController.swift` (new) —
+  read-only `NSTextView` in an `NSScrollView`, back button + path header,
+  1MB size guard and binary/non-UTF8 placeholder messages. Uses
+  `HarnessDesign` tokens throughout.
+- `FileTreeSwiftUIView.swift` — `NodeRow` gained an `onPreview` callback;
+  single-click previews a file, double-click still opens it in the terminal
+  editor (disambiguated via `TapGesture(count:).exclusively(before:)`).
+- `WorkspaceFileTreeView.swift` — exposes `onFilePreview` closure forwarded
+  into the SwiftUI tree via a stable wrapper (no rebuild on assignment).
+- `HarnessSidebarPanelViewController.swift` — hosts `FileViewerViewController`
+  as a child VC layered over the same area as the file tree (`setupFileViewer`),
+  toggles `.isHidden` on click / back / tab switch — same visibility-toggle
+  pattern as the existing Sessions/Files/Git tabs (no NSViewController
+  containment / navigation stack).
+
+**UX model (current — to be replaced):** single-click a file *replaces* the
+file tree view in the sidebar; a back arrow restores the tree. This was the
+fastest integration given the sidebar's existing "swap visibility" pattern.
+
+**Next planned change (per user 2026-06-07):** replace the in-place
+replacement model with **browser-style tabs** — open files in tabs rather than
+swapping out the tree. This is a UX redesign on top of the same
+`FileViewerViewController`; expect to add a tab strip/host above or beside the
+viewer and rework how `onFilePreview` routes (open-in-new-tab vs. reuse).
+
+**Deferred (still in original plan scope):**
+- Track 1 syntax highlighting (TreeSitter grammars — Swift/Python/TS/JS/JSON/YAML/MD/Rust/Go)
+- Line numbers gutter
+- Track 2 (Quick Look for images/PDFs via `QLPreviewView`)
+- Track 3 (LSP integration)
+
+See also `agent-memory/plans/file-viewer-integration.md` for a broader
+Quick-Look + Monaco/LSP design sketch (separate, more ambitious proposal —
+not what was implemented here).
 
 ---
 
