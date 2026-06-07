@@ -1132,6 +1132,14 @@ final class HarnessSidebarPanelViewController: NSViewController {
         let row = sessionTable.selectedRow
         guard let session = sessionRow(at: row), let activeWorkspaceID else { return }
         SessionCoordinator.shared.selectSession(workspaceID: activeWorkspaceID, sessionID: session.id)
+        // Force file tree + git panel refresh even if daemon thinks session was already active.
+        // This covers the case where snapshotChanged arrived asynchronously before the click.
+        if let cwd = session.activeTab?.cwd ?? session.tabs.first?.cwd {
+            fileTreeView.updateRoot(path: cwd, sessionID: session.id)
+            gitPanelView.updateRoot(path: cwd, force: true)
+            lastFileTreeSessionID = session.id
+            lastFileTreeGitBranch = nil
+        }
     }
 
     private func confirmCloseSession(_ session: SessionGroup) {
