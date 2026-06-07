@@ -230,6 +230,10 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// Map bold + palette colors 0–7 to their bright variants 8–15 (classic terminal
     /// behavior, Ghostty `bold-is-bright`). Off keeps the theme's exact colors for bold text.
     public var boldIsBright: Bool
+    /// Start a detected language server when a code preview opens.
+    public var lspAutoStart: Bool
+    /// Custom language-server executable overrides keyed by language id (`swift`, `python`, etc.).
+    public var lspServers: [String: String]
 
     /// Whether the *umbrella* Harness controls are on (prefix or status line). Kept for onboarding
     /// copy and tests; the prefix and status line each resolve independently via the effective
@@ -327,7 +331,9 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         pasteProtection: Bool = true,
         commandFinishedNotifications: Bool = false,
         commandFinishedThresholdSeconds: Int = 10,
-        boldIsBright: Bool = true
+        boldIsBright: Bool = true,
+        lspAutoStart: Bool = false,
+        lspServers: [String: String] = [:]
     ) {
         self.fontSize = fontSize
         self.fontFamily = fontFamily
@@ -390,6 +396,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.commandFinishedNotifications = commandFinishedNotifications
         self.commandFinishedThresholdSeconds = max(0, commandFinishedThresholdSeconds)
         self.boldIsBright = boldIsBright
+        self.lspAutoStart = lspAutoStart
+        self.lspServers = lspServers
     }
 
     /// Ensure the palette always has exactly 16 slots so index access is safe even if a
@@ -545,6 +553,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         commandFinishedThresholdSeconds =
             try container.decodeIfPresent(Int.self, forKey: .commandFinishedThresholdSeconds) ?? fallback.commandFinishedThresholdSeconds
         boldIsBright = try container.decodeIfPresent(Bool.self, forKey: .boldIsBright) ?? fallback.boldIsBright
+        lspAutoStart = try container.decodeIfPresent(Bool.self, forKey: .lspAutoStart) ?? fallback.lspAutoStart
+        lspServers = try container.decodeIfPresent([String: String].self, forKey: .lspServers) ?? fallback.lspServers
     }
 
     public static func load() -> HarnessSettings {

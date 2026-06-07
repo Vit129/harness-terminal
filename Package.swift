@@ -69,6 +69,8 @@ let platformTargets: [Target] = [
             "HarnessCore",
             "HarnessTerminalKit",
             "HarnessTheme",
+            "HarnessLSP",
+            "HarnessSyntaxResources",
             "HarnessOnboarding",
             .product(name: "Sparkle", package: "Sparkle"),
         ],
@@ -142,6 +144,8 @@ let package = Package(
         .library(name: "HarnessCopyMode", targets: ["HarnessCopyMode"]),
         // Native theme catalog + the shareable `.harnesstheme` document format. Pure Swift.
         .library(name: "HarnessTheme", targets: ["HarnessTheme"]),
+        .library(name: "HarnessLSP", targets: ["HarnessLSP"]),
+        .library(name: "HarnessSyntaxResources", targets: ["HarnessSyntaxResources"]),
         // C portability shim exposed as a product so the generated Xcode project can import the
         // same first-party module that SwiftPM targets use internally.
         .library(name: "CHarnessSys", targets: ["CHarnessSys"]),
@@ -179,6 +183,16 @@ let package = Package(
             // themes.json stays as the editable source of truth but is excluded from the build —
             // regenerate the embed with `EXPORT_THEMES=1 swift test --filter ThemeCatalogEmbedTests`.
             exclude: ["Resources/themes.json"]
+        ),
+        .target(
+            name: "HarnessLSP",
+            dependencies: ["HarnessCore"],
+            path: "Packages/HarnessLSP/Sources/HarnessLSP"
+        ),
+        .target(
+            name: "HarnessSyntaxResources",
+            path: "Packages/HarnessSyntaxResources",
+            resources: [.copy("Resources/TreeSitterGrammars")]
         ),
         // Tiny C shim wrapping the variadic `ioctl` (unavailable to Swift on Linux) into
         // non-variadic terminal helpers used by the PTY layer and the CLI attach client.
