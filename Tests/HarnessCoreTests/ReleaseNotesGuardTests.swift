@@ -58,6 +58,16 @@ final class ReleaseNotesGuardTests: XCTestCase {
                 // No markdown survives generation — the banner renders text verbatim.
                 XCTAssertFalse(item.contains("**"), "markdown leaked into: \(item)")
                 XCTAssertFalse(item.contains("`"), "markdown leaked into: \(item)")
+                // The notes are injected verbatim into a live PTY, so a stray ESC/BEL/other
+                // control character would emit an escape sequence (title change, color, …) into
+                // the user's terminal. Fail at generation time instead — printable scalars only
+                // (tab allowed); the generator never emits multi-line items.
+                for scalar in item.unicodeScalars {
+                    XCTAssertTrue(
+                        scalar.value >= 0x20 || scalar.value == 0x09,
+                        "control character U+\(String(format: "%04X", scalar.value)) in: \(item)"
+                    )
+                }
             }
         }
     }

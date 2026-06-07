@@ -121,9 +121,11 @@ public indirect enum Command: Codable, Sendable, Equatable {
     case setHook(event: String, source: String, condition: String?) // set-hook <event> "<cmd>"
     case showHooks(event: String?)                 // show-hooks [<event>]
     case unbindHook(id: UUID)                      // unbind-hook <id>
-    /// `find-window [-N|-C|-T] <pattern>` — fnmatch against window name/title (and pane
-    /// content with `-C`), then focus the match. Default matches name + title, like tmux.
-    case findWindow(pattern: String, matchName: Bool, matchContent: Bool, matchTitle: Bool)
+    /// `find-window [-N|-C|-T] [-t <session>] <pattern>` — fnmatch against window name/title
+    /// (and pane content with `-C`), then focus the match. Default matches name + title, like
+    /// tmux. `-t` scopes the search to one session; a `-t` naming a missing session matches
+    /// nothing (fails loudly) rather than silently searching every session.
+    case findWindow(pattern: String, matchName: Bool, matchContent: Bool, matchTitle: Bool, target: String?)
     /// `refresh-client [-S]`: re-pull options/snapshot and repaint. The GUI re-syncs;
     /// the compositor re-reads options, re-solves, and rewrites the frame.
     case refreshClient
@@ -250,8 +252,8 @@ extension Command {
         case let .setHook(event, source, _): return "set-hook \(event) '\(source)'"
         case let .showHooks(event): return "show-hooks\(event.map { " \($0)" } ?? "")"
         case let .unbindHook(id): return "unbind-hook \(id.uuidString)"
-        case let .findWindow(pattern, _, content, _):
-            return "find-window\(content ? " -C" : "") \(pattern)"
+        case let .findWindow(pattern, _, content, _, target):
+            return "find-window\(content ? " -C" : "")\(target.map { " -t \($0)" } ?? "") \(pattern)"
         case .refreshClient: return "refresh-client"
         case let .respawnWindow(keep): return keep ? "respawn-window" : "respawn-window -k"
         case .showMessages: return "show-messages"

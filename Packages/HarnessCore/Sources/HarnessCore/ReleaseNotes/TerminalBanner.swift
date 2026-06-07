@@ -204,7 +204,7 @@ public enum TerminalBanner {
             }
             var cut = ""
             for scalar in run.text.unicodeScalars {
-                let w = scalarWidth(scalar)
+                let w = DisplayWidth.width(of: scalar)
                 if w > budget { break }
                 cut.unicodeScalars.append(scalar)
                 budget -= w
@@ -222,30 +222,9 @@ public enum TerminalBanner {
 
     // MARK: - Display width
 
-    /// Local conservative width table — banner content is near-ASCII, but changelog
-    /// items can carry CJK or emoji and the box math must not drift. (The engine's
-    /// full generated table lives behind the package boundary; this minimal copy
-    /// covers the ranges that matter for truncation/padding.)
+    /// Banner box math is display-column aware (changelog items can carry CJK or emoji).
+    /// Shares the one core width table with status-format truncation — see `DisplayWidth`.
     static func displayWidth(_ text: String) -> Int {
-        text.unicodeScalars.reduce(0) { $0 + scalarWidth($1) }
-    }
-
-    private static func scalarWidth(_ scalar: Unicode.Scalar) -> Int {
-        switch scalar.value {
-        case 0x0300...0x036F, 0x20D0...0x20FF, 0xFE00...0xFE0F, 0x200B...0x200F:
-            return 0 // combining marks, variation selectors, zero-width controls
-        case 0x1100...0x115F, // Hangul jamo
-             0x2E80...0xA4CF, // CJK radicals … Yi
-             0xAC00...0xD7A3, // Hangul syllables
-             0xF900...0xFAFF, // CJK compatibility ideographs
-             0xFE30...0xFE4F, // CJK compatibility forms
-             0xFF00...0xFF60, // fullwidth forms
-             0xFFE0...0xFFE6,
-             0x1F300...0x1FAFF, // emoji blocks
-             0x20000...0x3FFFD: // CJK extensions
-            return 2
-        default:
-            return 1
-        }
+        DisplayWidth.columns(of: text)
     }
 }

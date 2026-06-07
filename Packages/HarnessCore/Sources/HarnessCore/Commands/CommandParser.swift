@@ -507,8 +507,9 @@ public enum CommandParser {
         case "show-messages":
             return .showMessages
         case "find-window":
-            // `-t` (a target window/session for the search) isn't supported, but its
-            // VALUE must never be mistaken for the search pattern.
+            // `-t <session>` scopes the search; its VALUE must never be mistaken for the
+            // search pattern (skipped from the positionals, captured separately).
+            let findTarget = stringValue(for: "-t", in: tokens)
             guard let pattern = positionalTokens(tokens, skippingValuesFor: ["-t"]).first else {
                 throw CommandParseError.missingArgument("find-window requires a pattern")
             }
@@ -522,7 +523,8 @@ public enum CommandParser {
                 pattern: pattern,
                 matchName: explicit ? name : true,
                 matchContent: content,
-                matchTitle: explicit ? title : true
+                matchTitle: explicit ? title : true,
+                target: findTarget
             )
 
         default:

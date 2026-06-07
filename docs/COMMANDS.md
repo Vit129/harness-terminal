@@ -235,7 +235,7 @@ Events: `after-new-tab`, `after-new-session`, `after-kill-tab`, `after-split-pan
 | `display-popup [-E <command>]` | Open a floating terminal pane. With `-E <command>`, run `<command>` in the popup and close it on exit. |
 | `display-menu [-T <title>] <name> <key> <command> …` | Show a native popup menu built from `name`/`key`/`command` triples. Key may be empty (`""`). |
 | `wait-for [-S \| -L \| -U] <channel>` | Named-channel synchronisation. No flag: block until the channel is signalled. `-S`: signal the channel (unblocking any waiters). `-L`: lock (exclusive, blocks if held). `-U`: unlock. Alias `wait`. |
-| `find-window [-N] [-T] [-C] <pattern>` | Focus the first window matching by name/title (default) or pane content (`-C`). No match fails loudly in every front-end. |
+| `find-window [-N] [-T] [-C] [-t <session>] <pattern>` | Focus the first window matching by name/title (default) or pane content (`-C`). `-t` scopes the search to one session. No match fails loudly in every front-end. |
 | `respawn-window [-k] [-t <target>]` (alias `respawnw`) | Respawn every pane in the window; `-k` clears scrollback. |
 | `refresh-client` (alias `refreshc`) | Re-pull options and snapshot for the calling client. |
 | `show-messages` | Print the recent `display-message` log (client- and hook-fired). |

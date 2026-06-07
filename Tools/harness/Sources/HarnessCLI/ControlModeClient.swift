@@ -139,12 +139,13 @@ enum ControlModeClient {
         case .showMessages:
             guard case let .text(log)? = try? client.request(.showMessages, timeout: 3) else { return nil }
             return log
-        case let .findWindow(pattern, name, content, title):
+        case let .findWindow(pattern, name, content, title, scopeTarget):
             // Only the -C form reaches here (non-content translated to selectTab upstream).
             _ = content
             guard case let .snapshot(snapshot)? = try? client.request(.getSnapshot, timeout: 3) else { return nil }
             let match = FindWindowMatcher.firstMatch(
-                snapshot, pattern: pattern, name: name, title: title
+                snapshot, pattern: pattern, name: name, title: title,
+                target: scopeTarget, current: snapshot.activeWorkspace?.activeSession
             ) { surfaceID in
                 guard case let .text(text)? = try? client.request(
                     .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 3) else { return nil }

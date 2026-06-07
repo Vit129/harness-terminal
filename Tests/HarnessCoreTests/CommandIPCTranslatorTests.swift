@@ -252,19 +252,33 @@ final class CommandIPCTranslatorTests: XCTestCase {
         let target = CommandTarget(snapshot: editor.snapshot)
 
         guard case let .requests(reqs) = CommandIPCTranslator.translate(
-            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true), target: target),
+            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true, target: nil), target: target),
             case let .selectTab(_, tabID) = reqs.first
         else { return XCTFail("expected selectTab") }
         XCTAssertEqual(tabID, tabs[1].id)
 
         guard case .unresolved = CommandIPCTranslator.translate(
-            .findWindow(pattern: "zzz-nope", matchName: true, matchContent: false, matchTitle: true), target: target)
+            .findWindow(pattern: "zzz-nope", matchName: true, matchContent: false, matchTitle: true, target: nil), target: target)
         else { return XCTFail("no match must be unresolved") }
 
         // -C hands off to the front-end (it owns the capture connection).
         guard case .clientLocal = CommandIPCTranslator.translate(
-            .findWindow(pattern: "x", matchName: false, matchContent: true, matchTitle: false), target: target)
+            .findWindow(pattern: "x", matchName: false, matchContent: true, matchTitle: false, target: nil), target: target)
         else { return XCTFail("-C must be clientLocal") }
+
+        // `-t` scopes to a session: a match only in another session is invisible, and a
+        // `-t` naming a missing session matches nothing (loud), never a silent global search.
+        let scopedTarget = CommandTarget(snapshot: editor.snapshot)
+        let mainSession = try XCTUnwrap(editor.snapshot.workspaces[0].sessions.first)
+        guard case let .requests(scopedReqs) = CommandIPCTranslator.translate(
+            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true,
+                        target: mainSession.id.uuidString), target: scopedTarget),
+            case .selectTab = scopedReqs.first
+        else { return XCTFail("in-session match must resolve") }
+        guard case .unresolved = CommandIPCTranslator.translate(
+            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true,
+                        target: UUID().uuidString), target: scopedTarget)
+        else { return XCTFail("a -t naming a missing session must be unresolved, not a global search") }
     }
 
     /// tmux `new-session -t <session>` means GROUP WITH the target, not create-at.

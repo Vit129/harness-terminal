@@ -1247,7 +1247,7 @@ private final class WindowSession: @unchecked Sendable {
             // Loud, like the GUI prompt and control mode: a typo'd `-t` (or a command
             // with no resolvable focus) must never read as a silent success.
             // find-window's no-match reads as a search result, like the -C path.
-            if case let .findWindow(pattern, _, _, _) = command {
+            if case let .findWindow(pattern, _, _, _, _) = command {
                 flashStatus("find-window: no matches for '\(pattern)'")
             } else {
                 flashStatus("no resolvable target for command")
@@ -1326,12 +1326,13 @@ private final class WindowSession: @unchecked Sendable {
             if case let .text(log)? = try? client.request(.showMessages, timeout: 1) {
                 flashStatus(log.isEmpty ? "no messages" : (log.split(separator: "\n").last.map(String.init) ?? log))
             }
-        case let .findWindow(pattern, name, content, title):
+        case let .findWindow(pattern, name, content, title, scopeTarget):
             // Only the -C form reaches here (non-content translated to selectTab upstream).
             _ = content
             let snapshot = latestSnapshot ?? SessionSnapshot()
             let match = FindWindowMatcher.firstMatch(
-                snapshot, pattern: pattern, name: name, title: title
+                snapshot, pattern: pattern, name: name, title: title,
+                target: scopeTarget, current: snapshot.activeWorkspace?.activeSession
             ) { surfaceID in
                 guard case let .text(text)? = try? client.request(
                     .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 1) else { return nil }

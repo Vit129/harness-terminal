@@ -279,6 +279,7 @@ grammar and `base-index` / `pane-base-index` option details.
 :find-window -N pattern      # search name only
 :find-window -T pattern      # search title only
 :find-window -C pattern      # search pane content (slower)
+:find-window -t work pattern # scope the search to one session
 ```
 
 Patterns are fnmatch-style globs. The first match in snapshot order is focused; if multiple matches

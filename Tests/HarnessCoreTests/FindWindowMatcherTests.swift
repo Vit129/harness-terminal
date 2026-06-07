@@ -52,6 +52,35 @@ final class FindWindowMatcherTests: XCTestCase {
         XCTAssertFalse(FindWindowMatcher.tabMatches(updated, pattern: "frontend", name: false, title: false))
     }
 
+    func testTargetScopesSearchToOneSessionOrMatchesNothing() throws {
+        var editor = SessionEditor()
+        let ws = try XCTUnwrap(editor.snapshot.activeWorkspace)
+        // Session A (seeded) and session B, each with a window titled "api-…".
+        let sessionA = editor.snapshot.workspaces[0].sessions[0].id
+        editor.updateTabTitle(
+            surfaceID: try XCTUnwrap(editor.snapshot.workspaces[0].sessions[0].tabs[0].rootPane.allSurfaceIDs().first),
+            title: "api-A")
+        let sessionB = try XCTUnwrap(editor.addSession(to: ws.id, name: "beta"))
+        let bTab = try XCTUnwrap(editor.snapshot.workspaces[0].sessions.first { $0.id == sessionB }?.tabs.first)
+        editor.updateTabTitle(surfaceID: try XCTUnwrap(bTab.rootPane.allSurfaceIDs().first), title: "api-B")
+        let snap = editor.snapshot
+        let aTab = try XCTUnwrap(snap.workspaces[0].sessions.first { $0.id == sessionA }?.tabs.first)
+
+        // Unscoped: both sessions' windows match.
+        XCTAssertEqual(
+            FindWindowMatcher.snapshotMatches(snap, pattern: "api", name: true, title: true).count, 2)
+        // Scoped to session A by id: only A's window, never B's.
+        XCTAssertEqual(
+            FindWindowMatcher.snapshotMatches(
+                snap, pattern: "api", name: true, title: true, target: sessionA.uuidString).map(\.tabID),
+            [aTab.id])
+        // Scoped to a session that doesn't exist: nothing — the caller fails loudly instead of
+        // silently widening back to a global search.
+        XCTAssertTrue(
+            FindWindowMatcher.snapshotMatches(
+                snap, pattern: "api", name: true, title: true, target: UUID().uuidString).isEmpty)
+    }
+
     func testFirstMatchFallsBackToContentCapture() {
         let snap = snapshot(titles: ["frontend", "backend"])
         let tabs = snap.workspaces[0].sessions.flatMap(\.tabs)

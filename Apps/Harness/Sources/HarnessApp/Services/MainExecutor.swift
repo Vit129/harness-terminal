@@ -210,12 +210,13 @@ final class MainExecutor: CommandExecutor {
             if case let .text(log)? = coordinator.requestDaemon(.showMessages) {
                 DisplayMessage.show(log.isEmpty ? "no messages" : log)
             }
-        case let .findWindow(pattern, name, content, title):
+        case let .findWindow(pattern, name, content, title, scopeTarget):
             // Non-content searches translate to a selectTab request; -C needs live
             // captures, done inline (re-dispatching the clientLocal result would loop).
             guard content else { return try runViaTranslator(command, coordinator: coordinator) }
             let match = FindWindowMatcher.firstMatch(
-                coordinator.snapshot, pattern: pattern, name: name, title: title
+                coordinator.snapshot, pattern: pattern, name: name, title: title,
+                target: scopeTarget, current: coordinator.snapshot.activeWorkspace?.activeSession
             ) { surfaceID in
                 guard case let .text(text)? = coordinator.requestDaemon(
                     .capturePane(surfaceID: surfaceID, includeScrollback: false)) else { return nil }
@@ -342,7 +343,7 @@ final class MainExecutor: CommandExecutor {
         case .unresolved:
             // find-window's no-match is a search result, not a focus problem — say so
             // (matches the -C path and the compositor/control-mode wording).
-            if case let .findWindow(pattern, _, _, _) = command {
+            if case let .findWindow(pattern, _, _, _, _) = command {
                 DisplayMessage.show("find-window: no matches for '\(pattern)'")
                 return
             }

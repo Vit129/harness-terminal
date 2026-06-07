@@ -34,7 +34,7 @@ the single honest ledger. Updated last for the 2026-06 parity close-out series
 | `default-terminal` | Aliases the `terminal-identity` option | TERM is pinned (`xterm-256color`); identity (TERM_PROGRAM/XTVERSION) is the meaningful adjustable |
 | `set-titles` | Applies to the **outer** terminal of attach clients (OSC 2) | The GUI owns native window titles |
 | `find-window` multi-match | Focuses the first match in snapshot order | tmux opens a picker; a filtered chooser may come later |
-| `find-window` default scope | Bare default searches window name + title; pane content needs an explicit `-C` (tmux's bare default is the full `-CNT`); a `-t` search target is not supported | Content search captures every pane — opt-in keeps the common name search snapshot-cheap |
+| `find-window` default scope | Bare default searches window name + title; pane content needs an explicit `-C` (tmux's bare default is the full `-CNT`); `-t <session>` scopes the search to one session (a `-t` naming a missing session matches nothing, never a silent global search) | Content search captures every pane — opt-in keeps the common name search snapshot-cheap |
 | `window-layout-changed` hook | Fires on explicit layout verbs (select/next/previous-layout, rotate); splits/kills/resizes fire their own `after-*` events instead | One event per user intent — tmux fires it for every geometry change |
 | `respawn-window` / `respawn-pane` `-k` | `-k` clears scrollback history; panes respawn regardless of running state | tmux's `-k` kills a still-running command (Harness respawn always replaces the process) |
 | `refresh-client` | Re-pulls options + snapshot; tmux's size/flag arguments are ignored | Client geometry is vote-driven (see `aggressive-resize`) |

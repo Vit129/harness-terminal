@@ -40,6 +40,18 @@ final class FormatStringTests: XCTestCase {
         XCTAssertEqual(result, "/Use")
     }
 
+    func testTruncationIsDisplayWidthAware() {
+        // CJK glyphs are two cells each, so `=4` fits two of them, not four — a character-count
+        // truncation would emit four glyphs (eight columns) and overflow the status bar. Cutting
+        // on grapheme boundaries means we never split a wide glyph to half-fill the last column.
+        var wide = context()
+        wide.paneTitle = "日本語入力"
+        XCTAssertEqual(FormatString.evaluate("#{=4:pane_title}", context: wide), "日本")
+        XCTAssertEqual(FormatString.evaluate("#{=3:pane_title}", context: wide), "日")
+        // A width that lands exactly on a wide-glyph boundary keeps the whole run.
+        XCTAssertEqual(FormatString.evaluate("#{=10:pane_title}", context: wide), "日本語入力")
+    }
+
     func testTruncationDegradesInsteadOfTrapping() {
         // A negative width must not trap `String.prefix(_:)`; it clamps to 0 (empty), and a
         // non-numeric width falls through to the unknown-token path (also empty). A status
@@ -263,6 +275,19 @@ final class FormatStringExtendedVariableTests: XCTestCase {
             FormatString.evaluate("#{window_id}", context: context),
             "@BBBBBBBB-0000-0000-0000-000000000000"
         )
+        XCTAssertEqual(FormatString.evaluate("#{pane_id}", context: context), "%pane-1")
+    }
+
+    /// The whole point of the `$`/`@`/`%` prefixes is that a displayed id pastes straight back
+    /// into a `-t` target. Pane ids are the easiest to regress (a bare uuid is mis-parsed as a
+    /// session name), so pin the full render → parse → resolve round-trip.
+    func testPaneIdRoundTripsIntoTargetGrammar() {
+        let paneUUID = UUID()
+        var context = extendedContext()
+        context.paneID = paneUUID.uuidString
+        let rendered = FormatString.evaluate("#{pane_id}", context: context)
+        XCTAssertEqual(rendered, "%" + paneUUID.uuidString)
+        XCTAssertEqual(TargetSpec.parse(rendered).pane, .byID(paneUUID))
     }
 
     /// Alert flags split out of `#{window_flags}` as 0/1 vars ("Z#!" = zoomed+activity+bell).
