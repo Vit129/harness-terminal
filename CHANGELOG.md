@@ -6,6 +6,59 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [Unreleased]
+
+The tmux-parity close-out: every remaining tracked gap is either shipped, adapted with a
+documented rationale, or explicitly rejected in [docs/TMUX_PARITY.md](docs/TMUX_PARITY.md) —
+Harness now carries its own complete tmux at the capability level. Plus the first-run /
+what's-new terminal banner. Each piece was review-hardened pre-merge (every Bugbot finding
+adversarially verified, 39 additional findings fixed, all pinned by tests).
+
+### Added
+- **First-run welcome tour and post-update "what's new" banner.** A one-shot MOTD in the
+  first fresh terminal: a quick tour on a clean install, the release highlights after an
+  update. Daemon-injected like real shell output, never repeated (durable ack with retry),
+  suppressible via the `update-banner` option.
+- **~25 new `#{…}` format variables** — `pane_pid`, `pane_current_command`, `pane_width/height`,
+  `pane_dead(+_status)`, `history_bytes`, `session_id`, `window_id`, `session_windows`,
+  `window_panes`, `window_active`, `window_flags`, `session_attached`, `session_group`,
+  `client_width/height/tty/termname`, `host(_short)`, `pid`, … — with tmux's `$`/`@`/`%`
+  ID prefixes so displayed IDs round-trip into `-t` targets.
+- **Full `-t` target grammar for `select-pane` / `swap-pane`**, plus `swap-pane -s <src>`
+  (swap two arbitrary panes). Strict resolution everywhere: a `-t`/`-s` that names a missing
+  session/window/pane fails loudly in every front-end — `kill-pane -t bogus` can no longer
+  silently kill the focused pane.
+- **Bindable config/buffer/hook verbs** — `set`/`setw`/`show`/`setenv`/`showenv`/`setb`/
+  `pasteb`/`deleteb`/`lsb`/`showb`/`set-hook [--if]`/`show-hooks`/`unbind-hook` work from
+  `bind-key`, the `:` prompt, hooks, and `source-file`, so a `.tmux.conf`'s config lines
+  migrate unchanged.
+- **`find-window`** (name/title by default, `-C` pane-content) with loud no-match in every
+  front-end; tmux's `copy-mode-vi` table name accepted everywhere a table is typed.
+- **Session/window lifecycle hook events** — `session-created/renamed/closed`,
+  `window-renamed/linked/unlinked/layout-changed` — with subject-true contexts (a
+  `session-closed` hook formats the closed session, not the survivor), plus `set-titles(+string)`,
+  `detach-on-destroy`, and `display-time` options.
+- **Grouped sessions** (`new-session -t <session>`, CLI `--group-with`): a shared window
+  list with per-member focus; window create/kill propagates group-wide, including after
+  members' layouts diverge.
+- **Server-admin verbs** — `kill-server` / `start-server` adapted to launchd supervision
+  (PID-identity-checked, remote-`--host` safe), `respawn-window`, `refresh-client`,
+  `show-messages` (includes hook-fired messages).
+- **`docs/TMUX_PARITY.md`** — the honest capability ledger: at-parity / adapted / rejected /
+  deferred, with the no-silent-misroute invariant it protects.
+
+### Fixed
+- `synchronize-panes` is one state across the GUI, the SSH compositor, and `setw` — toggles
+  write the per-tab option through, so a snapshot push can't revert a local toggle.
+- GUI, compositor, and control mode surface daemon validation errors (unknown hook event,
+  bad option scope) instead of reading as success; control mode emits `%error` for them.
+- CLI `setw` writes the tab scope like every other front-end (it silently wrote a global);
+  scoped CLI sets resolve the calling pane via `$HARNESS_SURFACE`.
+- Option/env/buffer values that begin with `-` are no longer swallowed as flags (getopt-style
+  parsing with `--` support); a bare `set-environment KEY` errors instead of persisting `""`.
+- Detaching `attach-window` restores the outer terminal title (`set-titles`); destroying the
+  attached session re-pins the surviving session's workspace.
+
 ## [1.7.1] - 2026-06-06
 
 The post-release audit of 1.7.0: a second exhaustive multi-agent pass (56 hunt dimensions across
