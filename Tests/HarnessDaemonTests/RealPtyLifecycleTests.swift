@@ -10,7 +10,7 @@ final class RealPtyLifecycleTests: XCTestCase {
     }
 
     private func makePty() throws -> RealPty {
-        try RealPty(
+        let pty = try RealPty(
             id: UUID().uuidString,
             cwd: NSTemporaryDirectory(),
             shell: "/bin/sh",
@@ -18,6 +18,8 @@ final class RealPtyLifecycleTests: XCTestCase {
             cols: 80,
             scrollbackBytes: 64 * 1024
         )
+        pty.start() // reading/exit-watching is now owner-initiated (deferred from init)
+        return pty
     }
 
     func testOutputReachesSubscriberAndScrollback() throws {

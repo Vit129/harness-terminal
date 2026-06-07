@@ -30,8 +30,21 @@ final class ScrollbackFile: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.robert.harness.scrollback-file")
     private let debounceInterval: TimeInterval = 0.5
+    /// Hard cap on the in-RAM `pending` buffer. A gapless output flood (`yes`, `cat bigfile`)
+    /// re-arms the debounce faster than the 0.5s timer can ever fire, so without this `pending`
+    /// would grow in proportion to total bytes produced — gigabytes for a sustained stream —
+    /// and risk OOM-ing the session-authority daemon. Crossing this forces an immediate flush
+    /// instead of another re-arm, bounding RAM to ~this size per surface regardless of duration.
+    private let maxPendingBytes = 256 * 1024
+    /// Longest the oldest buffered byte may wait before a forced flush, so a continuous trickle
+    /// that never trips the size cap still reaches disk on a bounded schedule rather than being
+    /// pushed indefinitely by re-arming.
+    private let maxFlushDelay: TimeInterval = 2.0
     private var pending = Data()
     private var pendingFlush: DispatchWorkItem?
+    /// Anchored at the first byte of the current batch; the debounce deadline is never pushed
+    /// past this, giving the re-arming timer a hard ceiling (the `maxFlushDelay` max-wait).
+    private var flushDeadline: DispatchTime?
     /// Set once the surface is gone for good; stops a late debounced flush from resurrecting a file
     /// we just deleted.
     private var closed = false
@@ -72,15 +85,30 @@ final class ScrollbackFile: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, !self.closed else { return }
             self.pending.append(data)
-            self.scheduleFlush()
+            // Bound RAM under a sustained flood: once buffered output crosses the cap, flush
+            // synchronously rather than re-arming the debounce (which a gapless stream would
+            // otherwise never let fire). Normal bursts stay batched off the hot path.
+            if self.pending.count >= self.maxPendingBytes {
+                self.pendingFlush?.cancel()
+                self.pendingFlush = nil
+                self.flushPending()
+            } else {
+                self.scheduleFlush()
+            }
         }
     }
 
     private func scheduleFlush() {
         pendingFlush?.cancel()
+        // Anchor the max-wait ceiling at the first byte of this batch, then never schedule
+        // later than it — so a continuous trickle that keeps re-arming still flushes within
+        // `maxFlushDelay` instead of being deferred forever.
+        let ceiling = flushDeadline ?? (.now() + maxFlushDelay)
+        flushDeadline = ceiling
+        let deadline = min(DispatchTime.now() + debounceInterval, ceiling)
         let work = DispatchWorkItem { [weak self] in self?.flushPending() }
         pendingFlush = work
-        queue.asyncAfter(deadline: .now() + debounceInterval, execute: work)
+        queue.asyncAfter(deadline: deadline, execute: work)
     }
 
     /// Synchronously persist any buffered output. Called on graceful shutdown so the last
@@ -95,6 +123,7 @@ final class ScrollbackFile: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.pendingFlush?.cancel()
+            self.flushDeadline = nil
             self.pending.removeAll(keepingCapacity: true)
             try? FileManager.default.removeItem(at: self.url)
             self.fileBytes = 0
@@ -116,6 +145,9 @@ final class ScrollbackFile: @unchecked Sendable {
     // MARK: - queue-confined
 
     private func flushPending() {
+        // The batch is being drained (or there's nothing to drain) — re-anchor the max-wait
+        // window so the next byte starts a fresh ceiling.
+        flushDeadline = nil
         guard !closed, !pending.isEmpty else { return }
         let chunk = pending
         pending.removeAll(keepingCapacity: true)

@@ -45,7 +45,51 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// Cheap per-surface output state, updated on the PTY read thread and drained by
     /// `processMonitors` on a timer. Kept off `lock` (its own tiny lock) so the hot output
     /// path never contends with layout mutations.
-    private struct SurfaceMonitor { var sawOutput = false; var sawBell = false; var lastOutput = Date() }
+    private struct SurfaceMonitor {
+        var sawOutput = false
+        var sawBell = false
+        var lastOutput = Date()
+        /// OSC-aware bell-scan state, carried across PTY chunks (a sequence can split over reads).
+        var bellScan: SurfaceRegistry.BellScanState = .normal
+    }
+
+    /// State for the lightweight bell scan in `noteSurfaceOutput`. A BEL (0x07) is a real terminal
+    /// bell only in `normal`; a BEL terminating or inside a string sequence (OSC/DCS/APC/PM/SOS) is
+    /// not — most importantly the OSC 133 prompt marks shell integration emits on every prompt.
+    enum BellScanState: Equatable { case normal, esc, string, stringEsc }
+
+    /// Scan `data` for real control-BELs, threading `state` across calls so a sequence split across
+    /// chunks is handled. Returns true if a genuine bell (not a string-sequence terminator) was
+    /// seen. Static + pure so it is unit-testable.
+    static func scanForBell(_ data: Data, state: inout BellScanState) -> Bool {
+        var sawBell = false
+        for byte in data {
+            switch state {
+            case .normal:
+                if byte == 0x1B { state = .esc }
+                else if byte == 0x07 { sawBell = true }
+            case .esc:
+                switch byte {
+                case 0x5D, 0x50, 0x5F, 0x5E, 0x58: state = .string   // OSC ] / DCS P / APC _ / PM ^ / SOS X
+                case 0x1B: state = .esc                              // ESC restarts escape parsing
+                case 0x07: sawBell = true; state = .normal           // BEL after a non-string ESC: real
+                default: state = .normal                             // CSI, ST, other escapes
+                }
+            case .string:
+                // A BEL terminates an OSC (xterm) and is data inside the others — never a bell.
+                // CAN/SUB abort a string sequence (as the VT parser does), so an unterminated string
+                // can't pin the scanner and swallow every later bell.
+                if byte == 0x07 { state = .normal }
+                else if byte == 0x18 || byte == 0x1A { state = .normal } // CAN / SUB abort
+                else if byte == 0x1B { state = .stringEsc }
+            case .stringEsc:
+                if byte == 0x5C { state = .normal }                  // ST (ESC \) terminates the string
+                else if byte == 0x1B { state = .stringEsc }          // another ESC; keep waiting
+                else { state = .string }                             // ESC was data; stay in the string
+            }
+        }
+        return sawBell
+    }
     private var monitors: [String: SurfaceMonitor] = [:]
     private let monitorLock = NSLock()
     private var monitorTimer: DispatchSourceTimer?
@@ -117,12 +161,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// Record output for a surface — runs on the PTY read thread, so it must stay cheap
     /// (no `lock`, no snapshot walk): just flag output / bell and stamp the time.
     private func noteSurfaceOutput(surfaceKey: String, data: Data) {
-        let bell = data.contains(0x07)
         monitorLock.lock()
         var m = monitors[surfaceKey] ?? SurfaceMonitor()
         m.sawOutput = true
         m.lastOutput = Date()
-        if bell { m.sawBell = true }
+        // Parser-aware bell: a raw `data.contains(0x07)` mistakes the OSC-terminator BEL that shell
+        // integration emits on every prompt (OSC 133) for a real terminal bell. The scan threads
+        // its state through `m.bellScan` so a sequence spanning chunks is still handled correctly.
+        if Self.scanForBell(data, state: &m.bellScan) { m.sawBell = true }
         monitors[surfaceKey] = m
         monitorLock.unlock()
     }
@@ -711,7 +757,9 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // registry; the stubs here exist only to keep the switch exhaustive.
             return .error("Client lifecycle requests must be handled by DaemonServer")
         case let .setBuffer(name, data):
-            let final = bufferStore.set(data, name: name)
+            guard let final = bufferStore.set(data, name: name) else {
+                return .error("set-buffer: payload exceeds the paste-buffer size limit")
+            }
             return .text(final)
         case let .getBuffer(name):
             let buffer: PasteBufferStore.Buffer?
@@ -823,19 +871,47 @@ public final class SurfaceRegistry: @unchecked Sendable {
             commit()
             return .paneID(newPane)
         case let .respawnPane(surfaceID, keepHistory):
-            guard let session = sessions[surfaceID] else { return .error("Surface not found") }
             // Last-known tab cwd as the fallback: after a natural shell exit there is no
             // live PID left to probe, and respawning into $HOME instead of where the user
             // was working would lose their place.
+            let surfaceTab = editor.tab(forSurfaceKey: surfaceID)
             var fallbackCwd: String?
-            if let match = editor.tab(forSurfaceKey: surfaceID) {
+            if let match = surfaceTab {
                 fallbackCwd = editor.snapshot.workspaces
                     .first(where: { $0.id == match.workspaceID })?
                     .sessions.flatMap { $0.tabs }
                     .first(where: { $0.id == match.tabID })?
                     .cwd
             }
-            session.respawn(clearHistory: !keepHistory, fallbackCwd: fallbackCwd)
+            if let session = sessions[surfaceID] {
+                session.respawn(clearHistory: !keepHistory, fallbackCwd: fallbackCwd)
+                return .ok
+            }
+            // A naturally-exited `remain-on-exit` pane keeps its dead leaf in the layout, but its
+            // RealPty was dropped from `sessions` on exit — so respawn-pane (whose entire purpose is
+            // reviving such a pane) must recreate the surface rather than fail "Surface not found".
+            // Only when the dead leaf still resolves; an unknown surface is a real error.
+            guard surfaceTab != nil else { return .error("Surface not found") }
+            let scrollbackURL = HarnessPaths.scrollbackFileURL(forSurfaceID: surfaceID)
+            var reviveScrollbackBytes: Int?
+            if keepHistory {
+                // Size the revived scrollback cap to at least the on-disk history (and the usual
+                // default floor) so reviving never TRIMS scrollback a normal reattach would keep:
+                // createOrEnsureSurface's nil default (1 MiB) would otherwise compact a larger
+                // persisted log on load. The live-respawn path above keeps the original cap; this
+                // is the dead-pane equivalent.
+                let onDisk = (try? FileManager.default.attributesOfItem(atPath: scrollbackURL.path)[.size]) as? Int ?? 0
+                reviveScrollbackBytes = onDisk > 0 ? max(onDisk, 1024 * 1024) : nil
+            } else {
+                // Honor `-k`: drop the persisted scrollback before the revived surface seeds its ring
+                // from disk, so it starts clean. The RealPty that normally owns this file is gone, so
+                // delete it directly; the default cap is fine on a now-empty history.
+                try? FileManager.default.removeItem(at: scrollbackURL)
+            }
+            guard createOrEnsureSurface(surfaceID: surfaceID, cwd: fallbackCwd, shell: nil,
+                                        rows: 24, cols: 80, scrollbackBytes: reviveScrollbackBytes) != nil else {
+                return .error("Could not respawn surface")
+            }
             return .ok
         case let .setOption(scopeRaw, target, key, raw):
             guard let scope = OptionStore.Scope(rawValue: scopeRaw) else {
@@ -1286,6 +1362,10 @@ public final class SurfaceRegistry: @unchecked Sendable {
             if let sid = UUID(uuidString: surfaceID), editor.setTabExitStatus(surfaceID: sid, status: nil) {
                 commit()
             }
+            // Begin reading/exit-watching only now that `onExit` is wired and the surface is in
+            // `sessions` — so a child that dies instantly (e.g. a bad shell) is reaped via
+            // `removeSurfaceIfCurrent` instead of firing into a nil handler and leaking.
+            session.start()
             return surfaceID
         } catch {
             fputs("HarnessDaemon surface launch failed for \(surfaceID): \(error)\n", harnessStderr)

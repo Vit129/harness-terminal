@@ -879,8 +879,10 @@ struct HarnessCLI {
         }
         var configuration = WindowAttachClient.Configuration()
         switch resolveDetachSequence(args) {
-        case .parsed(let seq): configuration.detachSequence = seq
-        case .absent: break  // flag absent — keep the default
+        case .parsed(let seq):
+            configuration.detachSequence = seq
+            configuration.detachSequenceExplicit = true  // user opted into a custom escape sequence
+        case .absent: break  // flag absent — keep the prefix-bound default detach
         case .invalid(let message): fputs(message, harnessStderr); return 64
         }
         return try WindowAttachClient.run(tab: selector, configuration: configuration)
@@ -1414,6 +1416,13 @@ struct HarnessCLI {
         // -g = global (default when no -s); -u = unset; -s targets a session.
         let global = args.contains("-g")
         let unset = args.contains("-u")
+        // A dangling `-s` (last token, no value) collapses to nil in flagValue, which would
+        // bypass requireSessionID and fall through to the GLOBAL environment — the exact
+        // secret-leak fail-open requireSessionID's own comment forbids. Reject it loudly.
+        if !global, flagIsDangling(args, flag: "-s") {
+            fputs("set-environment: -s requires a <session name|uuid>\n", harnessStderr)
+            exit(1)
+        }
         let sessionRaw = global ? nil : flagValue(args, flag: "-s")
         let sessionID = try sessionRaw.map { try requireSessionID($0, client: client, command: "set-environment") }
         // `positionalArgs` skips the subcommand at index 0 plus `-s <session>` (and lone
@@ -1428,6 +1437,12 @@ struct HarnessCLI {
     }
 
     static func handleShowEnvironment(_ args: [String], client: DaemonClient) throws {
+        // Same dangling-`-s` guard as set-environment: a truncated `-s` must not silently
+        // read the global environment instead of the intended session's.
+        if !args.contains("-g"), flagIsDangling(args, flag: "-s") {
+            fputs("show-environment: -s requires a <session name|uuid>\n", harnessStderr)
+            exit(1)
+        }
         let sessionRaw = args.contains("-g") ? nil : flagValue(args, flag: "-s")
         let sessionID = try sessionRaw.map { try requireSessionID($0, client: client, command: "show-environment") }
         let response = try checkedRequest(client, .showEnvironment(sessionID: sessionID))

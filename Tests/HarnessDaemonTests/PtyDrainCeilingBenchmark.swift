@@ -187,6 +187,7 @@ final class PtyDrainCeilingBenchmark: XCTestCase {
             scrollbackBytes: 2 * 1024 * 1024
         )
         defer { pty.close() }
+        pty.start() // reading/exit-watching is now owner-initiated (deferred from init)
 
         let counter = Counter(target: target)
         _ = pty.subscribe { data, _ in
@@ -239,6 +240,7 @@ final class PtyDrainCeilingBenchmark: XCTestCase {
             scrollbackBytes: 1 << 20
         )
         defer { pty.close() }
+        pty.start() // reading/exit-watching is now owner-initiated (deferred from init)
 
         let rtt = EchoRTT()
         _ = pty.subscribe { _, _ in

@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch // DispatchTime: a monotonic clock for command-duration timing (explicit for Linux)
 
 /// A headless terminal emulator: feed it PTY output bytes, query the screen via
 /// `readGrid()`. It owns the parser, the primary + alternate screens, terminal modes,
@@ -72,7 +73,10 @@ public final class TerminalEmulator: VTParserHandler {
     /// Last OSC-22 pointer shape (nil = terminal default). Surfaced for hosts that prefer polling.
     public private(set) var pointerShape: String?
     /// When the current command started running (OSC 133 `C`/`B`), for command-duration timing.
-    private var commandStartedAt: Date?
+    /// A MONOTONIC timestamp, not wall-clock `Date`: command duration is an elapsed interval, and a
+    /// wall-clock step (NTP/DST/manual change) between C and D would make it negative (suppressing a
+    /// long-command notification) or inflated (firing a spurious one).
+    private var commandStartedAt: DispatchTime?
 
     /// Active character set per designation slot (`ESC ( …` / `ESC ) …`). DEC special graphics
     /// turns letters into line-drawing glyphs; ASCII is the default. `glUsesG1` is toggled by
@@ -456,12 +460,14 @@ public final class TerminalEmulator: VTParserHandler {
             // (prompt-end/input start): duration must measure execution (C→D), not the time
             // the user spent typing at the prompt. B alone still covers integrations that
             // never emit C.
-            commandStartedAt = Date()
+            commandStartedAt = .now()
         case "D":
             let exitCode = parts.count >= 2 ? Int(parts[1]) : nil
             current.markCommandFinished(exit: exitCode)
             if let started = commandStartedAt {
-                onCommandFinished?(Date().timeIntervalSince(started), exitCode)
+                // Monotonic elapsed seconds — never negative or clock-skewed.
+                let elapsedNanos = DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds
+                onCommandFinished?(Double(elapsedNanos) / 1_000_000_000, exitCode)
                 commandStartedAt = nil
             }
         default: break

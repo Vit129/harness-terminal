@@ -1517,6 +1517,12 @@ public final class HarnessTerminalSurfaceView: NSView {
             return
         }
         guard cols != columns || newRows != rows else { return }
+        // A text selection can't survive a reflow — its anchors reference the OLD grid extents, so
+        // after a shrink the highlight renders at stale/out-of-grid coordinates and a copy yields
+        // blank/garbage rows. Clear it like the real-time path (`requestLiveResizeCommit`) does;
+        // this debounced/animated/legacy commit (and `testingResizeGrid`) skipped it. `clearSelection`
+        // no-ops when nothing is selected and avoids the `currentSelectionRegion` getter.
+        clearSelection()
         columns = cols
         rows = newRows
         invalidateRenderGeneration()              // bump generation; drop stale preview / plain-frame cache
@@ -1773,7 +1779,10 @@ public final class HarnessTerminalSurfaceView: NSView {
         let state = emulatorState
         let config = frameBuildConfiguration
         let requestedScrollOffset = scrollOffset
-        let selectionRegion = currentSelectionRegion
+        // Capture the RAW selection here (cheap, no emulator access) and resolve it on the emulator
+        // queue inside the build — see `resolveSelectionRegion`. Resolving on main would `emulatorSync`
+        // for a word selection and stall main behind the in-flight feed every build.
+        let rawSelection = currentRawSelection
         let preedit = markedText
         let blinkSetting = cursorBlinkEnabled
         let blinkVisible = cursorBlinkVisible
@@ -1858,6 +1867,12 @@ public final class HarnessTerminalSurfaceView: NSView {
                 let findHits = findIsActive
                     ? Self.viewportFindHighlights(findMatchesSnapshot, scrollOffset: requestedScrollOffset, historyCount: emulator.historyCount, rows: viewRows)
                     : []
+                // Resolve the selection HERE, on the emulator queue: a `.word` selection reads
+                // `wordColumnRange` directly (free) instead of stalling main via `emulatorSync`, and
+                // it resolves against the same emulator state this frame renders.
+                let selectionRegion = Self.resolveSelectionRegion(rawSelection, emulator: emulator,
+                                                                  scrollOffset: requestedScrollOffset,
+                                                                  columns: viewColumns)
                 let overlayFree = selectionRegion == nil && preedit.isEmpty && findHits.isEmpty
                 // The LIVE view (offset 0) always builds CLEAN: selection/find/preedit are
                 // re-shaded onto a copy after the reuse caches are updated (the cell-overlay
@@ -2422,6 +2437,62 @@ public final class HarnessTerminalSurfaceView: NSView {
     }
 
     // MARK: - Selection & copy
+
+    /// Raw selection inputs, captured on the main thread WITHOUT resolving the per-granularity
+    /// column expansion. The off-main render path resolves the region on the emulator queue (see
+    /// `resolveSelectionRegion`) so a `.word` selection never drives `currentSelectionRegion`'s
+    /// `emulatorSync` — which, off the queue, `queue.sync`s the MAIN thread behind an in-flight
+    /// output feed on every build while the word selection is held (the stall the off-main pipeline
+    /// exists to avoid). `Sendable` so the `@Sendable` build closure can capture it.
+    private struct RawSelection: Sendable {
+        let anchorRow: Int, anchorColumn: Int
+        let headRow: Int, headColumn: Int
+        let granularity: SelectionGranularity
+        let rectangular: Bool
+    }
+
+    private var currentRawSelection: RawSelection? {
+        guard let a = selectionAnchor, let h = selectionHead else { return nil }
+        return RawSelection(anchorRow: a.row, anchorColumn: a.column,
+                            headRow: h.row, headColumn: h.column,
+                            granularity: selectionGranularity, rectangular: selectionRectangular)
+    }
+
+    /// Resolve a raw selection into a render region. PURE — call it ON the emulator queue (inside
+    /// the build) so the `.word` expansion reads `wordColumnRange` directly instead of through a
+    /// main-stalling `emulatorSync`. Mirrors `currentSelectionRegion`'s expansion exactly.
+    private nonisolated static func resolveSelectionRegion(_ sel: RawSelection?, emulator: TerminalEmulator,
+                                                           scrollOffset: Int, columns: Int) -> SelectionRegion? {
+        guard let sel else { return nil }
+        if sel.rectangular {
+            return .block(BlockSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
+        }
+        if sel.granularity == .character {
+            return .linear(TerminalSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
+        }
+        func unitRange(row: Int, column: Int) -> ClosedRange<Int> {
+            switch sel.granularity {
+            case .character: return column ... column
+            case .line: return 0 ... max(0, columns - 1)
+            case .word:
+                let virtualLine = emulator.historyCount - scrollOffset + row
+                return emulator.wordColumnRange(line: virtualLine, column: column)
+            }
+        }
+        let lo: (row: Int, column: Int), hi: (row: Int, column: Int)
+        if (sel.anchorRow, sel.anchorColumn) <= (sel.headRow, sel.headColumn) {
+            lo = (sel.anchorRow, sel.anchorColumn); hi = (sel.headRow, sel.headColumn)
+        } else {
+            lo = (sel.headRow, sel.headColumn); hi = (sel.anchorRow, sel.anchorColumn)
+        }
+        let loRange = unitRange(row: lo.row, column: lo.column)
+        let hiRange = unitRange(row: hi.row, column: hi.column)
+        if lo.row == hi.row {
+            return .linear(TerminalSelection((lo.row, min(loRange.lowerBound, hiRange.lowerBound)),
+                                             (lo.row, max(loRange.upperBound, hiRange.upperBound))))
+        }
+        return .linear(TerminalSelection((lo.row, loRange.lowerBound), (hi.row, hiRange.upperBound)))
+    }
 
     /// The active selection region (nil when nothing is selected): rectangular for an Option-drag,
     /// else linear with the endpoints expanded by the current granularity (word / line).

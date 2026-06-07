@@ -394,6 +394,26 @@ final class CommandIPCTranslatorTests: XCTestCase {
         XCTAssertEqual(tabID, firstTab.id, "window 1 under base-index 1 is the first tab")
     }
 
+    func testMoveAndSwapWindowApplyBaseIndexOffset() throws {
+        var editor = SessionEditor()
+        let ws = try XCTUnwrap(editor.snapshot.activeWorkspace)
+        _ = try XCTUnwrap(editor.addTab(to: ws.id))
+        _ = try XCTUnwrap(editor.addTab(to: ws.id))
+        let target = CommandTarget(snapshot: editor.snapshot)
+
+        // move-window -t :3 under base-index 1 → array position 2 (was off-by-one: passed 3 raw).
+        guard case let .requests(moveReqs) = CommandIPCTranslator.translate(.moveWindow(toIndex: 3), target: target, baseIndex: 1),
+              case let .reorderTab(_, _, toIndex) = moveReqs.first
+        else { return XCTFail("expected reorderTab") }
+        XCTAssertEqual(toIndex, 2, "window 3 under base-index 1 is array position 2")
+
+        // swap-window -t :3 under base-index 1 → array position 2.
+        guard case let .requests(swapReqs) = CommandIPCTranslator.translate(.swapWindow(withIndex: 3), target: target, baseIndex: 1),
+              case let .swapTab(_, _, withIndex) = swapReqs.first
+        else { return XCTFail("expected swapTab") }
+        XCTAssertEqual(withIndex, 2, "window 3 under base-index 1 is array position 2")
+    }
+
     func testMovePaneResolvesToJoin() throws {
         let (target, _, _) = try makeTarget(splitOnce: true)
         let firstPane = try XCTUnwrap(target.paneOrder.first)

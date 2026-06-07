@@ -793,18 +793,39 @@ public struct SessionEditor: Sendable {
             }
         }
         guard let src = srcLeaf, let dst = dstLeaf else { return false }
+        // Swap in a SINGLE traversal that decides per leaf. Two sequential id-keyed
+        // replaceLeaf passes corrupt the tree: the first pass turns src's slot into a
+        // copy of dst (now carrying dst.id), so the second pass matches BOTH dst-id
+        // leaves and overwrites them, destroying one pane and duplicating the other.
         for workspaceIndex in snapshot.workspaces.indices {
             for sessionIndex in snapshot.workspaces[workspaceIndex].sessions.indices {
                 for tabIndex in snapshot.workspaces[workspaceIndex].sessions[sessionIndex].tabs.indices {
                     var tab = snapshot.workspaces[workspaceIndex].sessions[sessionIndex].tabs[tabIndex]
-                    replaceLeaf(in: &tab.rootPane, paneID: src.id, with: dst)
-                    replaceLeaf(in: &tab.rootPane, paneID: dst.id, with: src)
+                    swapLeaves(in: &tab.rootPane, srcID: src.id, src: src, dstID: dst.id, dst: dst)
                     snapshot.workspaces[workspaceIndex].sessions[sessionIndex].tabs[tabIndex] = tab
                 }
             }
         }
         bumpRevision()
         return true
+    }
+
+    /// One-pass leaf swap: each leaf is examined exactly once and reassigned at most
+    /// once, so src↔dst exchange correctly whether they live in the same tab or
+    /// different tabs. (Replacing by id in two passes does not — see `swapPanes`.)
+    private func swapLeaves(in node: inout PaneNode, srcID: PaneID, src: PaneLeaf, dstID: PaneID, dst: PaneLeaf) {
+        switch node {
+        case let .leaf(leaf):
+            if leaf.id == srcID {
+                node = .leaf(dst)
+            } else if leaf.id == dstID {
+                node = .leaf(src)
+            }
+        case .branch(let direction, let ratio, var first, var second):
+            swapLeaves(in: &first, srcID: srcID, src: src, dstID: dstID, dst: dst)
+            swapLeaves(in: &second, srcID: srcID, src: src, dstID: dstID, dst: dst)
+            node = .branch(direction: direction, ratio: ratio, first: first, second: second)
+        }
     }
 
     private func leaf(in node: PaneNode, paneID: PaneID) -> PaneLeaf? {

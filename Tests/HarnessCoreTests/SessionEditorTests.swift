@@ -91,6 +91,52 @@ final class SessionEditorTests: XCTestCase {
         XCTAssertNil(editor.paneLocation(forSurfaceKey: UUID().uuidString), "unknown surface → nil")
     }
 
+    func testSwapPanesExchangesLeavesWithoutCorruption() throws {
+        // Regression: two sequential id-keyed replaceLeaf passes used to destroy one
+        // pane and duplicate the other (the second pass matched both copies of dst.id).
+        var editor = SessionEditor()
+        let ws = try XCTUnwrap(editor.snapshot.activeWorkspace)
+        let tab = try XCTUnwrap(ws.activeTab)
+        let a = try XCTUnwrap(tab.rootPane.allPaneIDs().first)
+        let b = try XCTUnwrap(editor.splitPane(in: ws.id, tabID: tab.id, paneID: a, direction: .horizontal))
+        let surfA = try XCTUnwrap(editor.surfaceID(forPaneID: a))
+        let surfB = try XCTUnwrap(editor.surfaceID(forPaneID: b))
+
+        let before = try XCTUnwrap(editor.snapshot.activeWorkspace?.activeTab)
+        XCTAssertEqual(before.rootPane.allSurfaceIDs(), [surfA, surfB])
+
+        XCTAssertTrue(editor.swapPanes(a, b))
+
+        let after = try XCTUnwrap(editor.snapshot.activeWorkspace?.activeTab)
+        // Both panes survive — no pane destroyed, no id/surface duplicated.
+        XCTAssertEqual(after.rootPane.allPaneIDs().count, 2, "no pane id dropped or duplicated")
+        XCTAssertEqual(Set(after.rootPane.allPaneIDs()), [a, b])
+        XCTAssertEqual(after.rootPane.allSurfaceIDs().count, 2, "no surface id dropped or duplicated")
+        // Positions exchanged: first leaf now carries B's surface, second carries A's.
+        XCTAssertEqual(after.rootPane.allSurfaceIDs(), [surfB, surfA])
+    }
+
+    func testSwapPanesAcrossTabsExchangesWithoutLoss() throws {
+        var editor = SessionEditor()
+        let ws = try XCTUnwrap(editor.snapshot.activeWorkspace)
+        let tab1 = try XCTUnwrap(ws.activeTab)
+        let a = try XCTUnwrap(tab1.rootPane.allPaneIDs().first)
+        let surfA = try XCTUnwrap(editor.surfaceID(forPaneID: a))
+        let tab2ID = try XCTUnwrap(editor.addTab(to: ws.id, cwd: "/tmp"))
+        let tab2 = try XCTUnwrap(editor.snapshot.activeWorkspace?.sessions.flatMap(\.tabs).first { $0.id == tab2ID })
+        let b = try XCTUnwrap(tab2.rootPane.allPaneIDs().first)
+        let surfB = try XCTUnwrap(editor.surfaceID(forPaneID: b))
+
+        XCTAssertTrue(editor.swapPanes(a, b))
+
+        let tabs = try XCTUnwrap(editor.snapshot.activeWorkspace?.sessions.flatMap(\.tabs))
+        let t1 = try XCTUnwrap(tabs.first { $0.id == tab1.id })
+        let t2 = try XCTUnwrap(tabs.first { $0.id == tab2ID })
+        // A's surface moved to tab2, B's surface moved to tab1 — neither lost or duplicated.
+        XCTAssertEqual(t1.rootPane.allSurfaceIDs(), [surfB])
+        XCTAssertEqual(t2.rootPane.allSurfaceIDs(), [surfA])
+    }
+
     /// v2 layout.json had no `activePaneID`/`lastActivePaneID`; decoding must backfill
     /// the focus to the first leaf so older files load with a valid active pane.
     func testTabDecodeBackfillsActivePaneFromV2() throws {
