@@ -98,6 +98,12 @@ final class FileViewerViewController: NSViewController {
 
     private func setupPreviewViews() {
         syntaxView.translatesAutoresizingMaskIntoConstraints = false
+        syntaxView.onSave = { [weak self] text in
+            guard let path = self?.pathLabel.toolTip, !path.isEmpty else { return }
+            let expanded = (path as NSString).expandingTildeInPath
+            try? text.write(toFile: expanded, atomically: true, encoding: .utf8)
+            DisplayMessage.show("Saved \((path as NSString).lastPathComponent)")
+        }
         // LSP hooks — disabled (see TODO above)
         // syntaxView.onHover = { [weak self] position in await self?.lspSession.hover(position: position) }
         // syntaxView.onDefinition = { [weak self] position in await self?.lspSession.definition(position: position) }

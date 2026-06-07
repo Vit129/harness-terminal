@@ -53,6 +53,13 @@ final class SyntaxTextView: NSView {
         gutterView.needsDisplay = true
     }
 
+    /// Vi-like mode: read-only by default, press `i` to edit, `Esc` to return.
+    private(set) var isEditMode = false
+    /// Callback to save the current text content to disk.
+    var onSave: ((String) -> Void)?
+    /// Callback when edit mode changes (for status display).
+    var onEditModeChange: ((Bool) -> Void)?
+
     func showFindBar() {
         textView.performFindPanelAction(NSTextFinder.Action.showFindInterface)
     }
@@ -66,7 +73,34 @@ final class SyntaxTextView: NSView {
             showFindBar()
             return
         }
+        if cmd && key == "s" {
+            if isEditMode {
+                onSave?(textView.string)
+                exitEditMode()
+            }
+            return
+        }
+        if !isEditMode && key == "i" && !cmd {
+            enterEditMode()
+            return
+        }
+        if isEditMode && event.keyCode == 53 { // Esc
+            exitEditMode()
+            return
+        }
         super.keyDown(with: event)
+    }
+
+    private func enterEditMode() {
+        isEditMode = true
+        textView.isEditable = true
+        onEditModeChange?(true)
+    }
+
+    private func exitEditMode() {
+        isEditMode = false
+        textView.isEditable = false
+        onEditModeChange?(false)
     }
 
     override func mouseMoved(with event: NSEvent) {

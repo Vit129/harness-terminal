@@ -99,6 +99,8 @@ struct FileTreeSwiftUIView: View {
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .semibold))
         }
         .foregroundStyle(Color(HarnessDesign.chrome.textSecondary))
         .padding(.horizontal, HarnessDesign.Spacing.sm)
@@ -110,6 +112,8 @@ struct FileTreeSwiftUIView: View {
                 .stroke(Color(HarnessDesign.chrome.border), lineWidth: 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { showBranchSwitcher() }
         .listRowInsets(EdgeInsets(
             top: HarnessDesign.Spacing.xs,
             leading: HarnessDesign.horizontalInset,
@@ -117,6 +121,48 @@ struct FileTreeSwiftUIView: View {
             trailing: HarnessDesign.horizontalInset
         ))
         .listRowBackground(Color.clear)
+    }
+
+    private func showBranchSwitcher() {
+        Task {
+            let branches = await listBranches()
+            let current = gitBranch ?? ""
+            let menu = NSMenu()
+            for branch in branches {
+                let item = NSMenuItem(title: branch, action: #selector(BranchSwitchHelper.switchBranch(_:)), keyEquivalent: "")
+                item.target = BranchSwitchHelper.shared
+                item.representedObject = (rootPath, branch) as (String, String)
+                if branch == current { item.state = .on }
+                menu.addItem(item)
+            }
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+            let mouseLocation = window.mouseLocationOutsideOfEventStream
+            menu.popUp(positioning: nil, at: mouseLocation, in: window.contentView)
+        }
+    }
+
+    private func listBranches() async -> [String] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                process.arguments = ["branch", "--format=%(refname:short)"]
+                process.currentDirectoryURL = URL(fileURLWithPath: rootPath)
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = Pipe()
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: data, encoding: .utf8) ?? ""
+                    let branches = output.components(separatedBy: "\n").filter { !$0.isEmpty }
+                    continuation.resume(returning: branches)
+                } catch {
+                    continuation.resume(returning: [])
+                }
+            }
+        }
     }
 
     private func refreshGitBranch() {
@@ -357,5 +403,31 @@ private struct NodeRow: View {
         guard let surfaceID = coordinator.activeSurfaceID else { return }
         let command = "open \(node.node.path)\r"
         coordinator.requestDaemon(.sendData(surfaceID: surfaceID.uuidString, data: Data(command.utf8)))
+    }
+}
+
+// MARK: - Branch switch helper (NSMenu target)
+
+@MainActor
+final class BranchSwitchHelper: NSObject {
+    static let shared = BranchSwitchHelper()
+
+    @objc func switchBranch(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? (String, String) else { return }
+        let (rootPath, branch) = pair
+        Task {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["checkout", branch]
+            process.currentDirectoryURL = URL(fileURLWithPath: rootPath)
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try? process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                DisplayMessage.show("Switched to \(branch)")
+                SessionCoordinator.shared.syncFromDaemon()
+            }
+        }
     }
 }

@@ -244,6 +244,8 @@ public final class HarnessTerminalSurfaceView: NSView {
     public var onProgress: ((TerminalProgressReport) -> Void)?
     /// Reported working directory (OSC 7) — the host forwards this to its delegate.
     public var onPwd: ((String) -> Void)?
+    /// Last reported working directory, kept for ⌘-click file path resolution.
+    private(set) var currentCwd: String?
     /// Terminal bell (BEL) — the host forwards this to its delegate.
     public var onBell: (() -> Void)?
     /// A shell command finished (OSC 133), with its run duration + exit code — the host forwards
@@ -933,9 +935,13 @@ public final class HarnessTerminalSurfaceView: NSView {
         }
         emulator.onWorkingDirectoryChange = { [weak self] path in
             if Thread.isMainThread {
+                self?.currentCwd = path
                 self?.onPwd?(path)
             } else {
-                DispatchQueue.main.async { [weak self] in self?.onPwd?(path) }
+                DispatchQueue.main.async { [weak self] in
+                    self?.currentCwd = path
+                    self?.onPwd?(path)
+                }
             }
         }
         emulator.onBell = { [weak self] in
@@ -2242,10 +2248,39 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// surprising handler (e.g. a custom app scheme) on ⌘-click. No `file:` — an OSC 8
     /// hyperlink comes from terminal output (possibly a remote host), and opening an
     /// arbitrary local path via NSWorkspace executes .app bundles and .command scripts.
+    /// File paths (absolute or relative to cwd) open in Harness's file preview instead.
     private func openLink(_ string: String) {
+        // Check if it's a local file path first
+        let path = resolveFilePath(string)
+        if let path, FileManager.default.fileExists(atPath: path) {
+            let isDirectory = (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeDirectory
+            guard !isDirectory else { return }
+            // Don't open executables (.app, .command, etc.) — security
+            guard !path.hasSuffix(".app"), !path.hasSuffix(".command"), !path.hasSuffix(".tool") else { return }
+            NotificationCenter.default.post(
+                name: Notification.Name("HarnessOpenFilePreview"),
+                object: nil,
+                userInfo: ["path": path]
+            )
+            return
+        }
         guard let url = URL(string: string), let scheme = url.scheme?.lowercased(),
               ["http", "https", "mailto", "ftp", "ftps"].contains(scheme) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Resolve a string to an absolute file path. Handles absolute paths and paths with
+    /// line:col suffixes (e.g. `src/main.swift:42:5`).
+    private func resolveFilePath(_ string: String) -> String? {
+        // Strip line:col suffix (e.g. "file.swift:42:5" or "file.swift:42")
+        let stripped = string.replacingOccurrences(of: #":\d+(?::\d+)?$"#, with: "", options: .regularExpression)
+        if stripped.hasPrefix("/") {
+            return stripped
+        }
+        // Relative path — resolve against terminal's cwd
+        guard let cwd = currentCwd, !cwd.isEmpty else { return nil }
+        let resolved = (cwd as NSString).appendingPathComponent(stripped)
+        return resolved
     }
 
     public override func mouseDragged(with event: NSEvent) {

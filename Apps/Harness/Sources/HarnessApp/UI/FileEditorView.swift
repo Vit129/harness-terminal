@@ -63,6 +63,11 @@ final class FileEditorView: NSView {
         wantsLayer = true
 
         syntaxView.translatesAutoresizingMaskIntoConstraints = false
+        syntaxView.onSave = { [weak self] text in
+            guard let self, !self.filePath.isEmpty else { return }
+            try? text.write(toFile: self.filePath, atomically: true, encoding: .utf8)
+            DisplayMessage.show("Saved \((self.filePath as NSString).lastPathComponent)")
+        }
         // LSP hooks — disabled (see TODO above)
         // syntaxView.onHover = { [weak self] position in await self?.lspSession.hover(position: position) }
         // syntaxView.onDefinition = { [weak self] position in await self?.lspSession.definition(position: position) }

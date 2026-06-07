@@ -115,6 +115,17 @@ final class MainSplitViewController: NSViewController {
             name: NSWindow.didExitFullScreenNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openFilePreviewFromTerminal(_:)),
+            name: Notification.Name("HarnessOpenFilePreview"),
+            object: nil
+        )
+    }
+
+    @objc private func openFilePreviewFromTerminal(_ notification: Notification) {
+        guard let path = notification.userInfo?["path"] as? String else { return }
+        contentVC.openFileTab(path: path)
     }
 
     /// Resolve the divider line color: user override (`settings.dividerHex`) wins; otherwise
