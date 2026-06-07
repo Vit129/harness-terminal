@@ -587,6 +587,57 @@ public final class RealPty: @unchecked Sendable {
         return (pid, cwd)
     }
 
+    /// Name of the process that owns the terminal foreground (`#{pane_current_command}`):
+    /// `tcgetpgrp` on the master names the foreground process group, whose leader's PID
+    /// equals the group ID. Falls back to the spawned child when the ioctl fails (e.g. no
+    /// foreground job yet). Cheap (one ioctl + one name lookup) — safe both in the off-lock
+    /// metadata scan and at format-resolve time. Returns the *child* PID alongside so scan
+    /// callers can reuse the same respawn-commit guard as `probeWorkingDirectory`.
+    public func probeForegroundCommand() -> (pid: pid_t, command: String)? {
+        lifecycleLock.lock()
+        let fd = master
+        let child = childPID
+        lifecycleLock.unlock()
+        guard fd >= 0, child > 0 else { return nil }
+        let foreground = tcgetpgrp(fd)
+        guard let name = Self.processName(for: foreground > 0 ? foreground : child) else { return nil }
+        return (child, name)
+    }
+
+    /// Short process name (comm) for a PID, or nil when it can't be read (exited, denied).
+    private static func processName(for pid: pid_t) -> String? {
+        guard pid > 0 else { return nil }
+        #if canImport(Darwin)
+        var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
+        let length = proc_name(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(decoding: buffer.prefix(Int(length)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        #else
+        // /proc/<pid>/comm holds the thread name with a trailing newline.
+        guard let raw = try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+        #endif
+    }
+
+    /// The PTY's current size (`TIOCGWINSZ`), for `#{pane_width}`/`#{pane_height}`.
+    public func currentSize() -> (rows: Int, cols: Int)? {
+        lifecycleLock.lock()
+        let fd = master
+        lifecycleLock.unlock()
+        guard fd >= 0 else { return nil }
+        var rows: UInt16 = 0
+        var cols: UInt16 = 0
+        guard harness_pty_get_winsize(fd, &rows, &cols) == 0, rows > 0, cols > 0 else { return nil }
+        return (Int(rows), Int(cols))
+    }
+
+    /// Bytes currently held in the in-memory scrollback ring (`#{history_bytes}`).
+    public var historyBytes: Int {
+        scrollbackLock.lock(); defer { scrollbackLock.unlock() }
+        return scrollbackBytes
+    }
+
     /// After SIGTERM, a child that traps/ignores TERM+HUP never exits, so the `watchForExit`
     /// `waitpid(pid, …, 0)` blocks forever and that thread leaks for the daemon's lifetime
     /// (and accumulates across repeated close/respawn). Escalate to SIGKILL after a grace.

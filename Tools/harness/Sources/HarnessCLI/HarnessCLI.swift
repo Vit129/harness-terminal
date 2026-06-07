@@ -140,9 +140,9 @@ struct HarnessCLI {
             case "control-mode", "-CC":
                 exit(try ControlModeClient.run(client: client))
             case "kill-server":
-                handleKillServer()
+                handleKillServer(args)
             case "start-server":
-                handleStartServer(client: client)
+                handleStartServer(args, client: client)
             case "show-messages":
                 if case let .text(log) = try checkedRequest(client, .showMessages) {
                     print(log.isEmpty ? "no messages" : log)
@@ -232,8 +232,12 @@ struct HarnessCLI {
                 try handleRespawnPane(args, client: client)
             case "select-pane":
                 try handleSelectPane(args, client: client)
-            case "set-option", "setw":
-                try handleSetOption(args, client: client)
+            case "set-option":
+                try handleSetOption(args, defaultScope: "global", client: client)
+            case "setw", "set-window-option":
+                // tmux `setw` is a WINDOW option — same default the bindable parser
+                // uses, so a sourced `.tmux.conf` line and the CLI write the same scope.
+                try handleSetOption(args, defaultScope: "tab", client: client)
             case "show-options":
                 try handleShowOptions(args, client: client)
             case "set-environment", "setenv":
@@ -296,12 +300,26 @@ struct HarnessCLI {
     }
 
     static func handleNewSession(_ args: [String], client: DaemonClient) throws {
+        let name = flagValue(args, flag: "--name")
+        // tmux `new-session -t <session>`: a session GROUPED with the target,
+        // sharing its window list. Loud lookup — never group with the wrong session.
+        if let groupWith = flagValue(args, flag: "--group-with") {
+            guard case let .snapshot(snapshot)? = try? client.request(.getSnapshot, timeout: 2),
+                  let target = snapshot.workspaces.flatMap(\.sessions)
+                      .first(where: { $0.name == groupWith || $0.id.uuidString == groupWith })
+            else {
+                fputs("new-session: --group-with: no session named '\(groupWith)'\n", harnessStderr)
+                exit(1)
+            }
+            let response = try checkedRequest(client, .newSessionInGroup(targetSessionID: target.id, name: name))
+            if case let .sessionID(id) = response { print(id.uuidString) }
+            return
+        }
         guard let workspaceID = try resolveWorkspaceID(args, client: client) else {
-            fputs("Usage: harness-cli new-session --workspace <name|uuid> [--cwd path] [--name name]\n", harnessStderr)
+            fputs("Usage: harness-cli new-session --workspace <name|uuid> [--cwd path] [--name name] [--group-with <session>]\n", harnessStderr)
             exit(1)
         }
         let cwd = flagValue(args, flag: "--cwd")
-        let name = flagValue(args, flag: "--name")
         let response = try checkedRequest(client, .newSession(workspaceID: workspaceID, cwd: cwd, name: name))
         if case let .sessionID(id) = response { print(id.uuidString) }
     }
@@ -973,7 +991,9 @@ struct HarnessCLI {
         // Only strip the table token when it came from an explicit `-T <table>`; never when it's the
         // implicit default, or a literal key spec equal to "prefix" would be eaten.
         if explicitTable != nil, let i = positional.firstIndex(of: table) { positional.remove(at: i) }
-        return (table, positional)
+        // tmux's `copy-mode-vi` is Harness's `copy-mode` — same mapping the parser
+        // applies, so a CLI bind never lands in a phantom table no client consults.
+        return (CommandParser.canonicalTableName(table), positional)
     }
 
     static func handleBindKey(_ args: [String]) throws {
@@ -1224,10 +1244,22 @@ struct HarnessCLI {
     /// tmux `kill-server`, adapted to launchd supervision: SIGTERM stops the daemon
     /// gracefully; KeepAlive respawns it with sessions restored from layout.json. A
     /// permanent stop is launchctl's job, so say so instead of fighting it.
-    static func handleKillServer() {
+    /// Local-only by construction (PID file + signal): with `--host`, refuse loudly
+    /// instead of SIGTERMing the LOCAL daemon while targeting a remote one.
+    static func handleKillServer(_ args: [String]) {
+        if flagValue(args, flag: "--host") != nil {
+            fputs("kill-server: operates on the local daemon only — run it on the host (ssh <host> harness-cli kill-server)\n", harnessStderr)
+            exit(64)
+        }
         let raw = (try? String(contentsOf: HarnessPaths.daemonPIDURL, encoding: .utf8)) ?? ""
         guard let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else {
             fputs("kill-server: no daemon.pid — is the daemon running? (try: harness-cli ping)\n", harnessStderr)
+            exit(1)
+        }
+        // PID-reuse guard: after an unclean shutdown the recorded PID can belong to an
+        // unrelated process — never signal anything that isn't a live HarnessDaemon.
+        guard isLiveHarnessDaemon(pid) else {
+            fputs("kill-server: pid \(pid) from daemon.pid is not a running HarnessDaemon (stale file?) — nothing to signal\n", harnessStderr)
             exit(1)
         }
         guard kill(pid, SIGTERM) == 0 else {
@@ -1241,11 +1273,37 @@ struct HarnessCLI {
         #endif
     }
 
+    /// `kill(pid, 0)` liveness probe + executable identity (mirrors
+    /// `DaemonLifecycle.executablePath`, which the CLI target doesn't link).
+    static func isLiveHarnessDaemon(_ pid: Int32) -> Bool {
+        guard kill(pid, 0) == 0 || errno == EPERM else { return false }
+        #if canImport(Darwin)
+        var buffer = [UInt8](repeating: 0, count: Int(MAXPATHLEN))
+        let length = buffer.withUnsafeMutableBufferPointer { ptr -> Int32 in
+            proc_pidpath(pid, ptr.baseAddress, UInt32(MAXPATHLEN))
+        }
+        guard length > 0 else { return false }
+        let path = String(decoding: buffer.prefix(Int(length)), as: UTF8.self)
+        #else
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let len = readlink("/proc/\(pid)/exe", &buffer, buffer.count - 1)
+        guard len > 0 else { return false }
+        let path = String(decoding: buffer[0 ..< len].map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        #endif
+        return (path as NSString).lastPathComponent.contains("HarnessDaemon")
+    }
+
     /// tmux `start-server`, adapted: ensure the daemon is up (ping → launchctl kickstart).
-    static func handleStartServer(client: DaemonClient) {
+    /// The ping honours `--host` (tunnelled client); the kickstart cannot — refuse the
+    /// remote form instead of starting the LOCAL LaunchAgent while the remote stays down.
+    static func handleStartServer(_ args: [String], client: DaemonClient) {
         if case .pong? = try? client.request(.ping, timeout: 1) {
             print("daemon already running")
             return
+        }
+        if flagValue(args, flag: "--host") != nil {
+            fputs("start-server: cannot start a remote daemon — start it on the host (systemd/launchctl or harness-cli install)\n", harnessStderr)
+            exit(1)
         }
         #if os(macOS)
         let kick = Process()
@@ -1265,20 +1323,25 @@ struct HarnessCLI {
         #endif
     }
 
-    static func handleSetOption(_ args: [String], client: DaemonClient) throws {
+    static func handleSetOption(_ args: [String], defaultScope: String, client: DaemonClient) throws {
         // Usage: set-option [-g|-w|-s|-t|-p] [-T <target>] <key> <value>
-        var scope = "global"
+        var scope = defaultScope
         if args.contains("-g") { scope = "global" }
         if args.contains("-w") { scope = "workspace" }
         if args.contains("-s") { scope = "session" }
         if args.contains("-t") { scope = "tab" }
         if args.contains("-p") { scope = "pane" }
-        let target = flagValue(args, flag: "-T")
+        var target = flagValue(args, flag: "-T")
         // Scoped options resolve by exact target — a nil-target workspace/session/tab/pane
         // entry is stored but unreachable by every read path (the fallback chain only widens
-        // toward global). Require the target instead of silently writing a dead option.
+        // toward global). Without -T, resolve the target from the calling pane
+        // ($HARNESS_SURFACE — tmux: scoped sets apply to the current window); outside
+        // a Harness pane, require -T instead of silently writing a dead option.
         if scope != "global", target == nil {
-            fputs("set-option: \(scope) scope requires -T <target>\n", harnessStderr)
+            target = callingPaneTarget(scope: scope, client: client)
+        }
+        if scope != "global", target == nil {
+            fputs("set-option: \(scope) scope requires -T <target> (or run inside a Harness pane)\n", harnessStderr)
             exit(1)
         }
         // `positionalArgs` skips the subcommand at index 0 plus `-T <target>` (and any
@@ -1291,6 +1354,31 @@ struct HarnessCLI {
         let key = positional[0]
         let value = positional.dropFirst().joined(separator: " ")
         _ = try checkedRequest(client, .setOption(scope: scope, target: target, key: key, rawValue: value))
+    }
+
+    /// The calling pane's workspace/session/tab/pane ID for a scoped option write —
+    /// the CLI's "focus" when it runs inside a Harness pane ($HARNESS_SURFACE).
+    /// nil outside a pane or when the surface is gone from the snapshot.
+    static func callingPaneTarget(scope: String, client: DaemonClient) -> String? {
+        guard let surface = ProcessInfo.processInfo.environment["HARNESS_SURFACE"],
+              let surfaceID = UUID(uuidString: surface),
+              case let .snapshot(snapshot)? = try? client.request(.getSnapshot, timeout: 2)
+        else { return nil }
+        for workspace in snapshot.workspaces {
+            for session in workspace.sessions {
+                for tab in session.tabs where tab.rootPane.allSurfaceIDs().contains(surfaceID) {
+                    switch scope {
+                    case "workspace": return workspace.id.uuidString
+                    case "session": return session.id.uuidString
+                    case "tab": return tab.id.uuidString
+                    case "pane":
+                        return tab.rootPane.allLeaves().first { $0.surfaceID == surfaceID }?.id.uuidString
+                    default: return nil
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     static func handleShowOptions(_ args: [String], client: DaemonClient) throws {
@@ -1414,7 +1502,7 @@ struct HarnessCLI {
         let tableFlag = flagValue(args, flag: "-T")
         let set = KeybindingsStore.load()
         let chosen: [KeyTable] = tableFlag.map {
-            [set.table(KeyTableID(rawValue: $0))].compactMap { $0 }
+            [set.table(KeyTableID(rawValue: CommandParser.canonicalTableName($0)))].compactMap { $0 }
         } ?? set.tableList
         for table in chosen {
             print("[\(table.id.rawValue)]")
@@ -1661,7 +1749,7 @@ struct HarnessCLI {
           list-commands
           get-snapshot
           new-workspace --name <name>
-          new-session --workspace <name|uuid> [--cwd path] [--name name]
+          new-session --workspace <name|uuid> [--cwd path] [--name name] [--group-with <session>]
           new-tab --workspace <name|uuid> [--cwd path]
           new-split --tab <uuid> --direction horizontal|vertical [--pane <uuid>]
           select-workspace --workspace <name|uuid>
@@ -1714,6 +1802,7 @@ struct HarnessCLI {
           respawn-pane --surface <id> [--clear-history|-k]
           select-pane --pane <uuid> --dir L|R|U|D
           set-option [-g|-w|-s|-t|-p] [-T target] <key> <value>
+          setw <key> <value>   (window option for the calling pane's tab; -T overrides)
           show-options [-g|-w|-s|-t|-p] [--json] [--pretty]
           set-environment [-g] [-u] [-s <sessionID>] <key> [value]
           show-environment [-g] [-s <sessionID>] [--json] [--pretty]

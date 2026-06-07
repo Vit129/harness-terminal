@@ -319,19 +319,52 @@ public enum FormatString {
         case "cwd_basename":
             guard let cwd = context.paneCwd else { return "" }
             return (cwd as NSString).lastPathComponent
-        case "pane_active": return context.paneActive ? "1" : ""
+        // Flag tokens render tmux's "1"/"0" (conditionals treat "0" and "" as falsy
+        // either way, but the literal output should be uniform across the vocabulary).
+        case "pane_active": return context.paneActive ? "1" : "0"
         case "pane_index": return context.paneIndex.map(String.init) ?? ""
+        case "pane_pid": return context.panePID.map(String.init) ?? ""
+        case "pane_current_command": return context.paneCurrentCommand ?? ""
+        case "pane_width": return context.paneWidth.map(String.init) ?? ""
+        case "pane_height": return context.paneHeight.map(String.init) ?? ""
+        case "pane_dead": return context.paneDead.map { $0 ? "1" : "0" } ?? ""
+        case "pane_dead_status": return context.paneExitStatus.map(String.init) ?? ""
+        case "history_bytes": return context.historyBytes.map(String.init) ?? ""
         case "session_name": return context.sessionName ?? ""
+        // tmux-style identifiers, matching the `-t` target grammar ($session/@window) so a
+        // displayed id round-trips straight back into a target argument.
+        case "session_id": return context.sessionID.map { "$" + $0 } ?? ""
+        case "window_id": return context.windowID.map { "@" + $0 } ?? ""
+        case "session_windows": return context.sessionWindows.map(String.init) ?? ""
+        case "session_attached": return context.sessionAttached.map(String.init) ?? ""
+        case "session_group": return context.sessionGroup ?? ""
         case "tab_name", "window_name": return context.tabName ?? ""
         case "tab_index", "window_index": return context.tabIndex.map(String.init) ?? ""
+        case "window_panes": return context.windowPanes.map(String.init) ?? ""
+        case "window_active": return context.windowActive.map { $0 ? "1" : "0" } ?? ""
         case "workspace_name": return context.workspaceName ?? ""
         case "agent_kind": return context.agentKind ?? ""
         case "agent_activity": return context.agentActivity ?? ""
         case "git_branch": return context.gitBranch ?? ""
         case "client_name": return context.clientName ?? ""
+        case "client_width": return context.clientWidth.map(String.init) ?? ""
+        case "client_height": return context.clientHeight.map(String.init) ?? ""
+        case "client_tty": return context.clientTTY ?? ""
+        case "client_termname": return context.clientTermname ?? ""
         case "window_flags": return context.windowFlags ?? ""
         case "window_zoomed_flag": return (context.windowFlags?.contains("Z") ?? false) ? "1" : ""
+        // Alert flags as standalone 0/1 vars, derived from the same `#{window_flags}`
+        // characters the daemon sets (`#` activity, `~` silence, `!` bell).
+        case "window_activity_flag": return (context.windowFlags?.contains("#") ?? false) ? "1" : "0"
+        case "window_silence_flag": return (context.windowFlags?.contains("~") ?? false) ? "1" : "0"
+        case "window_bell_flag": return (context.windowFlags?.contains("!") ?? false) ? "1" : "0"
+        case "pid": return context.serverPID.map(String.init) ?? ""
+        case "socket_path": return HarnessPaths.socketURL.path
+        case "version": return HarnessVersion.short
         case "host", "hostname": return ProcessInfo.processInfo.hostName
+        case "host_short":
+            let host = ProcessInfo.processInfo.hostName
+            return host.split(separator: ".").first.map(String.init) ?? host
         case "user", "username": return NSUserName()
         default: return ""
         }
@@ -358,6 +391,34 @@ public struct FormatContext: Sendable {
     /// tmux-style window flags: `Z` zoomed, `*` active, `#` activity, `!` bell, `M` marked.
     public var windowFlags: String?
     public var now: Date
+    // Extended tmux-parity fields. All optional: a builder fills what its vantage point
+    // knows (the daemon has PTY facts, the attach client has tty facts) and the rest
+    // render as empty tokens.
+    /// PID of the pane's root shell process (`#{pane_pid}`).
+    public var panePID: Int?
+    /// Foreground process name (`#{pane_current_command}`).
+    public var paneCurrentCommand: String?
+    public var paneWidth: Int?
+    public var paneHeight: Int?
+    /// Whether the pane's process has exited while `remain-on-exit` kept it (`#{pane_dead}`).
+    public var paneDead: Bool?
+    public var paneExitStatus: Int?
+    public var historyBytes: Int?
+    /// Bare UUID strings — `resolve` adds the tmux-style `$`/`@` prefixes.
+    public var sessionID: String?
+    public var windowID: String?
+    public var sessionWindows: Int?
+    public var windowPanes: Int?
+    public var windowActive: Bool?
+    public var sessionAttached: Int?
+    /// Group name once grouped sessions land; empty until then.
+    public var sessionGroup: String?
+    /// Daemon PID (`#{pid}`); nil in client-side contexts.
+    public var serverPID: Int?
+    public var clientWidth: Int?
+    public var clientHeight: Int?
+    public var clientTTY: String?
+    public var clientTermname: String?
 
     public init(
         paneID: String? = nil,

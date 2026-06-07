@@ -243,6 +243,7 @@ final class SessionCoordinator: NSObject {
             applyTerminalIdentity(to: host)
             pushBorderColors(to: host)
         }
+        adoptSynchronizeOptions()
         refreshSyncSiblings()
         reassertMarkedPane()
     }
@@ -430,7 +431,7 @@ final class SessionCoordinator: NSObject {
         let workspace = snapshot.activeWorkspace
         let session = workspace?.activeSession
         let tab = workspace?.activeTab
-        return FormatContext(
+        var context = FormatContext(
             paneID: activeSurfaceID?.uuidString,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -445,6 +446,21 @@ final class SessionCoordinator: NSObject {
             gitBranch: tab?.gitBranch,
             clientName: "Harness.app"
         )
+        // Extended tmux-parity fields derivable from the snapshot (PTY-backed values —
+        // pane_pid, pane_width, history_bytes — are daemon vantage; left nil here).
+        context.paneCurrentCommand = tab?.currentCommand
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        context.sessionGroup = session.flatMap { snapshot.groupName(of: $0) }
+        // Same expression as the daemon's builder so `#{window_flags}` agrees between
+        // GUI display-message and CLI/hook output.
+        context.windowFlags = tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
+        return context
     }
 
     /// Apply a theme. By default this seeds the full editable color set from the
@@ -1075,8 +1091,31 @@ final class SessionCoordinator: NSObject {
         guard let tab = snapshot.activeWorkspace?.activeTab else { return }
         let nowOn = on ?? !synchronizedTabIDs.contains(tab.id)
         if nowOn { synchronizedTabIDs.insert(tab.id) } else { synchronizedTabIDs.remove(tab.id) }
+        // Write the per-tab option through (tmux: synchronize-panes IS a window
+        // option), so `setw -t <tab> synchronize-panes` and the GUI toggle are one
+        // state — the compositor honors the same option for the same tab.
+        requestDaemon(.setOption(
+            scope: "tab", target: tab.id.uuidString,
+            key: "synchronize-panes", rawValue: nowOn ? "on" : "off"
+        ))
         refreshSyncSiblings()
         DisplayMessage.show(nowOn ? "synchronize-panes: on" : "synchronize-panes: off")
+    }
+
+    /// Adopt per-tab `synchronize-panes` options written outside the GUI (`setw`,
+    /// the compositor toggle) into the local mirror. Called from metadata sync.
+    func adoptSynchronizeOptions() {
+        guard case let .options(entries)? = requestDaemon(.showOptions(scope: "tab")) else { return }
+        var changed = false
+        for entry in entries where entry.key == "synchronize-panes" {
+            guard let target = entry.target, let tabID = TabID(uuidString: target) else { continue }
+            let on = entry.value == "on" || entry.value == "true" || entry.value == "1"
+            if on != synchronizedTabIDs.contains(tabID) {
+                if on { synchronizedTabIDs.insert(tabID) } else { synchronizedTabIDs.remove(tabID) }
+                changed = true
+            }
+        }
+        if changed { refreshSyncSiblings() }
     }
 
     /// Push each live host its sibling surface ids when its tab is synchronized

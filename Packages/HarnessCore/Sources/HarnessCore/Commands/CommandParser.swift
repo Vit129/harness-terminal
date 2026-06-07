@@ -85,6 +85,7 @@ public enum CommandParser {
         "resizep": "resize-pane", "swapp": "swap-pane", "swapw": "swap-window",
         "movew": "move-window", "rotatew": "rotate-window", "breakp": "break-pane",
         "joinp": "join-pane", "respawnp": "respawn-pane", "movep": "move-pane",
+        "respawnw": "respawn-window", "refreshc": "refresh-client",
         "renumberw": "renumber-windows",
         "renamew": "rename-window", "rename": "rename-window",
         "renames": "rename-session", "news": "new-session", "kills": "kill-session",
@@ -152,6 +153,11 @@ public enum CommandParser {
         case "select-pane":
             if tokens.contains("-m") { return .markPane(set: true) }
             if tokens.contains("-M") { return .markPane(set: false) }
+            if let spec = try explicitPaneTargetSpec(from: tokens) {
+                // Absolute target (`%id`, `session:window.pane`, `{top}`, …): resolved at
+                // translate time; the inner relative target is ignored on this path.
+                return .targeted(spec, .selectPane(target: .next))
+            }
             let target = try paneTarget(from: tokens, defaultValue: .next)
             return .selectPane(target: target)
         // Convenience verbs for the directional cycle (`select-pane -t :.+/:.-` and the
@@ -174,8 +180,19 @@ public enum CommandParser {
             default: return .synchronizePanes(set: nil)
             }
         case "swap-pane":
+            // tmux `swap-pane [-s src] [-t dst]` — `-s` names the pane to act FROM
+            // (default: the caller's active pane); without `-t` the destination is
+            // the current pane (tmux behavior), spelled here as a self-target the
+            // translator resolves against the caller's focus.
+            let source = try explicitPaneTargetSpec(from: tokens, flag: "-s")
+            if let spec = try explicitPaneTargetSpec(from: tokens) {
+                return .targeted(spec, .swapPane(target: .next, source: source))
+            }
+            if source != nil, stringValue(for: "-t", in: tokens) == nil, !tokens.contains("-l") {
+                return .swapPane(target: .current, source: source)
+            }
             let target = try paneTarget(from: tokens, defaultValue: .next)
-            return .swapPane(target: target)
+            return .swapPane(target: target, source: source)
         case "new-window", "new-tab":
             return .newWindow
         case "kill-window", "kill-tab":
@@ -432,6 +449,10 @@ public enum CommandParser {
             }
             let unset = tokens.contains("-u")
             let value = positional.dropFirst().joined(separator: " ")
+            // tmux errors on a bare key; silently persisting KEY="" would surprise.
+            guard unset || !value.isEmpty else {
+                throw CommandParseError.missingArgument("set-environment requires a value (or -u to unset)")
+            }
             return .setEnvironment(
                 global: tokens.contains("-g"),
                 key: key,
@@ -456,14 +477,17 @@ public enum CommandParser {
         case "show-buffer":
             return .showBuffer(name: stringValue(for: "-b", in: tokens))
         case "set-hook":
-            let positional = positionalTokens(tokens, skippingValuesFor: [])
+            // `--if <format>` mirrors the CLI's `bind-hook --if` so a conditional hook
+            // can be bound from the `:` prompt / source-file too, not just the CLI.
+            let condition = stringValue(for: "--if", in: tokens)
+            let positional = positionalTokens(tokens, skippingValuesFor: ["--if"])
             guard positional.count >= 2 else {
                 throw CommandParseError.missingArgument("set-hook requires an event and a command")
             }
             return .setHook(
                 event: positional[0],
                 source: positional.dropFirst().joined(separator: " "),
-                condition: nil
+                condition: condition
             )
         case "show-hooks":
             return .showHooks(event: positionalTokens(tokens, skippingValuesFor: []).first)
@@ -472,15 +496,20 @@ public enum CommandParser {
                   let id = UUID(uuidString: raw)
             else { throw CommandParseError.missingArgument("unbind-hook requires a hook id (see show-hooks)") }
             return .unbindHook(id: id)
-        case "refresh-client", "refreshc":
+        case "refresh-client":
             return .refreshClient
-        case "respawn-window", "respawnw":
+        case "respawn-window":
+            // Aliases (respawnw/refreshc) resolve via the alias TABLE before the
+            // universal `-t` wrap — a case-pattern alias here would skip the wrap,
+            // silently respawning the focused window on `respawnw -t <bad>`.
             let keep = !(tokens.contains("-k") || tokens.contains("--clear-history"))
             return .respawnWindow(keepHistory: keep)
         case "show-messages":
             return .showMessages
         case "find-window":
-            guard let pattern = positionalTokens(tokens, skippingValuesFor: []).first else {
+            // `-t` (a target window/session for the search) isn't supported, but its
+            // VALUE must never be mistaken for the search pattern.
+            guard let pattern = positionalTokens(tokens, skippingValuesFor: ["-t"]).first else {
                 throw CommandParseError.missingArgument("find-window requires a pattern")
             }
             // tmux defaults to matching everything (-CNT); Harness defaults to the cheap
@@ -534,18 +563,27 @@ public enum CommandParser {
     /// tmux key-table name aliases. Harness's vi-flavored copy-mode table is named
     /// `copy-mode` (selected when `mode-keys` is vi, the default) — tmux calls that table
     /// `copy-mode-vi`, so accept both everywhere a table name is typed.
-    private static func canonicalTableName(_ name: String) -> String {
+    public static func canonicalTableName(_ name: String) -> String {
         name == "copy-mode-vi" ? "copy-mode" : name
     }
 
     /// Tokens that are not flags and not the value of one of `skippingValuesFor`'s flags.
+    /// getopt-style: flag recognition stops at the first positional token or a literal
+    /// `--`, so values that begin with `-` (quoted hook commands, buffer payloads,
+    /// option/environment values) survive once the positional run starts instead of
+    /// being silently dropped as unknown flags.
     private static func positionalTokens(_ tokens: [String], skippingValuesFor valueFlags: [String]) -> [String] {
         var positional: [String] = []
         var index = 0
+        var flagsEnded = false
         while index < tokens.count {
             let token = tokens[index]
-            if valueFlags.contains(token) { index += 2; continue }
-            if token.hasPrefix("-"), token.count > 1, Int(token) == nil { index += 1; continue }
+            if !flagsEnded {
+                if token == "--" { flagsEnded = true; index += 1; continue }
+                if valueFlags.contains(token) { index += 2; continue }
+                if token.hasPrefix("-"), token.count > 1, Int(token) == nil { index += 1; continue }
+                flagsEnded = true // first positional ends the flag run (POSIX)
+            }
             positional.append(token)
             index += 1
         }
@@ -570,6 +608,30 @@ public enum CommandParser {
         return items
     }
 
+    /// Absolute (non-relative) `-t` pane target for select-pane/swap-pane: any value the
+    /// full `TargetSpec` grammar accepts (`%id`, `session:window.pane`, `{top}`, an index…).
+    /// Returns nil when the tokens carry a directional flag, a relative target (`:.+`/`:.-`/
+    /// `!` — `paneTarget`'s fast paths), or no `-t` at all. Throws — never silently
+    /// misroutes (the v1.7.1 policy) — when the value parses to nothing actionable (a bare
+    /// `:` or `.`); a *name* that doesn't exist parses fine and fails loudly at resolution
+    /// instead, matching tmux's "can't find session" behavior.
+    private static func explicitPaneTargetSpec(from tokens: [String], flag: String = "-t") throws -> TargetSpec? {
+        if flag == "-t" {
+            // Directional / relative forms are `paneTarget`'s fast paths, not specs.
+            guard !tokens.contains("-L"), !tokens.contains("-R"), !tokens.contains("-U"),
+                  !tokens.contains("-D"), !tokens.contains("-l")
+            else { return nil }
+        }
+        guard let raw = stringValue(for: flag, in: tokens) else { return nil }
+        if flag == "-t", [":.+", ":.-", "!"].contains(raw) { return nil }
+        let spec = TargetSpec.parse(raw)
+        guard !spec.isEmpty else {
+            throw CommandParseError.invalidArgument(
+                "unrecognized pane target '\(raw)' — use %id, session:window.pane, an index, {top}/{bottom}/{left}/{right}, or :.+/:.-/!")
+        }
+        return spec
+    }
+
     private static func paneTarget(from tokens: [String], defaultValue: Command.PaneTarget) throws -> Command.PaneTarget {
         if tokens.contains("-L") { return .left }
         if tokens.contains("-R") { return .right }
@@ -582,15 +644,17 @@ public enum CommandParser {
             case ":.-": return .previous
             case "!": return .last
             default:
-                // Silently routing an unrecognized -t to .next moved the wrong pane with no
-                // feedback; fail loudly instead (same policy as the v1.7 CLI flag validation).
+                // Unreachable from select-pane/swap-pane (`explicitPaneTargetSpec` intercepts
+                // absolute targets first) — kept as the loud backstop for any future caller,
+                // preserving the v1.7 no-silent-misroute policy.
                 throw CommandParseError.invalidArgument(
                     "unsupported pane target '\(target)' — use -t :.+, -t :.-, -t ! or -L/-R/-U/-D/-l")
             }
         }
         // A dangling -t (flag present, value missing) is a typo, not a request for the default.
         if tokens.contains("-t") {
-            throw CommandParseError.missingArgument("-t requires a pane target (:.+, :.-, or !)")
+            throw CommandParseError.missingArgument(
+                "-t requires a pane target (:.+, :.-, !, %id, or session:window.pane)")
         }
         return defaultValue
     }
