@@ -256,4 +256,17 @@ final class HarnessCLITests: XCTestCase {
         XCTAssertEqual(table, "prefix")
         XCTAssertEqual(positional, ["prefix"])
     }
+
+    func testParseKeyTableArgsCanonicalizesCopyModeVi() {
+        // tmux's `copy-mode-vi` is Harness's `copy-mode`. Pre-fix, a CLI
+        // `bind-key -T copy-mode-vi …` wrote into a phantom table no client
+        // consults — the bind silently did nothing.
+        let (table, positional) = HarnessCLI.parseKeyTableArgs(
+            ["bind-key", "-T", "copy-mode-vi", "v", "copy-mode -X begin-selection"])
+        XCTAssertEqual(table, "copy-mode")
+        XCTAssertEqual(positional, ["v", "copy-mode -X begin-selection"])
+        // The emacs table keeps its own name.
+        let (emacs, _) = HarnessCLI.parseKeyTableArgs(["list-keys", "-T", "copy-mode-emacs"])
+        XCTAssertEqual(emacs, "copy-mode-emacs")
+    }
 }

@@ -217,6 +217,16 @@ public enum CommandIPCTranslator {
         case .showOptions, .showEnvironment, .listBuffers, .showBuffer, .showHooks:
             return .clientLocal(command)
 
+        case let .findWindow(pattern, name, content, title):
+            // Content matching needs a live capture (client-side concern) — hand off.
+            // Name/title resolve from the snapshot here so every front-end agrees.
+            if content { return .clientLocal(command) }
+            let matches = FindWindowMatcher.snapshotMatches(
+                target.snapshot, pattern: pattern, name: name, title: title)
+            guard let first = matches.first else { return .unresolved }
+            // tmux lists multiple matches; Harness focuses the first in snapshot order.
+            return .requests([.selectTab(workspaceID: first.workspaceID, tabID: first.tabID)])
+
         // MARK: Pane structure
         case let .splitWindow(direction):
             guard let tab = target.tab, let pane = target.paneID else { return .unresolved }

@@ -202,6 +202,23 @@ final class MainExecutor: CommandExecutor {
                 let lines = hooks.map { "\($0.event) → \($0.commandSource)  [\($0.id.uuidString.prefix(8))]" }
                 DisplayMessage.show(lines.isEmpty ? "no hooks bound" : lines.joined(separator: "\n"))
             }
+        case let .findWindow(pattern, name, content, title):
+            // Non-content searches translate to a selectTab request; -C needs live
+            // captures, done inline (re-dispatching the clientLocal result would loop).
+            guard content else { return try runViaTranslator(command, coordinator: coordinator) }
+            let match = FindWindowMatcher.firstMatch(
+                coordinator.snapshot, pattern: pattern, name: name, title: title
+            ) { surfaceID in
+                guard case let .text(text)? = coordinator.requestDaemon(
+                    .capturePane(surfaceID: surfaceID, includeScrollback: false)) else { return nil }
+                return text
+            }
+            guard let match else {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
+            _ = coordinator.requestDaemon(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID))
+            coordinator.syncFromDaemon()
         case .reloadKeybindings:
             KeybindingsService.shared.reload()
             PrefixKeymap.shared.rebuildFromSettings()
@@ -315,6 +332,12 @@ final class MainExecutor: CommandExecutor {
         case let .clientLocal(local):
             try dispatch(local)
         case .unresolved:
+            // find-window's no-match is a search result, not a focus problem — say so
+            // (matches the -C path and the compositor/control-mode wording).
+            if case let .findWindow(pattern, _, _, _) = command {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
             // Distinguish "you named something that doesn't exist" (strict `-t`/`-s`
             // resolution) from "there is nothing focused to act on".
             if case let .targeted(spec, _) = command {

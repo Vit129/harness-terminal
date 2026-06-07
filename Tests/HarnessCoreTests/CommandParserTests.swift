@@ -383,6 +383,52 @@ final class CommandParserTests: XCTestCase {
         XCTAssertThrowsError(try CommandParser.parse("unbind-hook not-a-uuid"))
     }
 
+    // MARK: - find-window + copy-mode-vi alias (P3)
+
+    func testFindWindowParsesFlagsAndDefaults() throws {
+        // No flags: match name + title (cheap snapshot fields), not content.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window api"),
+            .findWindow(pattern: "api", matchName: true, matchContent: false, matchTitle: true)
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -C 'error 42'"),
+            .findWindow(pattern: "error 42", matchName: false, matchContent: true, matchTitle: false)
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -N -T build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
+        XCTAssertThrowsError(try CommandParser.parse("find-window"))
+        // A `-t` value is a (currently unsupported) target, never the pattern.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -t somewhere build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
+    }
+
+    /// tmux's table name for the vi copy-mode table is `copy-mode-vi`; Harness's is
+    /// `copy-mode`. Both must work at every site a table name is typed.
+    func testCopyModeViTableNameIsAccepted() throws {
+        guard case let .bindKey(table, _, _, _) = try CommandParser.parse(
+            "bind-key -T copy-mode-vi v copy-mode -X begin-selection") else {
+            return XCTFail("expected bindKey")
+        }
+        XCTAssertEqual(table, "copy-mode")
+        guard case let .unbindKey(unbindTable, _) = try CommandParser.parse(
+            "unbind-key -T copy-mode-vi v") else {
+            return XCTFail("expected unbindKey")
+        }
+        XCTAssertEqual(unbindTable, "copy-mode")
+        XCTAssertEqual(try CommandParser.parse("list-keys -T copy-mode-vi"), .listKeys(table: "copy-mode"))
+        XCTAssertEqual(
+            try CommandParser.parse("switch-client -T copy-mode-vi"),
+            .switchClientTable(table: "copy-mode")
+        )
+        // The emacs table keeps its own name.
+        XCTAssertEqual(try CommandParser.parse("list-keys -T copy-mode-emacs"), .listKeys(table: "copy-mode-emacs"))
+    }
+
     /// `--if <format>` makes bindable set-hook condition-capable like CLI bind-hook.
     func testSetHookParsesCondition() throws {
         XCTAssertEqual(

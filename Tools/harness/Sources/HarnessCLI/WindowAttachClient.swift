@@ -1182,9 +1182,14 @@ private final class WindowSession: @unchecked Sendable {
         case let .clientLocal(local):
             handleLocalCommand(local, target: target)
         case .unresolved:
-            // Loud, like the GUI prompt and control mode: a typo'd `-t` (or a command with
-            // no resolvable focus) must never read as a silent success.
-            flashStatus("no resolvable target for command")
+            // Loud, like the GUI prompt and control mode: a typo'd `-t` (or a command
+            // with no resolvable focus) must never read as a silent success.
+            // find-window's no-match reads as a search result, like the -C path.
+            if case let .findWindow(pattern, _, _, _) = command {
+                flashStatus("find-window: no matches for '\(pattern)'")
+            } else {
+                flashStatus("no resolvable target for command")
+            }
         }
     }
 
@@ -1249,6 +1254,22 @@ private final class WindowSession: @unchecked Sendable {
             if case let .hooks(hooks)? = try? client.request(.listHooks(event: event), timeout: 1) {
                 flashStatus(hooks.isEmpty ? "no hooks bound"
                     : hooks.prefix(2).map { "\($0.event)→\($0.commandSource)" }.joined(separator: " · "))
+            }
+        case let .findWindow(pattern, name, content, title):
+            // Only the -C form reaches here (non-content translated to selectTab upstream).
+            _ = content
+            let snapshot = latestSnapshot ?? SessionSnapshot()
+            let match = FindWindowMatcher.firstMatch(
+                snapshot, pattern: pattern, name: name, title: title
+            ) { surfaceID in
+                guard case let .text(text)? = try? client.request(
+                    .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 1) else { return nil }
+                return text
+            }
+            if let match {
+                _ = try? client.request(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID), timeout: 1)
+            } else {
+                flashStatus("find-window: no matches for '\(pattern)'")
             }
         default:
             break

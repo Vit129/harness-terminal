@@ -969,7 +969,9 @@ struct HarnessCLI {
         // Only strip the table token when it came from an explicit `-T <table>`; never when it's the
         // implicit default, or a literal key spec equal to "prefix" would be eaten.
         if explicitTable != nil, let i = positional.firstIndex(of: table) { positional.remove(at: i) }
-        return (table, positional)
+        // tmux's `copy-mode-vi` is Harness's `copy-mode` — same mapping the parser
+        // applies, so a CLI bind never lands in a phantom table no client consults.
+        return (CommandParser.canonicalTableName(table), positional)
     }
 
     static func handleBindKey(_ args: [String]) throws {
@@ -1396,7 +1398,7 @@ struct HarnessCLI {
         let tableFlag = flagValue(args, flag: "-T")
         let set = KeybindingsStore.load()
         let chosen: [KeyTable] = tableFlag.map {
-            [set.table(KeyTableID(rawValue: $0))].compactMap { $0 }
+            [set.table(KeyTableID(rawValue: CommandParser.canonicalTableName($0)))].compactMap { $0 }
         } ?? set.tableList
         for table in chosen {
             print("[\(table.id.rawValue)]")

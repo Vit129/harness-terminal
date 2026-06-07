@@ -122,7 +122,7 @@ public enum CommandParser {
         "set-option", "set-window-option", "show-options", "show-window-options",
         "set-environment", "show-environment",
         "set-buffer", "paste-buffer", "delete-buffer", "list-buffers", "show-buffer",
-        "set-hook", "show-hooks", "unbind-hook",
+        "set-hook", "show-hooks", "unbind-hook", "find-window",
     ]
 
     private static func buildCommand(name rawName: String, tokens: [String]) throws -> Command {
@@ -288,7 +288,7 @@ public enum CommandParser {
             return .ifShell(condition: positional[0], then: then, otherwise: otherwise)
         case "bind-key", "bind":
             // bind-key -T <table> <spec> <command...>
-            let table = stringValue(for: "-T", in: tokens) ?? "prefix"
+            let table = canonicalTableName(stringValue(for: "-T", in: tokens) ?? "prefix")
             // tokens after the table flag/spec belong to the inner command.
             // Strategy: filter out "-T", the table name, take the next token as
             // spec, and re-join the rest as the inner command source.
@@ -310,7 +310,7 @@ public enum CommandParser {
             let inner = try parse(remaining.joined(separator: " "))
             return .bindKey(table: table, spec: spec, command: inner, repeatable: repeatable)
         case "unbind-key", "unbind":
-            let table = stringValue(for: "-T", in: tokens) ?? "prefix"
+            let table = canonicalTableName(stringValue(for: "-T", in: tokens) ?? "prefix")
             var remaining = tokens
             if let i = remaining.firstIndex(of: "-T"), i + 1 < remaining.count {
                 remaining.remove(at: i + 1)
@@ -321,7 +321,7 @@ public enum CommandParser {
             }
             return .unbindKey(table: table, spec: spec)
         case "list-keys":
-            return .listKeys(table: stringValue(for: "-T", in: tokens))
+            return .listKeys(table: stringValue(for: "-T", in: tokens).map(canonicalTableName))
         case "source-config", "source", "reload-config":
             return .sourceConfig
         case "reload-keybindings":
@@ -418,7 +418,7 @@ public enum CommandParser {
             guard let table = stringValue(for: "-T", in: tokens) else {
                 throw CommandParseError.missingArgument("switch-client requires -T <table>")
             }
-            return .switchClientTable(table: table)
+            return .switchClientTable(table: canonicalTableName(table))
         case "link-window", "linkw":
             guard let target = stringValue(for: "-t", in: tokens) ?? tokens.first(where: { !$0.hasPrefix("-") }) else {
                 throw CommandParseError.missingArgument("link-window requires a target session (-t <session>)")
@@ -494,6 +494,24 @@ public enum CommandParser {
                   let id = UUID(uuidString: raw)
             else { throw CommandParseError.missingArgument("unbind-hook requires a hook id (see show-hooks)") }
             return .unbindHook(id: id)
+        case "find-window":
+            // `-t` (a target window/session for the search) isn't supported, but its
+            // VALUE must never be mistaken for the search pattern.
+            guard let pattern = positionalTokens(tokens, skippingValuesFor: ["-t"]).first else {
+                throw CommandParseError.missingArgument("find-window requires a pattern")
+            }
+            // tmux defaults to matching everything (-CNT); Harness defaults to the cheap
+            // snapshot fields (name + title) and adds content capture only with -C.
+            let name = tokens.contains("-N")
+            let content = tokens.contains("-C")
+            let title = tokens.contains("-T")
+            let explicit = name || content || title
+            return .findWindow(
+                pattern: pattern,
+                matchName: explicit ? name : true,
+                matchContent: content,
+                matchTitle: explicit ? title : true
+            )
 
         default:
             throw CommandParseError.unknownCommand(resolveAlias(name) ?? name)
@@ -528,6 +546,13 @@ public enum CommandParser {
         if tokens.contains("-t") { return "tab" }
         if tokens.contains("-p") { return "pane" }
         return defaultScope
+    }
+
+    /// tmux key-table name aliases. Harness's vi-flavored copy-mode table is named
+    /// `copy-mode` (selected when `mode-keys` is vi, the default) — tmux calls that table
+    /// `copy-mode-vi`, so accept both everywhere a table name is typed.
+    public static func canonicalTableName(_ name: String) -> String {
+        name == "copy-mode-vi" ? "copy-mode" : name
     }
 
     /// Tokens that are not flags and not the value of one of `skippingValuesFor`'s flags.

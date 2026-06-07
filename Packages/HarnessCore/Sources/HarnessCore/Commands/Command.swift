@@ -121,6 +121,9 @@ public indirect enum Command: Codable, Sendable, Equatable {
     case setHook(event: String, source: String, condition: String?) // set-hook <event> "<cmd>"
     case showHooks(event: String?)                 // show-hooks [<event>]
     case unbindHook(id: UUID)                      // unbind-hook <id>
+    /// `find-window [-N|-C|-T] <pattern>` — fnmatch against window name/title (and pane
+    /// content with `-C`), then focus the match. Default matches name + title, like tmux.
+    case findWindow(pattern: String, matchName: Bool, matchContent: Bool, matchTitle: Bool)
 
     // MARK: Targeting
     /// Run `command` as if the client's focus were `spec`'s resolved target
@@ -240,6 +243,8 @@ extension Command {
         case let .setHook(event, source, _): return "set-hook \(event) '\(source)'"
         case let .showHooks(event): return "show-hooks\(event.map { " \($0)" } ?? "")"
         case let .unbindHook(id): return "unbind-hook \(id.uuidString)"
+        case let .findWindow(pattern, _, content, _):
+            return "find-window\(content ? " -C" : "") \(pattern)"
         case let .targeted(spec, command):
             return "\(command.shortDescription)\(spec.raw.isEmpty ? "" : " -t \(spec.raw)")"
         }

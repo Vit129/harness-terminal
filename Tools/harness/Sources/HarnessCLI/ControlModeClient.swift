@@ -104,7 +104,7 @@ enum ControlModeClient {
         case let .clientLocal(local):
             // Show verbs print their query results as control-mode lines; UI-only
             // verbs (overlays, modes) have no control-mode output.
-            return showVerbOutput(local, client: client) ?? ""
+            return try showVerbOutput(local, client: client) ?? ""
         case .unresolved:
             throw ControlModeError.unresolved
         }
@@ -112,7 +112,7 @@ enum ControlModeClient {
 
     /// Render the config/buffer/hook show verbs as text lines (the control-mode analog of
     /// the GUI message overlay and the compositor status flash).
-    private static func showVerbOutput(_ command: Command, client: DaemonClient) -> String? {
+    private static func showVerbOutput(_ command: Command, client: DaemonClient) throws -> String? {
         switch command {
         case let .showOptions(scope):
             guard case let .options(items)? = try? client.request(.showOptions(scope: scope), timeout: 3) else { return nil }
@@ -136,6 +136,22 @@ enum ControlModeClient {
         case let .showHooks(event):
             guard case let .hooks(hooks)? = try? client.request(.listHooks(event: event), timeout: 3) else { return nil }
             return hooks.map { "\($0.event) → \($0.commandSource) [\($0.id.uuidString)]" }.joined(separator: "\n")
+        case let .findWindow(pattern, name, content, title):
+            // Only the -C form reaches here (non-content translated to selectTab upstream).
+            _ = content
+            guard case let .snapshot(snapshot)? = try? client.request(.getSnapshot, timeout: 3) else { return nil }
+            let match = FindWindowMatcher.firstMatch(
+                snapshot, pattern: pattern, name: name, title: title
+            ) { surfaceID in
+                guard case let .text(text)? = try? client.request(
+                    .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 3) else { return nil }
+                return text
+            }
+            // No match is a %error (like the non-content path's .unresolved), not a
+            // benign %end a protocol consumer would read as success.
+            guard let match else { throw ControlModeError.noMatch(pattern: pattern) }
+            _ = try? client.request(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID), timeout: 3)
+            return "find-window: focused \(match.tabID.uuidString)"
         default:
             return nil
         }
@@ -174,11 +190,13 @@ enum ControlModeClient {
     enum ControlModeError: Error, CustomStringConvertible {
         case noSnapshot, unresolved
         case daemon(String)
+        case noMatch(pattern: String)
         var description: String {
             switch self {
             case .noSnapshot: return "could not read session snapshot"
             case .unresolved: return "command had no resolvable target"
             case let .daemon(message): return message
+            case let .noMatch(pattern): return "find-window: no matches for '\(pattern)'"
             }
         }
     }
