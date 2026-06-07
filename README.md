@@ -59,6 +59,12 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - **Session-as-tab** — each top tab is a project session; sidebar group headers can create a new session in that group with `+`, and the session card `×` appears on hover to close it
 - **Recent projects** — clock button in the sidebar footer shows the last 10 project roots and switches to an existing session on duplicate
 
+## Philosophy — Terminal First, IDE Convenience
+
+Harness is a **terminal** — not an editor that happens to have a terminal panel. Every feature (file tree, git panel, file viewer) is a shortcut that saves you from typing `cat`, `git status`, or `vim`. Nothing *requires* the GUI; it just makes common workflows faster.
+
+Think: **tmux + lazygit + bat + fzf** — built-in, zero config, native macOS.
+
 ## IDE Sidebar
 
 Toggle the sidebar with `Cmd+\`. It has three panels:
