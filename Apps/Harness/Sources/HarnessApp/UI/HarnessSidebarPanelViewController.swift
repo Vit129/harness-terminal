@@ -600,10 +600,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             fileTreeView.bottomAnchor.constraint(equalTo: footer.topAnchor),
         ])
         fileTreeView.onFilePreview = { [weak self] node in
-            guard let self else { return }
-            self.fileViewerVC.load(path: node.path)
-            self.fileTreeView.isHidden = true
-            self.fileViewerVC.view.isHidden = false
+            guard let self, let split = self.view.window?.contentViewController as? MainSplitViewController else { return }
+            split.contentVC.openFileTab(path: node.path)
         }
     }
 

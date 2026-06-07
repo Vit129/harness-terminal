@@ -12,6 +12,8 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     /// relying on empty space to imply separation from the terminal canvas.
     private let tabBarDivider = HarnessDesign.divider()
     private var paneContainer: PaneContainerView?
+    private let fileTabManager = FileTabManager()
+    private var fileEditorView: FileEditorView?
     private var lastStructureKey = ""
     private var pendingReload: Bool?
     /// Pasteboard change counter captured at left-mouse-down. On mouse-up, if it
@@ -368,6 +370,140 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         default:
             return nil
         }
+    }
+
+    // MARK: - File Tabs
+
+    func openFileTab(path: String) {
+        fileTabManager.open(path: path)
+        showFileEditorSplit()
+        loadActiveFileTab()
+    }
+
+    func closeFileTab(id: FileTabID) {
+        fileTabManager.close(id: id)
+        if fileTabManager.hasOpenTabs {
+            loadActiveFileTab()
+        } else {
+            hideFileEditorSplit()
+        }
+    }
+
+    func selectFileTab(id: FileTabID) {
+        fileTabManager.activate(id: id)
+        loadActiveFileTab()
+    }
+
+    private func loadActiveFileTab() {
+        guard let tab = fileTabManager.activeTab() else { return }
+        fileEditorView?.load(path: tab.path)
+        fileEditorTabBar?.reload(tabs: fileTabManager.openTabs, activeID: fileTabManager.activeFileTabID)
+    }
+
+    private var fileEditorSplit: NSSplitView?
+    private var fileEditorTabBar: FileEditorTabBarView?
+
+    private func showFileEditorSplit() {
+        guard fileEditorSplit == nil else {
+            loadActiveFileTab()
+            return
+        }
+        // Wrap terminal in a split: [file editor | terminal]
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.translatesAutoresizingMaskIntoConstraints = false
+
+        // File editor panel (tab bar + editor)
+        let editorPanel = NSView()
+        editorPanel.wantsLayer = true
+        editorPanel.layer?.backgroundColor = NSColor.black.cgColor
+        editorPanel.layer?.borderColor = NSColor(white: 0.25, alpha: 1).cgColor
+        editorPanel.layer?.borderWidth = 1
+        editorPanel.translatesAutoresizingMaskIntoConstraints = false
+
+        let tabBarView = FileEditorTabBarView()
+        tabBarView.translatesAutoresizingMaskIntoConstraints = false
+        tabBarView.onSelect = { [weak self] id in self?.selectFileTab(id: id) }
+        tabBarView.onClose = { [weak self] id in self?.closeFileTab(id: id) }
+        editorPanel.addSubview(tabBarView)
+        fileEditorTabBar = tabBarView
+
+        let editor = FileEditorView(frame: .zero)
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        editorPanel.addSubview(editor)
+        fileEditorView = editor
+
+        NSLayoutConstraint.activate([
+            tabBarView.topAnchor.constraint(equalTo: editorPanel.topAnchor),
+            tabBarView.leadingAnchor.constraint(equalTo: editorPanel.leadingAnchor),
+            tabBarView.trailingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
+            tabBarView.heightAnchor.constraint(equalToConstant: 34),
+            editor.topAnchor.constraint(equalTo: tabBarView.bottomAnchor),
+            editor.leadingAnchor.constraint(equalTo: editorPanel.leadingAnchor),
+            editor.trailingAnchor.constraint(equalTo: editorPanel.trailingAnchor),
+            editor.bottomAnchor.constraint(equalTo: editorPanel.bottomAnchor),
+        ])
+
+        // Reparent terminalHost into split
+        let terminalWrapper = NSView()
+        terminalWrapper.wantsLayer = true
+        terminalWrapper.layer?.backgroundColor = NSColor.black.cgColor
+        terminalWrapper.translatesAutoresizingMaskIntoConstraints = false
+        // Move all terminalHost subviews into wrapper
+        for sub in terminalHost.subviews {
+            sub.removeFromSuperview()
+            terminalWrapper.addSubview(sub)
+            sub.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                sub.topAnchor.constraint(equalTo: terminalWrapper.topAnchor),
+                sub.leadingAnchor.constraint(equalTo: terminalWrapper.leadingAnchor),
+                sub.trailingAnchor.constraint(equalTo: terminalWrapper.trailingAnchor),
+                sub.bottomAnchor.constraint(equalTo: terminalWrapper.bottomAnchor),
+            ])
+        }
+
+        split.addSubview(editorPanel)
+        split.addSubview(terminalWrapper)
+        terminalHost.addSubview(split)
+        NSLayoutConstraint.activate([
+            split.topAnchor.constraint(equalTo: terminalHost.topAnchor),
+            split.leadingAnchor.constraint(equalTo: terminalHost.leadingAnchor),
+            split.trailingAnchor.constraint(equalTo: terminalHost.trailingAnchor),
+            split.bottomAnchor.constraint(equalTo: terminalHost.bottomAnchor),
+        ])
+        // Set initial 50/50 split
+        DispatchQueue.main.async {
+            let total = split.bounds.width
+            if total > 0 { split.setPosition(total * 0.4, ofDividerAt: 0) }
+        }
+        fileEditorSplit = split
+    }
+
+    private func hideFileEditorSplit() {
+        guard let split = fileEditorSplit else { return }
+        // Move terminal content back to terminalHost directly
+        if let terminalWrapper = split.subviews.last {
+            for sub in terminalWrapper.subviews {
+                sub.removeFromSuperview()
+                terminalHost.addSubview(sub)
+                sub.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    sub.topAnchor.constraint(equalTo: terminalHost.topAnchor),
+                    sub.leadingAnchor.constraint(equalTo: terminalHost.leadingAnchor),
+                    sub.trailingAnchor.constraint(equalTo: terminalHost.trailingAnchor),
+                    sub.bottomAnchor.constraint(equalTo: terminalHost.bottomAnchor),
+                ])
+            }
+        }
+        split.removeFromSuperview()
+        fileEditorSplit = nil
+        fileEditorView = nil
+        fileEditorTabBar = nil
+    }
+
+    func activateTerminalTab() {
+        // no-op — terminal is always visible in split mode
     }
 }
 

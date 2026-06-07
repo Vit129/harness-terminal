@@ -7,6 +7,7 @@ final class MainSplitViewController: NSViewController {
     private let split = NSSplitView()
     private let sidebar = HarnessSidebarPanelViewController()
     private let content = ContentAreaViewController()
+    var contentVC: ContentAreaViewController { content }
     private let statusLine = StatusLineView()
     /// 1px hairline along the inner edge of the sidebar — adds quiet definition
     /// between sidebar/terminal without resorting to a draggable divider line.

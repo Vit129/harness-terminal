@@ -189,10 +189,27 @@ private struct NodeRow: View {
             NSItemProvider(contentsOf: URL(fileURLWithPath: node.node.path)) ?? NSItemProvider()
         }
         .contextMenu {
+            Button("New File") { newFile(in: node.node) }
+            Button("New Folder") { newFolder(in: node.node) }
+            Divider()
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.selectFile(node.node.path, inFileViewerRootedAtPath: "")
+            }
+            Button("Open in Default App") {
+                NSWorkspace.shared.open(URL(fileURLWithPath: node.node.path))
+            }
+            Divider()
             Button("Copy Path") { copyToPasteboard(node.node.path) }
             Button("Copy Relative Path") {
                 let rel = node.node.path.replacingOccurrences(of: rootPath + "/", with: "")
                 copyToPasteboard(rel)
+            }
+            Divider()
+            Button("Rename…") { renameItem(path: node.node.path) }
+            Button("Duplicate") { duplicateItem(path: node.node.path) }
+            Divider()
+            Button("Move to Trash", role: .destructive) {
+                moveToTrash(path: node.node.path)
             }
         }
     }
@@ -226,6 +243,67 @@ private struct NodeRow: View {
     private func copyToPasteboard(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    private func moveToTrash(path: String) {
+        let url = URL(fileURLWithPath: path)
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    private func newFile(in node: FileNode) {
+        let dir = node.isDirectory ? node.path : (node.path as NSString).deletingLastPathComponent
+        let path = uniquePath(base: dir, name: "untitled", ext: "")
+        FileManager.default.createFile(atPath: path, contents: nil)
+        renameItem(path: path)
+    }
+
+    private func newFolder(in node: FileNode) {
+        let dir = node.isDirectory ? node.path : (node.path as NSString).deletingLastPathComponent
+        let path = uniquePath(base: dir, name: "untitled folder", ext: "")
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+    }
+
+    private func renameItem(path: String) {
+        let url = URL(fileURLWithPath: path)
+        // Use NSWorkspace rename via Finder AppleScript is heavy — use simple alert
+        let alert = NSAlert()
+        alert.messageText = "Rename"
+        alert.informativeText = (path as NSString).lastPathComponent
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = (path as NSString).lastPathComponent
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let newName = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        let newPath = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(newName)
+        try? FileManager.default.moveItem(at: url, to: URL(fileURLWithPath: newPath))
+    }
+
+    private func duplicateItem(path: String) {
+        let ext = (path as NSString).pathExtension
+        let base = (path as NSString).deletingPathExtension
+        let dir = (path as NSString).deletingLastPathComponent
+        let name = (base as NSString).lastPathComponent
+        let newName = ext.isEmpty ? "\(name) copy" : "\(name) copy.\(ext)"
+        let dest = (dir as NSString).appendingPathComponent(newName)
+        try? FileManager.default.copyItem(atPath: path, toPath: dest)
+    }
+
+    private func uniquePath(base dir: String, name: String, ext: String) -> String {
+        let suffix = ext.isEmpty ? "" : ".\(ext)"
+        var path = (dir as NSString).appendingPathComponent(name + suffix)
+        var i = 2
+        while FileManager.default.fileExists(atPath: path) {
+            path = (dir as NSString).appendingPathComponent("\(name) \(i)\(suffix)")
+            i += 1
+        }
+        return path
     }
 
     private func loadChildren() async {
