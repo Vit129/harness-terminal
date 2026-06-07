@@ -3,41 +3,34 @@
 ## Active Context
 - **Project:** harness-terminal (Swift/AppKit macOS terminal emulator)
 - **Fork:** Vit129/harness-terminal (fork of robzilla1738/harness-terminal)
-- **Working branch:** `worktree-feature+acp-aidlc` in `.claude/worktrees/feature+acp-aidlc/`
-- **Preview:** `cd /tmp/hp && make preview` (symlink to avoid socket path length limit)
+- **Working branch:** `main`
+- **Preview:** `make preview` (uses `.harness-preview/` dir)
 
-## Current Sprint — Split Panel (v1.5.0)
-✅ CMUX-style split buttons (split right + close) at top-right corner of each pane  
-✅ ⌘D — split right (creates new pane with shell)  
-✅ ⌥⌘←→↑↓ — directional pane navigation  
-✅ ⌥⇧⌘W — close pane  
-✅ Drag divider to resize panes  
-✅ Removed old S1/S2/S3 pane-local surface tabs (broken drag UX)  
-✅ N-ary flatten: same-direction splits use single NSSplitView with equal distribution  
-✅ Infinite recursion fix: isApplyingPositions guard in HarnessSplitView.layout()  
-✅ Host reuse: detach terminal hosts before rebuild, re-insert without losing Metal state  
+## Current Sprint — Sidebar & Split Polish (post-v1.5.0)
+✅ Sidebar position toggle (left/right) — real-time, no restart required  
+✅ Right-click sidebar toggle button → "Move Sidebar to Left/Right" menu  
+✅ Right-click session row → includes "Move Sidebar to Left/Right"  
+✅ Removed all "Split Down" from menus, command palette, context menus  
+✅ P6 UI Polish complete (SF Symbols, animations, vibrancy, pill buttons)  
+✅ Git toast messages (fetch/pull/push/stage progress feedback)  
+✅ viewDidMoveToSuperview() fix for Metal CADisplayLink on reparent  
+✅ File preview (P4 Track 1 MVP) merged  
 
 ## Known Issues
-- **Split down removed** — The Split Down (vertical split/rows) functionality was completely removed from the menu bar, command palette, and UI buttons per user request. Split Right remains fully functional.
-- **Sidebar Right persistence & transition** — Sidebar position reverts to Left on app restart, and real-time transitions show layout anomalies (traffic light overlaps). See [sidebar-and-split-issues.md](file:///Users/supavit.cho/Git/harness-terminal/agent-memory/plans/sidebar-and-split-issues.md).
-- **Split Right squeezing** — Splitting horizontal panes more than 3 times causes the middle ones to be squeezed during resizes because NSSplitView's default resize algorithm is unequal. See [sidebar-and-split-issues.md](file:///Users/supavit.cho/Git/harness-terminal/agent-memory/plans/sidebar-and-split-issues.md).
+- **Split right 4+ panes slightly uneven** — NSSplitView default resize algorithm compresses middle panes on window resize. Tolerable for now.
 
 ## Completed Sprints
 - **v1.3.0** — IDE-like Sidebar (PBI-001): Files tab, Git tab, session tabs, recent projects
-- **v1.4.0** — Git panel: Commit ▼ menu (Tracked/Amend/Signoff), Sync button (Fetch From/Pull Rebase/Push To per-remote)
-
-## In Progress — P4 File View MVP (`worktree-p4-file-view`, 2026-06-07)
-✅ `FileViewerViewController` — read-only plain-text preview (NSTextView, 1MB guard, binary/non-UTF8 placeholder)
-✅ Single-click file in tree → preview replaces tree in sidebar; back arrow restores tree (double-click still opens in terminal editor)
-✅ Wired through `FileTreeSwiftUIView`/`WorkspaceFileTreeView`/`HarnessSidebarPanelViewController` via existing visibility-toggle pattern
-🔜 **Next:** redesign UX to browser-style tabs (open files in tabs instead of replacing the tree) — see `agent-memory/plans/p4-lsp-file-view.md`
-📋 Deferred: TreeSitter syntax highlighting, line numbers, Quick Look (images/PDF), LSP integration
+- **v1.4.0** — Git panel: Commit ▼ menu, Sync button with per-remote options
+- **v1.5.0** — CMUX split panes, N-ary flatten, host reuse, split down removed
 
 ## Architecture Notes
 - Sidebar: `HarnessSidebarPanelViewController` — tabs (Sessions/Files/Git) via NSSegmentedControl
+- Sidebar position: `MainSplitViewController.updateSidebarPlacement()` — reorders NSSplitView subviews
 - File tree: `WorkspaceFileTreeView` — NSOutlineView with `FileTreeWatcher`
 - Git panel: `GitPanelView` — custom NSView with scroll views for changes/history
 - Split panes: `PaneContainerView` builds from `PaneNode` binary tree; `HarnessSplitView` (NSSplitView subclass) per branch node
 - Split buttons: `PaneSplitButtonsView` — overlay at top-right with zPosition 1000
 - Sessions: `SessionCoordinator.shared` manages daemon IPC, snapshot notifications via `NotificationBus.shared.snapshotChanged`
 - Preview uses `.harness-preview/` — socket path max 103 bytes (use `/tmp/hp` symlink for worktree)
+- SoftIconButton: supports `rightMouseDown` → pops up assigned `.menu`

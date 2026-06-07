@@ -25,6 +25,7 @@ This branch adds IDE-like sidebar functionality to Harness Terminal, transformin
 - **Drag surface tabs** between panes to split left/right
 - **Drop overlay** — accent-colored half-pane highlight shows where the split will land
 - **Ratio preservation** — custom split ratios persist across tab switches and rebuilds (CASE-002 fix)
+- **Sidebar position** — toggle sidebar left/right via View menu, right-click toggle button, or session context menu (real-time, no restart)
 
 ### Session Management
 - **1 session = 1 project** — tab bar shows sessions, not tabs within a session

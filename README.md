@@ -55,6 +55,7 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - **Project-aware file tree** — SwiftUI tree with folder expand/collapse, right-click copy path, and drag-to-terminal
 - **Git workflow** — stage/unstage files, commit (with amend & signoff), fetch/pull/push (with per-remote and rebase options), branch switcher, and worktree controls from the sidebar
 - **CMUX pane splitting** — drag surface tabs to split left/right with live drop overlays and ratio auto-restoration
+- **Sidebar position** — move sidebar to left or right via View menu or right-click (real-time toggle, persists across restarts)
 - **Session-as-tab** — each top tab is a project session; sidebar group headers can create a new session in that group with `+`, and the session card `×` appears on hover to close it
 - **Recent projects** — clock button in the sidebar footer shows the last 10 project roots and switches to an existing session on duplicate
 
