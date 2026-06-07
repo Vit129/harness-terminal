@@ -143,6 +143,13 @@ public enum HarnessPaths {
         applicationSupport.appendingPathComponent("settings.json")
     }
 
+    /// Daemon-owned record of the last build whose first-run/what's-new banner was shown.
+    /// Read at registry start; the pending banner is consumed (and this rewritten) by the
+    /// first freshly created surface after an install or update.
+    public static var versionStateURL: URL {
+        applicationSupport.appendingPathComponent("version-state.json")
+    }
+
     /// User-installed `.harnesstheme` files (imported by double-clicking a shared theme).
     /// Kept under application support so installs survive relaunch and can be re-shared.
     public static var themesDirectory: URL {

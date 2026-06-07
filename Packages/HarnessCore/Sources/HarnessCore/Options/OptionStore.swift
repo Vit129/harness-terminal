@@ -122,6 +122,10 @@ public final class OptionStore: @unchecked Sendable {
         "pane-base-index": .int(0),
         // When on, tab indices are renumbered contiguously after a tab closes.
         "renumber-windows": .bool(false),
+        // One-shot first-run / what's-new terminal banner — read by the daemon's
+        // `injectVersionBannerIfPending`. Off suppresses the output but still records
+        // the build as seen (the banner never resurrects when re-enabled).
+        "update-banner": .bool(true),
         // Title behavior: `allow-rename` (global) lets a program set the title via
         // OSC; `automatic-rename` (per-tab, defaults on) is turned off by a manual
         // `rename-tab` so the chosen name sticks.

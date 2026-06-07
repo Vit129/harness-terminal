@@ -29,6 +29,17 @@ if [[ "$PLIST_SHORT" != "$CODE_SHORT" || "$PLIST_BUILD" != "$CODE_BUILD" ]]; the
   exit 1
 fi
 
+# Guard: the post-update "what's new" banner ships the generated CHANGELOG notes
+# (GeneratedReleaseNotes.swift). Stale notes would banner the PREVIOUS release's changes
+# after every update — fail the package step instead.
+NOTES_SWIFT="$ROOT/Packages/HarnessCore/Sources/HarnessCore/ReleaseNotes/GeneratedReleaseNotes.swift"
+NOTES_VERSION="$(sed -n 's/.*version: "\([^"]*\)".*/\1/p' "$NOTES_SWIFT" | head -1)"
+if [[ "$NOTES_VERSION" != "$PLIST_SHORT" ]]; then
+  echo "error: GeneratedReleaseNotes.swift ($NOTES_VERSION) does not match Info.plist ($PLIST_SHORT)." >&2
+  echo "       Run 'make release-notes' after updating CHANGELOG.md, before packaging." >&2
+  exit 1
+fi
+
 # SwiftPM resource bundles (for example HarnessTheme's bundled themes.json) are
 # emitted next to the built products. The app is assembled by this script rather
 # than by Xcode, so copy those bundles into Contents/Resources explicitly.

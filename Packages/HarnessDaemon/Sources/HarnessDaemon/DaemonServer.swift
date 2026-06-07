@@ -9,7 +9,7 @@ import HarnessCore
 
 /// @unchecked Sendable: socket-accept and subscription state are confined to the serial `queue`.
 public final class DaemonServer: @unchecked Sendable {
-    public let registry = SurfaceRegistry()
+    public let registry: SurfaceRegistry
     private var listener: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.robert.harness.daemon")
     private var clientBuffers: [Int32: Data] = [:]
@@ -63,7 +63,11 @@ public final class DaemonServer: @unchecked Sendable {
     private let waitForRegistry = WaitForRegistry()
     private let startedAt = Date()
 
-    public init() {
+    /// `enableVersionBanner` is passed by the real daemon entry point only (`main.swift`):
+    /// the first-run / what's-new banner is daemon policy, not something every embedded or
+    /// test registry should emit into freshly spawned PTYs.
+    public init(enableVersionBanner: Bool = false) {
+        registry = SurfaceRegistry(enableVersionBanner: enableVersionBanner)
         // Push layout changes to snapshot subscribers (the attach-window compositor),
         // replacing its old 0.5s poll. Hop onto the serial queue for FD-safe sends.
         registry.onSnapshotCommitted = { [weak self] revision in
