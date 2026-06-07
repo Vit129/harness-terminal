@@ -334,6 +334,11 @@ final class CommandParserTests: XCTestCase {
             .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
         )
         XCTAssertThrowsError(try CommandParser.parse("find-window"))
+        // A `-t` value is a (currently unsupported) target, never the pattern.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -t somewhere build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
     }
 
     /// tmux's table name for the vi copy-mode table is `copy-mode-vi`; Harness's is
@@ -356,6 +361,36 @@ final class CommandParserTests: XCTestCase {
         )
         // The emacs table keeps its own name.
         XCTAssertEqual(try CommandParser.parse("list-keys -T copy-mode-emacs"), .listKeys(table: "copy-mode-emacs"))
+    }
+
+    /// `--if <format>` makes bindable set-hook condition-capable like CLI bind-hook.
+    func testSetHookParsesCondition() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(##"set-hook --if "#{?pane_active,1,}" after-new-tab "display-message hi""##),
+            .setHook(event: "after-new-tab", source: "display-message hi", condition: "#{?pane_active,1,}")
+        )
+    }
+
+    /// Values that begin with `-` survive once the positional run starts (getopt):
+    /// a quoted hook command with flags, a buffer payload, an env value. `--` ends
+    /// flag parsing explicitly for a leading-dash first positional.
+    func testDashPrefixedValuesAreNotSwallowed() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-hook after-new-tab splitw -h"#),
+            .setHook(event: "after-new-tab", source: "splitw -h", condition: nil),
+            "unquoted trailing flags belong to the hook command"
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-environment PS1_SUFFIX -v"),
+            .setEnvironment(global: false, key: "PS1_SUFFIX", value: "-v")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-buffer -- "-rf""#),
+            .setBuffer(name: nil, text: "-rf"),
+            "-- ends flag parsing so a dash-leading payload parses"
+        )
+        // A bare key with no value still errors (tmux) rather than persisting "".
+        XCTAssertThrowsError(try CommandParser.parse("set-environment LONESOME"))
     }
 
     func testKnownVerbsAreAllParseable() {

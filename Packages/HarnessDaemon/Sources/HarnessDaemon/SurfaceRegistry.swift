@@ -350,18 +350,25 @@ public final class SurfaceRegistry: @unchecked Sendable {
             fireHookLocked(.afterKillTab)
             return .ok
         case let .closeSession(sessionID):
-            let closedSurfaces = editor.snapshot.workspaces
+            let closingSession = editor.snapshot.workspaces
                 .flatMap(\.sessions)
-                .first(where: { $0.id == sessionID })?
+                .first(where: { $0.id == sessionID })
+            let closedSurfaces = closingSession?
                 .tabs
                 .flatMap { $0.rootPane.allSurfaceIDs().map(\.uuidString) } ?? []
+            // Hook context captured BEFORE the close: `#{session_name}` must describe
+            // the session that closed, not whatever survives it.
+            let closedContext = buildFormatContext(
+                surfaceKey: (closingSession?.activeTab ?? closingSession?.tabs.first)?
+                    .rootPane.allSurfaceIDs().first?.uuidString
+            )
             guard editor.closeSession(sessionID) else { return .error("Session not found") }
             closeSurfaces(closedSurfaces)
             // Drop the session's per-session env so entries don't accumulate in environment.json.
             environmentStore.clearSession(sessionID.uuidString)
             ensureAllSnapshotSurfaces()
             commit()
-            fireHookLocked(.sessionClosed)
+            fireHookLocked(.sessionClosed, context: closedContext)
             return .ok
         case let .closeWorkspace(id):
             let workspaceSessionIDs = editor.snapshot.workspaces
@@ -597,12 +604,20 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // later OSC title doesn't clobber the chosen name.
             optionStore.set(.bool(false), key: "automatic-rename", scope: .tab, target: tabID.uuidString)
             commit()
-            fireHookLocked(.windowRenamed)
+            // Hook context follows the RENAMED tab (a `-t` can name a non-active one),
+            // like the OSC automatic-rename path — never the focused tab's.
+            fireHookLocked(.windowRenamed, surfaceKey: editor.snapshot.workspaces
+                .flatMap { $0.sessions.flatMap(\.tabs) }
+                .first(where: { $0.id == tabID })?
+                .rootPane.allSurfaceIDs().first?.uuidString)
             return .ok
         case let .renameSession(sessionID, name):
             guard editor.renameSession(sessionID, name: name) else { return .error("Session not found") }
             commit()
-            fireHookLocked(.sessionRenamed)
+            // Same misroute class: format against the RENAMED session's active tab.
+            let renamed = editor.snapshot.workspaces.flatMap(\.sessions).first { $0.id == sessionID }
+            fireHookLocked(.sessionRenamed, surfaceKey: (renamed?.activeTab ?? renamed?.tabs.first)?
+                .rootPane.allSurfaceIDs().first?.uuidString)
             return .ok
         case let .renameWorkspace(workspaceID, name):
             guard editor.renameWorkspace(workspaceID, name: name) else { return .error("Workspace not found") }
@@ -837,16 +852,21 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // Render via FormatString using whatever context the daemon can
             // build right now (active workspace/tab from snapshot). UI clients
             // observe the notification bus and decide how to surface it.
-            let context = buildFormatContext()
-            let text = FormatString.evaluate(format, context: context)
-            NotificationBus.shared.post(AgentNotification(
-                surfaceID: nil,
-                daemonSurfaceID: nil,
-                title: "Harness",
-                body: text
-            ))
+            postDisplayMessage(FormatString.evaluate(format, context: buildFormatContext()))
             return .ok
         }
+    }
+
+    /// Post an already-rendered display-message line. Split from the IPC handler so
+    /// hook-fired display-message can render with the HOOK's context (the event's
+    /// subject — e.g. the closed session) instead of the active chain.
+    func postDisplayMessage(_ text: String) {
+        NotificationBus.shared.post(AgentNotification(
+            surfaceID: nil,
+            daemonSurfaceID: nil,
+            title: "Harness",
+            body: text
+        ))
     }
 
     private func subscribe(surfaceID: String) -> IPCResponse {
@@ -974,17 +994,19 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// stay nil so format strings render an empty token instead of "(none)".
     public func buildFormatContext(surfaceKey: String? = nil, clientName: String? = nil) -> FormatContext {
         // When the event names a specific surface (split/kill/exit), resolve THAT
-        // pane's tab so tokens like #{pane_cwd} reflect the affected pane; otherwise
-        // fall back to the active selection.
+        // pane's tab AND its owning session, so tokens like #{pane_cwd} and
+        // #{session_name} reflect the affected pane — not the active selection.
         let workspace = editor.snapshot.activeWorkspace
-        let session = workspace?.activeSession
+        var session = workspace?.activeSession
         var tab = workspace?.activeTab
         if let surfaceKey, let match = editor.tab(forSurfaceKey: surfaceKey) {
-            let resolved = editor.snapshot.workspaces
+            let owningSession = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
-                .sessions.flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })
-            if let resolved { tab = resolved }
+                .sessions.first(where: { $0.tabs.contains { $0.id == match.tabID } })
+            if let resolved = owningSession?.tabs.first(where: { $0.id == match.tabID }) {
+                tab = resolved
+                session = owningSession
+            }
         }
         return FormatContext(
             paneID: surfaceKey,
@@ -1009,9 +1031,11 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// Schedule the hooks bound to `event`. MUST be called with `lock` held: it reads
     /// the locked snapshot to build the context, then fires on `hookQueue` so the
     /// commands run after the current mutation commits and the lock is released.
-    private func fireHookLocked(_ event: HookEvent, surfaceKey: String? = nil) {
-        let context = buildFormatContext(surfaceKey: surfaceKey)
-        hookQueue.async { [weak self] in self?.hookRegistry.fire(event, context: context) }
+    /// `context` overrides the snapshot-derived one for events whose subject is gone
+    /// by fire time (session-closed captures its context before the mutation).
+    private func fireHookLocked(_ event: HookEvent, surfaceKey: String? = nil, context: FormatContext? = nil) {
+        let resolved = context ?? buildFormatContext(surfaceKey: surfaceKey)
+        hookQueue.async { [weak self] in self?.hookRegistry.fire(event, context: resolved) }
     }
 
     /// Client attach/detach originate in `DaemonServer` (which owns FDs), outside the

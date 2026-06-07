@@ -431,6 +431,10 @@ public enum CommandParser {
             }
             let unset = tokens.contains("-u")
             let value = positional.dropFirst().joined(separator: " ")
+            // tmux errors on a bare key; silently persisting KEY="" would surprise.
+            guard unset || !value.isEmpty else {
+                throw CommandParseError.missingArgument("set-environment requires a value (or -u to unset)")
+            }
             return .setEnvironment(
                 global: tokens.contains("-g"),
                 key: key,
@@ -455,14 +459,17 @@ public enum CommandParser {
         case "show-buffer":
             return .showBuffer(name: stringValue(for: "-b", in: tokens))
         case "set-hook":
-            let positional = positionalTokens(tokens, skippingValuesFor: [])
+            // `--if <format>` mirrors the CLI's `bind-hook --if` so a conditional hook
+            // can be bound from the `:` prompt / source-file too, not just the CLI.
+            let condition = stringValue(for: "--if", in: tokens)
+            let positional = positionalTokens(tokens, skippingValuesFor: ["--if"])
             guard positional.count >= 2 else {
                 throw CommandParseError.missingArgument("set-hook requires an event and a command")
             }
             return .setHook(
                 event: positional[0],
                 source: positional.dropFirst().joined(separator: " "),
-                condition: nil
+                condition: condition
             )
         case "show-hooks":
             return .showHooks(event: positionalTokens(tokens, skippingValuesFor: []).first)
@@ -472,7 +479,9 @@ public enum CommandParser {
             else { throw CommandParseError.missingArgument("unbind-hook requires a hook id (see show-hooks)") }
             return .unbindHook(id: id)
         case "find-window":
-            guard let pattern = positionalTokens(tokens, skippingValuesFor: []).first else {
+            // `-t` (a target window/session for the search) isn't supported, but its
+            // VALUE must never be mistaken for the search pattern.
+            guard let pattern = positionalTokens(tokens, skippingValuesFor: ["-t"]).first else {
                 throw CommandParseError.missingArgument("find-window requires a pattern")
             }
             // tmux defaults to matching everything (-CNT); Harness defaults to the cheap
@@ -526,18 +535,27 @@ public enum CommandParser {
     /// tmux key-table name aliases. Harness's vi-flavored copy-mode table is named
     /// `copy-mode` (selected when `mode-keys` is vi, the default) — tmux calls that table
     /// `copy-mode-vi`, so accept both everywhere a table name is typed.
-    private static func canonicalTableName(_ name: String) -> String {
+    public static func canonicalTableName(_ name: String) -> String {
         name == "copy-mode-vi" ? "copy-mode" : name
     }
 
     /// Tokens that are not flags and not the value of one of `skippingValuesFor`'s flags.
+    /// getopt-style: flag recognition stops at the first positional token or a literal
+    /// `--`, so values that begin with `-` (quoted hook commands, buffer payloads,
+    /// option/environment values) survive once the positional run starts instead of
+    /// being silently dropped as unknown flags.
     private static func positionalTokens(_ tokens: [String], skippingValuesFor valueFlags: [String]) -> [String] {
         var positional: [String] = []
         var index = 0
+        var flagsEnded = false
         while index < tokens.count {
             let token = tokens[index]
-            if valueFlags.contains(token) { index += 2; continue }
-            if token.hasPrefix("-"), token.count > 1, Int(token) == nil { index += 1; continue }
+            if !flagsEnded {
+                if token == "--" { flagsEnded = true; index += 1; continue }
+                if valueFlags.contains(token) { index += 2; continue }
+                if token.hasPrefix("-"), token.count > 1, Int(token) == nil { index += 1; continue }
+                flagsEnded = true // first positional ends the flag run (POSIX)
+            }
             positional.append(token)
             index += 1
         }

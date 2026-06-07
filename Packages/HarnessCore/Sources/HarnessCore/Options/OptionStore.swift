@@ -82,7 +82,10 @@ public final class OptionStore: @unchecked Sendable {
         save()
     }
 
-    public func unset(key: String, scope: Scope = .global, target: String? = nil) {
+    public func unset(key rawKey: String, scope: Scope = .global, target: String? = nil) {
+        // Same alias mapping as get/set — unsetting `default-terminal` must clear
+        // the canonical key, not leave the stored value reachable by both names.
+        let key = Self.canonical(rawKey)
         lock.lock()
         values.removeValue(forKey: Self.encodeKey(ScopedKey(scope: scope, target: target, key: key)))
         lock.unlock()

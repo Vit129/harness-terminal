@@ -243,6 +243,7 @@ final class SessionCoordinator: NSObject {
             applyTerminalIdentity(to: host)
             pushBorderColors(to: host)
         }
+        adoptSynchronizeOptions()
         refreshSyncSiblings()
         reassertMarkedPane()
     }
@@ -1075,8 +1076,31 @@ final class SessionCoordinator: NSObject {
         guard let tab = snapshot.activeWorkspace?.activeTab else { return }
         let nowOn = on ?? !synchronizedTabIDs.contains(tab.id)
         if nowOn { synchronizedTabIDs.insert(tab.id) } else { synchronizedTabIDs.remove(tab.id) }
+        // Write the per-tab option through (tmux: synchronize-panes IS a window
+        // option), so `setw -t <tab> synchronize-panes` and the GUI toggle are one
+        // state — the compositor honors the same option for the same tab.
+        requestDaemon(.setOption(
+            scope: "tab", target: tab.id.uuidString,
+            key: "synchronize-panes", rawValue: nowOn ? "on" : "off"
+        ))
         refreshSyncSiblings()
         DisplayMessage.show(nowOn ? "synchronize-panes: on" : "synchronize-panes: off")
+    }
+
+    /// Adopt per-tab `synchronize-panes` options written outside the GUI (`setw`,
+    /// the compositor toggle) into the local mirror. Called from metadata sync.
+    func adoptSynchronizeOptions() {
+        guard case let .options(entries)? = requestDaemon(.showOptions(scope: "tab")) else { return }
+        var changed = false
+        for entry in entries where entry.key == "synchronize-panes" {
+            guard let target = entry.target, let tabID = TabID(uuidString: target) else { continue }
+            let on = entry.value == "on" || entry.value == "true" || entry.value == "1"
+            if on != synchronizedTabIDs.contains(tabID) {
+                if on { synchronizedTabIDs.insert(tabID) } else { synchronizedTabIDs.remove(tabID) }
+                changed = true
+            }
+        }
+        if changed { refreshSyncSiblings() }
     }
 
     /// Push each live host its sibling surface ids when its tab is synchronized

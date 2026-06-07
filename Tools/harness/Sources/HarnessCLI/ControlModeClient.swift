@@ -92,13 +92,19 @@ enum ControlModeClient {
         case let .requests(requests):
             var output = ""
             for request in requests {
-                if case let .text(text)? = try? client.request(request, timeout: 3) { output += text }
+                switch try? client.request(request, timeout: 3) {
+                case let .text(text)?: output += text
+                // Daemon validation errors become a %error block — a dropped .error
+                // would read as success to anything parsing the control protocol.
+                case let .error(message)?: throw ControlModeError.daemon(message)
+                default: break
+                }
             }
             return output
         case let .clientLocal(local):
             // Show verbs print their query results as control-mode lines; UI-only
             // verbs (overlays, modes) have no control-mode output.
-            return showVerbOutput(local, client: client) ?? ""
+            return try showVerbOutput(local, client: client) ?? ""
         case .unresolved:
             throw ControlModeError.unresolved
         }
@@ -106,7 +112,7 @@ enum ControlModeClient {
 
     /// Render the config/buffer/hook show verbs as text lines (the control-mode analog of
     /// the GUI message overlay and the compositor status flash).
-    private static func showVerbOutput(_ command: Command, client: DaemonClient) -> String? {
+    private static func showVerbOutput(_ command: Command, client: DaemonClient) throws -> String? {
         switch command {
         case let .showOptions(scope):
             guard case let .options(items)? = try? client.request(.showOptions(scope: scope), timeout: 3) else { return nil }
@@ -121,7 +127,11 @@ enum ControlModeClient {
             guard case let .buffers(buffers)? = try? client.request(.listBuffers, timeout: 3) else { return nil }
             return buffers.map { "\($0.name): \($0.byteCount) bytes: \"\($0.preview)\"" }.joined(separator: "\n")
         case let .showBuffer(name):
-            guard case let .buffer(buffer)? = try? client.request(.getBuffer(name: name), timeout: 3) else { return nil }
+            // A missing buffer reports like the GUI/compositor ("no such buffer"),
+            // not an empty success block.
+            guard case let .buffer(buffer)? = try? client.request(.getBuffer(name: name), timeout: 3) else {
+                return "no such buffer"
+            }
             return buffer.data.map { String(decoding: $0, as: UTF8.self) } ?? buffer.preview
         case let .showHooks(event):
             guard case let .hooks(hooks)? = try? client.request(.listHooks(event: event), timeout: 3) else { return nil }
@@ -137,7 +147,9 @@ enum ControlModeClient {
                     .capturePane(surfaceID: surfaceID, includeScrollback: false), timeout: 3) else { return nil }
                 return text
             }
-            guard let match else { return "find-window: no matches for '\(pattern)'" }
+            // No match is a %error (like the non-content path's .unresolved), not a
+            // benign %end a protocol consumer would read as success.
+            guard let match else { throw ControlModeError.noMatch(pattern: pattern) }
             _ = try? client.request(.selectTab(workspaceID: match.workspaceID, tabID: match.tabID), timeout: 3)
             return "find-window: focused \(match.tabID.uuidString)"
         default:
@@ -177,10 +189,14 @@ enum ControlModeClient {
 
     enum ControlModeError: Error, CustomStringConvertible {
         case noSnapshot, unresolved
+        case daemon(String)
+        case noMatch(pattern: String)
         var description: String {
             switch self {
             case .noSnapshot: return "could not read session snapshot"
             case .unresolved: return "command had no resolvable target"
+            case let .daemon(message): return message
+            case let .noMatch(pattern): return "find-window: no matches for '\(pattern)'"
             }
         }
     }

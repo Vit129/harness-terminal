@@ -128,7 +128,9 @@ private final class WindowSession: @unchecked Sendable {
     private let client: DaemonClient
     private let configuration: WindowAttachClient.Configuration
     private var tab: Tab
-    private let workspaceID: WorkspaceID?
+    /// var: re-pinned together with `sessionID` when `detach-on-destroy off`
+    /// re-targets a surviving session in another workspace.
+    private var workspaceID: WorkspaceID?
     /// var: `detach-on-destroy off` re-targets a surviving session on destroy.
     private var sessionID: SessionID
     /// Merged prefix/copy-mode key tables (defaults + `keybindings.json`), so the
@@ -603,7 +605,8 @@ private final class WindowSession: @unchecked Sendable {
             detachOnDestroy = !(entry.value == "off" || entry.value == "false" || entry.value == "0")
         }
         // `synchronize-panes` as a window option (tmux setw): the option is authoritative
-        // when set per-tab; the toggle command still works and writes only local state.
+        // when set per-tab; the toggle command writes the same option through, so the
+        // store is the single truth and a snapshot push never reverts a local toggle.
         for entry in entries where entry.key == "synchronize-panes" && entry.scope == "tab" && entry.target == tab.id.uuidString {
             synchronize = entry.value == "on" || entry.value == "true" || entry.value == "1"
         }
@@ -1032,6 +1035,13 @@ private final class WindowSession: @unchecked Sendable {
 
     private func toggleSynchronize(_ set: Bool?) {
         synchronize = set ?? !synchronize
+        // Write the per-tab option through (tmux: synchronize-panes IS a window
+        // option) so the next snapshot push re-reads the value just toggled instead
+        // of silently reverting it — option store and local state stay one truth.
+        _ = try? client.request(.setOption(
+            scope: "tab", target: tab.id.uuidString,
+            key: "synchronize-panes", rawValue: synchronize ? "on" : "off"
+        ), timeout: 1)
         flashStatus(synchronize ? "synchronize-panes on" : "synchronize-panes off")
     }
 
@@ -1191,12 +1201,25 @@ private final class WindowSession: @unchecked Sendable {
         )
         switch CommandIPCTranslator.translate(command, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex) {
         case let .requests(requests):
-            for request in requests { _ = try? client.request(request, timeout: 2) }
+            for request in requests {
+                // Surface daemon validation errors (unknown hook event, bad option
+                // scope, …) in the status line — never a silent no-op. First error
+                // aborts the remainder, like the GUI and CLI.
+                if case let .error(message)? = try? client.request(request, timeout: 2) {
+                    flashStatus(message)
+                    break
+                }
+            }
             checkStructure()
         case let .clientLocal(local):
             handleLocalCommand(local, target: target)
         case .unresolved:
-            break
+            // find-window's no-match reads as a search result, like the -C path.
+            if case let .findWindow(pattern, _, _, _) = command {
+                flashStatus("find-window: no matches for '\(pattern)'")
+            } else {
+                flashStatus("no resolvable target for command")
+            }
         }
     }
 
@@ -1321,6 +1344,11 @@ private final class WindowSession: @unchecked Sendable {
                let fallbackTab = fallback.activeTab ?? fallback.tabs.first {
                 sessionID = fallback.id
                 tab = fallbackTab
+                // Re-pin the workspace too: currentTarget()/status/titles resolve
+                // against it, and the fallback session may live elsewhere.
+                if let owner = snapshot.workspaces.first(where: { ws in ws.sessions.contains { $0.id == fallback.id } }) {
+                    workspaceID = owner.id
+                }
                 rebuildLayout(initial: false)
                 flashStatus("session closed — switched to \(fallback.name.isEmpty ? "another session" : fallback.name)")
                 return
@@ -1416,6 +1444,9 @@ private final class WindowSession: @unchecked Sendable {
         renderQueue.sync {
             tornDown = true
             if mouseEnabled { setOuterMouseTracking(false) }
+            // Restore an empty outer title (set-titles): the user's shell title
+            // machinery takes back over after detach.
+            if lastOuterTitle != nil { writeOut("\u{1b}]2;\u{07}"); lastOuterTitle = nil }
             writeOut("\u{1b}[0m\u{1b}[?25h\u{1b}[2J\u{1b}[H") // reset SGR, show cursor, clear frame
         }
         if wakeRead >= 0 { close(wakeRead) }

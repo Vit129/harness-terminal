@@ -327,11 +327,25 @@ final class MainExecutor: CommandExecutor {
         )
         switch CommandIPCTranslator.translate(command, target: focus, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex) {
         case let .requests(requests):
-            for request in requests { _ = coordinator.requestDaemon(request) }
+            // Daemon validation errors (unknown hook event, bad option scope, …) must
+            // reach the user — a silently-dropped .error reads as success (fail-loud
+            // policy). First error aborts the remainder.
+            for request in requests {
+                if case let .error(message)? = coordinator.requestDaemon(request) {
+                    coordinator.syncFromDaemon()
+                    throw CommandExecutionError.daemonError(message)
+                }
+            }
             coordinator.syncFromDaemon()
         case let .clientLocal(local):
             try dispatch(local)
         case .unresolved:
+            // find-window's no-match is a search result, not a focus problem — say so
+            // (matches the -C path and the compositor/control-mode wording).
+            if case let .findWindow(pattern, _, _, _) = command {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
             throw CommandExecutionError.noActiveSurface
         }
     }
@@ -508,6 +522,12 @@ final class MainExecutor: CommandExecutor {
 
 @MainActor
 enum DisplayMessage {
+    /// `display-time` cache: a synchronous show-options IPC round-trip per toast
+    /// blocked the main actor (hook bursts fire many). The value changes rarely —
+    /// re-read at most every few seconds, like the compositor's applyOptions cache.
+    private static var cachedDisplayTimeMS = 750
+    private static var displayTimeFetchedAt = Date.distantPast
+
     /// Non-blocking transient toast anchored to the active window, with the
     /// message run through the `FormatString` evaluator so tokens like
     /// `#{pane_title}` / `#{session_name}` resolve (matching the status line).
@@ -515,11 +535,14 @@ enum DisplayMessage {
         let rendered = FormatString.evaluate(format, context: SessionCoordinator.shared.currentFormatContext())
         guard let host = (NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.contentView != nil }))?.contentView else { return }
         // `display-time` (ms, tmux) bounds the toast hold, same as the compositor's flash.
-        let ms = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)).flatMap { response -> Int? in
-            guard case let .options(entries) = response else { return nil }
-            return entries.first { $0.key == "display-time" }.flatMap { Int($0.value) }
-        } ?? 750
-        Toast.show(rendered, in: host, hold: max(Double(ms) / 1000, 0.1))
+        if Date().timeIntervalSince(displayTimeFetchedAt) > 5 {
+            displayTimeFetchedAt = Date()
+            cachedDisplayTimeMS = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)).flatMap { response -> Int? in
+                guard case let .options(entries) = response else { return nil }
+                return entries.first { $0.key == "display-time" }.flatMap { Int($0.value) }
+            } ?? 750
+        }
+        Toast.show(rendered, in: host, hold: max(Double(cachedDisplayTimeMS) / 1000, 0.1))
     }
 }
 
