@@ -5,6 +5,7 @@ import HarnessCore
 final class GitPanelView: NSView {
     private var currentPath: String?
     private var didCommitSinceLastSync = false
+    private var selectedCommitHash: String?
 
     // Top tabs: Changes | History | Worktrees
     private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
@@ -24,6 +25,12 @@ final class GitPanelView: NSView {
     // History view
     private let historyScroll = NSScrollView()
     private let historyStack = FlippedStackView()
+    private let historyDetailContainer = NSView()
+    private let historyFilesScroll = NSScrollView()
+    private let historyFilesStack = FlippedStackView()
+    private let historyPreviewScroll = NSScrollView()
+    private let historyPreviewTextView = NSTextView()
+    private let historyEmptyLabel = NSTextField(labelWithString: "Select a commit to inspect changed files")
 
     // Worktrees view
     private let worktreesScroll = NSScrollView()
@@ -49,6 +56,13 @@ final class GitPanelView: NSView {
     func updateRoot(path: String, force: Bool = false) {
         guard force || path != currentPath else { return }
         currentPath = path
+        selectedCommitHash = nil
+        Task { [weak self] in await self?.refresh() }
+    }
+
+    func clearRoot() {
+        currentPath = nil
+        selectedCommitHash = nil
         Task { [weak self] in await self?.refresh() }
     }
 
@@ -90,7 +104,7 @@ final class GitPanelView: NSView {
         historyContainer.translatesAutoresizingMaskIntoConstraints = false
         historyContainer.isHidden = true
         historyStack.orientation = .vertical; historyStack.alignment = .leading; historyStack.spacing = 0
-        setupScrollView(historyScroll, with: historyStack, in: historyContainer)
+        setupHistoryView()
 
         // Worktrees container
         worktreesContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -209,6 +223,91 @@ final class GitPanelView: NSView {
             stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+    }
+
+    private func setupHistoryView() {
+        historyStack.translatesAutoresizingMaskIntoConstraints = false
+        historyDetailContainer.translatesAutoresizingMaskIntoConstraints = false
+        historyFilesStack.orientation = .vertical
+        historyFilesStack.alignment = .leading
+        historyFilesStack.spacing = 0
+        historyFilesStack.translatesAutoresizingMaskIntoConstraints = false
+
+        historyScroll.documentView = historyStack
+        historyScroll.hasVerticalScroller = true
+        historyScroll.drawsBackground = false
+        historyScroll.scrollerStyle = .overlay
+        historyScroll.autohidesScrollers = true
+        historyScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        historyFilesScroll.documentView = historyFilesStack
+        historyFilesScroll.hasVerticalScroller = true
+        historyFilesScroll.drawsBackground = false
+        historyFilesScroll.scrollerStyle = .overlay
+        historyFilesScroll.autohidesScrollers = true
+        historyFilesScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        historyPreviewTextView.isEditable = false
+        historyPreviewTextView.isSelectable = true
+        historyPreviewTextView.drawsBackground = false
+        historyPreviewTextView.textContainerInset = NSSize(width: HarnessDesign.Spacing.sm, height: HarnessDesign.Spacing.sm)
+        historyPreviewTextView.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        historyPreviewTextView.textColor = HarnessDesign.chrome.textPrimary
+        historyPreviewTextView.textContainer?.widthTracksTextView = false
+        historyPreviewTextView.isHorizontallyResizable = true
+        historyPreviewTextView.autoresizingMask = [.width]
+
+        historyPreviewScroll.documentView = historyPreviewTextView
+        historyPreviewScroll.hasVerticalScroller = true
+        historyPreviewScroll.hasHorizontalScroller = true
+        historyPreviewScroll.drawsBackground = false
+        historyPreviewScroll.scrollerStyle = .overlay
+        historyPreviewScroll.autohidesScrollers = true
+        historyPreviewScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        historyEmptyLabel.font = .systemFont(ofSize: 11.5)
+        historyEmptyLabel.textColor = HarnessDesign.chrome.textTertiary
+        historyEmptyLabel.alignment = .center
+        historyEmptyLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        historyContainer.addSubview(historyScroll)
+        historyContainer.addSubview(historyDetailContainer)
+        historyDetailContainer.addSubview(historyFilesScroll)
+        historyDetailContainer.addSubview(historyPreviewScroll)
+        historyDetailContainer.addSubview(historyEmptyLabel)
+
+        NSLayoutConstraint.activate([
+            historyScroll.topAnchor.constraint(equalTo: historyContainer.topAnchor),
+            historyScroll.leadingAnchor.constraint(equalTo: historyContainer.leadingAnchor),
+            historyScroll.trailingAnchor.constraint(equalTo: historyContainer.trailingAnchor),
+            historyScroll.heightAnchor.constraint(equalTo: historyContainer.heightAnchor, multiplier: 0.42),
+            historyStack.leadingAnchor.constraint(equalTo: historyScroll.contentView.leadingAnchor),
+            historyStack.trailingAnchor.constraint(equalTo: historyScroll.contentView.trailingAnchor),
+            historyStack.widthAnchor.constraint(equalTo: historyScroll.contentView.widthAnchor),
+
+            historyDetailContainer.topAnchor.constraint(equalTo: historyScroll.bottomAnchor, constant: 4),
+            historyDetailContainer.leadingAnchor.constraint(equalTo: historyContainer.leadingAnchor),
+            historyDetailContainer.trailingAnchor.constraint(equalTo: historyContainer.trailingAnchor),
+            historyDetailContainer.bottomAnchor.constraint(equalTo: historyContainer.bottomAnchor),
+
+            historyFilesScroll.topAnchor.constraint(equalTo: historyDetailContainer.topAnchor),
+            historyFilesScroll.leadingAnchor.constraint(equalTo: historyDetailContainer.leadingAnchor),
+            historyFilesScroll.trailingAnchor.constraint(equalTo: historyDetailContainer.trailingAnchor),
+            historyFilesScroll.heightAnchor.constraint(equalToConstant: 96),
+            historyFilesStack.leadingAnchor.constraint(equalTo: historyFilesScroll.contentView.leadingAnchor),
+            historyFilesStack.trailingAnchor.constraint(equalTo: historyFilesScroll.contentView.trailingAnchor),
+            historyFilesStack.widthAnchor.constraint(equalTo: historyFilesScroll.contentView.widthAnchor),
+
+            historyPreviewScroll.topAnchor.constraint(equalTo: historyFilesScroll.bottomAnchor, constant: 4),
+            historyPreviewScroll.leadingAnchor.constraint(equalTo: historyDetailContainer.leadingAnchor),
+            historyPreviewScroll.trailingAnchor.constraint(equalTo: historyDetailContainer.trailingAnchor),
+            historyPreviewScroll.bottomAnchor.constraint(equalTo: historyDetailContainer.bottomAnchor),
+
+            historyEmptyLabel.centerXAnchor.constraint(equalTo: historyDetailContainer.centerXAnchor),
+            historyEmptyLabel.centerYAnchor.constraint(equalTo: historyDetailContainer.centerYAnchor),
+            historyEmptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: historyDetailContainer.leadingAnchor, constant: 16),
+            historyEmptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: historyDetailContainer.trailingAnchor, constant: -16),
         ])
     }
 
@@ -444,6 +543,19 @@ final class GitPanelView: NSView {
         }
     }
 
+    @objc private func historyCommitClicked(_ sender: GitHistoryCommitCardView) {
+        selectedCommitHash = sender.commitHash
+        Task { [weak self] in
+            await self?.loadCommitDetails(hash: sender.commitHash)
+        }
+    }
+
+    @objc private func historyFileClicked(_ sender: GitHistoryFileButton) {
+        Task { [weak self] in
+            await self?.loadCommitFileDiff(commitHash: sender.commitHash, path: sender.filePath)
+        }
+    }
+
     @objc private func toggleStage(_ sender: NSButton) {
         guard let path = currentPath, let file = sender.toolTip else { return }
         // After click, .on means user wants to stage, .off means unstage
@@ -532,7 +644,7 @@ final class GitPanelView: NSView {
 
         let branch = await runGit(["branch", "--show-current"], in: path)
         let porcelain = await runGit(["status", "--porcelain"], in: path)
-        let log = await runGit(["log", "--format=%H|%an|%ar|%s", "-25"], in: path)
+        let log = await runGit(["log", "--format=%H%x1f%an%x1f%ar%x1f%s", "-25"], in: path)
 
         branchLabel.stringValue = "⎇ " + (branch.isEmpty ? "detached" : branch)
 
@@ -570,10 +682,24 @@ final class GitPanelView: NSView {
 
         // History
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for line in log.components(separatedBy: "\n").prefix(25) where !line.isEmpty {
-            let card = makeHistoryCard(line)
-            historyStack.addArrangedSubview(card)
-            card.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+        let commits = log.components(separatedBy: "\n").filter { !$0.isEmpty }
+        tabSelector.setLabel("History", forSegment: 1)
+        if commits.isEmpty {
+            let label = makeLabel("No commits")
+            historyStack.addArrangedSubview(label)
+            label.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+            clearHistoryDetails(message: "No commits to inspect")
+        } else {
+            for line in commits.prefix(25) {
+                let card = makeHistoryCard(line)
+                historyStack.addArrangedSubview(card)
+                card.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+            }
+            if let selectedCommitHash {
+                await loadCommitDetails(hash: selectedCommitHash)
+            } else {
+                clearHistoryDetails(message: "Select a commit to inspect changed files")
+            }
         }
 
         await refreshWorktrees()
@@ -586,6 +712,11 @@ final class GitPanelView: NSView {
         let head: String
         let branch: String
         let isMain: Bool
+    }
+
+    private struct CommitChangedFile {
+        let status: String
+        let path: String
     }
 
     private func makeChangeRow(_ line: String, rootPath: String) -> NSView {
@@ -637,16 +768,19 @@ final class GitPanelView: NSView {
     }
 
     private func makeHistoryCard(_ line: String) -> NSView {
-        let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
+        let parts = line.components(separatedBy: "\u{1f}")
         guard parts.count >= 4 else { return makeLabel(line) }
-        let hash = String(parts[0].prefix(7))
+        let fullHash = parts[0]
+        let hash = String(fullHash.prefix(7))
         let author = parts[1]
         let time = parts[2]
         let subject = parts[3]
 
-        let card = NSView()
+        let card = GitHistoryCommitCardView(commitHash: fullHash)
         card.wantsLayer = true
         card.translatesAutoresizingMaskIntoConstraints = false
+        card.target = self
+        card.action = #selector(historyCommitClicked(_:))
 
         // Subject line
         let subjectLabel = NSTextField(labelWithString: subject)
@@ -674,6 +808,52 @@ final class GitPanelView: NSView {
             meta.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10),
         ])
         return card
+    }
+
+    private func makeCommitFileRow(_ file: CommitChangedFile, commitHash: String) -> NSView {
+        let button = GitHistoryFileButton(commitHash: commitHash, filePath: file.path)
+        button.target = self
+        button.action = #selector(historyFileClicked(_:))
+        button.bezelStyle = NSButton.BezelStyle.inline
+        button.isBordered = false
+        button.alignment = NSTextAlignment.left
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        let statusLabel = NSTextField(labelWithString: file.status)
+        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
+        statusLabel.textColor = historyStatusColor(file.status)
+        statusLabel.alignment = .center
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let name = NSTextField(labelWithString: file.path)
+        name.font = .systemFont(ofSize: 11)
+        name.textColor = HarnessDesign.chrome.textPrimary
+        name.lineBreakMode = .byTruncatingMiddle
+        name.toolTip = file.path
+        name.translatesAutoresizingMaskIntoConstraints = false
+
+        button.addSubview(statusLabel)
+        button.addSubview(name)
+        NSLayoutConstraint.activate([
+            button.heightAnchor.constraint(equalToConstant: 24),
+            statusLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 10),
+            statusLabel.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            statusLabel.widthAnchor.constraint(equalToConstant: 20),
+            name.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 6),
+            name.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -10),
+            name.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+        ])
+        return button
+    }
+
+    private func historyStatusColor(_ status: String) -> NSColor {
+        switch status.first {
+        case "M": return .systemOrange
+        case "A": return .systemGreen
+        case "D": return .systemRed
+        case "R": return .systemBlue
+        default: return HarnessDesign.chrome.textSecondary
+        }
     }
 
     private func makeWorktreeRow(_ worktree: WorktreeEntry) -> NSView {
@@ -779,6 +959,67 @@ final class GitPanelView: NSView {
         }
     }
 
+    private func loadCommitDetails(hash: String) async {
+        guard let path = currentPath else {
+            clearHistoryDetails(message: "Open a terminal session in a git repository")
+            return
+        }
+
+        historyFilesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let output = await runGit(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-M", hash], in: path)
+        let files = parseCommitChangedFiles(output)
+
+        guard !files.isEmpty else {
+            clearHistoryDetails(message: "No changed files for \(String(hash.prefix(7)))")
+            return
+        }
+
+        historyEmptyLabel.isHidden = true
+        historyFilesScroll.isHidden = false
+        historyPreviewScroll.isHidden = false
+
+        for file in files {
+            let row = makeCommitFileRow(file, commitHash: hash)
+            historyFilesStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: historyFilesStack.widthAnchor).isActive = true
+        }
+
+        if let first = files.first {
+            await loadCommitFileDiff(commitHash: hash, path: first.path)
+        }
+    }
+
+    private func loadCommitFileDiff(commitHash: String, path filePath: String) async {
+        guard let path = currentPath else { return }
+        let diff = await runGit(["show", "--format=", "--find-renames", commitHash, "--", filePath], in: path)
+        if diff.isEmpty {
+            let contents = await runGit(["show", "\(commitHash):\(filePath)"], in: path)
+            historyPreviewTextView.string = contents.isEmpty ? "No preview available for \(filePath)." : contents
+        } else {
+            historyPreviewTextView.string = diff
+        }
+        historyPreviewTextView.scrollToBeginningOfDocument(nil)
+    }
+
+    private func parseCommitChangedFiles(_ output: String) -> [CommitChangedFile] {
+        output.components(separatedBy: "\n").compactMap { line in
+            let fields = line.components(separatedBy: "\t")
+            guard fields.count >= 2 else { return nil }
+            let status = fields[0]
+            let path = fields.count >= 3 && status.hasPrefix("R") ? fields[2] : fields[1]
+            return CommitChangedFile(status: status, path: path)
+        }
+    }
+
+    private func clearHistoryDetails(message: String) {
+        historyFilesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        historyPreviewTextView.string = ""
+        historyFilesScroll.isHidden = true
+        historyPreviewScroll.isHidden = true
+        historyEmptyLabel.stringValue = message
+        historyEmptyLabel.isHidden = false
+    }
+
     // MARK: - Git
 
     private func runGitResult(_ args: [String], in directory: String) async -> (String, String, Int32) {
@@ -866,6 +1107,47 @@ final class GitPanelView: NSView {
 
 private final class FlippedStackView: NSStackView {
     override var isFlipped: Bool { true }
+}
+
+@MainActor
+private final class GitHistoryCommitCardView: NSControl {
+    let commitHash: String
+
+    init(commitHash: String) {
+        self.commitHash = commitHash
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) {
+        sendAction(action, to: target)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+@MainActor
+private final class GitHistoryFileButton: NSButton {
+    let commitHash: String
+    let filePath: String
+
+    init(commitHash: String, filePath: String) {
+        self.commitHash = commitHash
+        self.filePath = filePath
+        super.init(frame: .zero)
+        title = ""
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
 }
 
 @MainActor

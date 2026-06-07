@@ -662,6 +662,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             sectionLabel.stringValue = "GIT"
             if let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
                 gitPanelView.updateRoot(path: cwd)
+            } else {
+                gitPanelView.clearRoot()
             }
         default:
             // Switching back to Sessions tab: rebuild cache so heightOfRow/viewFor
@@ -770,6 +772,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             if cwd != home, cwd != "/" {
                 Self.recordRecentProject(cwd)
             }
+        } else {
+            gitPanelView.clearRoot()
         }
     }
 
@@ -805,6 +809,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             gitPanelView.updateRoot(path: cwd, force: sessionChanged)
             lastFileTreeSessionID = activeSessionID
             lastFileTreeGitBranch = gitBranch
+        } else {
+            gitPanelView.clearRoot()
         }
         // Rebuild cache once; iterate the stored result — no redundant recomputation.
         rebuildSidebarRows()
