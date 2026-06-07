@@ -83,12 +83,12 @@ final class GitPanelView: NSView {
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .rename, .delete, .extend],
-            queue: DispatchQueue.global(qos: .utility)
+            queue: .main
         )
         watchSource = source
         source.setEventHandler { [weak self] in
             self?.watchDebounce?.cancel()
-            let work = DispatchWorkItem {
+            let work = DispatchWorkItem { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     await self.refresh()

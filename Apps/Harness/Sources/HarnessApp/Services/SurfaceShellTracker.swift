@@ -101,9 +101,11 @@ final class SurfaceShellTracker {
         var result: [String: String] = [:]
         for (surface, list) in candidates {
             let sorted = list.sorted { $0.depth > $1.depth }
-            // Deepest PID that yields a readable cwd (skip wrappers we can't introspect).
-            if let cwd = sorted.lazy.compactMap({ cwd(for: $0.pid) }).first {
-                result[surface] = cwd
+            for entry in sorted {
+                if let cwd = cwd(for: entry.pid) {
+                    result[surface] = cwd
+                    break
+                }
             }
         }
         return result
@@ -160,8 +162,9 @@ final class SurfaceShellTracker {
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         let bytes = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size)
         guard bytes == size else { return nil }
-        return withUnsafeBytes(of: &info.pvi_cdir.vip_path) { rawBuffer -> String in
-            let charPointer = rawBuffer.baseAddress!.assumingMemoryBound(to: CChar.self)
+        return withUnsafeBytes(of: &info.pvi_cdir.vip_path) { rawBuffer -> String? in
+            guard let base = rawBuffer.baseAddress else { return nil }
+            let charPointer = base.assumingMemoryBound(to: CChar.self)
             return decodeBoundedCString(charPointer, capacity: rawBuffer.count)
         }
     }

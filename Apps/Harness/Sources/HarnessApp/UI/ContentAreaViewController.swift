@@ -78,10 +78,10 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         terminalHost.translatesAutoresizingMaskIntoConstraints = false
         refreshTerminalHostFill()
 
+        view.addSubview(terminalHost)
         view.addSubview(titleStrip)
         view.addSubview(tabBar)
         view.addSubview(tabBarDivider)
-        view.addSubview(terminalHost)
         setupSidebarToggle()
 
         NSLayoutConstraint.activate([
@@ -184,10 +184,10 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         let sidebarOnRight = settings.sidebarOnRight
         
         if sidebarOnRight {
-            tabBar.setLeadingInset(0)
+            tabBar.setLeadingInset(inset)
             tabBar.trailingInset = sidebarVisible ? 0 : 28
         } else {
-            tabBar.setLeadingInset(sidebarVisible ? 0 : 28)
+            tabBar.setLeadingInset(sidebarVisible ? 0 : inset)
             tabBar.trailingInset = 0
         }
         
