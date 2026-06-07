@@ -954,11 +954,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
         // the surface wasn't closed/replaced before committing (PID reuse safety). Capture the PID
         // the cwd was computed for so a respawn during the probe (same RealPty, new child) can't
         // commit the OLD child's cwd for the NEW one.
-        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String)] = snap.compactMap { key, session in
+        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String, command: String?)] = snap.compactMap { key, session in
             guard let uuid = UUID(uuidString: key), let result = session.probeWorkingDirectory() else {
                 return nil
             }
-            return (key, session, uuid, result.pid, result.cwd)
+            // Foreground command rides the same probe cycle (one extra ioctl + name lookup).
+            // Guarded by the same child PID so a respawn can't commit the old child's command.
+            let command = session.probeForegroundCommand()
+            return (key, session, uuid, result.pid, result.cwd, command?.pid == result.pid ? command?.command : nil)
         }
         guard !probed.isEmpty else { return }
 
@@ -976,18 +979,27 @@ public final class SurfaceRegistry: @unchecked Sendable {
             else { continue }
             // Re-read the tab's stored cwd under the lock; the proc-scan result (`entry.cwd`) was
             // computed off-lock so we never re-run that O(all-PIDs) walk while holding the lock.
-            let current = editor.snapshot.workspaces
+            let tab = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
                 .sessions
                 .flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })?
-                .cwd
-            guard current != entry.cwd else { continue }
-            editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
-            changed = true
+                .first(where: { $0.id == match.tabID })
+            if tab?.cwd != entry.cwd {
+                editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
+                changed = true
+            }
+            if let command = entry.command, tab?.currentCommand != command {
+                editor.updateTabCurrentCommand(surfaceID: entry.uuid, command: command)
+                changed = true
+            }
         }
         if changed { commit() }
     }
+
+    /// Count of identified clients, injected by `DaemonServer` (which owns the FDs) for
+    /// `#{session_attached}`. Must be safe to call under `lock` from any thread — the
+    /// server backs it with its own counter, never a hop onto the daemon queue.
+    public var attachedClientCountProvider: (@Sendable () -> Int)?
 
     /// Build a `FormatContext` from the current snapshot's active selection.
     /// Used by `display-message` and hook firing. Conservative: nil fields
@@ -1008,7 +1020,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 session = owningSession
             }
         }
-        return FormatContext(
+        var context = FormatContext(
             paneID: surfaceKey,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -1024,6 +1036,31 @@ public final class SurfaceRegistry: @unchecked Sendable {
             clientName: clientName,
             windowFlags: tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
         )
+        // Extended tmux-parity fields. PTY-backed values come from the live surface when the
+        // context names one (exact per-pane truth, unlike the per-tab scan metadata); the
+        // probes are single ioctls/syscalls — cheap enough at display-message/hook frequency.
+        context.paneCurrentCommand = tab?.currentCommand
+        if let surfaceKey, let live = sessions[surfaceKey] {
+            context.panePID = Int(live.currentChildPID)
+            if let command = live.probeForegroundCommand()?.command {
+                context.paneCurrentCommand = command
+            }
+            if let size = live.currentSize() {
+                context.paneWidth = size.cols
+                context.paneHeight = size.rows
+            }
+            context.historyBytes = live.historyBytes
+        }
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        context.sessionAttached = attachedClientCountProvider?()
+        context.serverPID = Int(getpid())
+        return context
     }
 
     // MARK: - Hook firing
