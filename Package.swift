@@ -151,6 +151,7 @@ let package = Package(
         .library(name: "CHarnessSys", targets: ["CHarnessSys"]),
         .executable(name: "HarnessDaemon", targets: ["HarnessDaemon"]),
         .executable(name: "harness-cli", targets: ["HarnessCLI"]),
+        .executable(name: "harness-mcp", targets: ["HarnessMCP"]),
     ] + platformProducts,
     dependencies: platformDependencies,
     targets: [
@@ -219,6 +220,11 @@ let package = Package(
             dependencies: cliDependencies,
             path: "Tools/harness/Sources/HarnessCLI",
             exclude: cliExclude
+        ),
+        .executableTarget(
+            name: "HarnessMCP",
+            dependencies: ["HarnessCore"],
+            path: "Tools/harness-mcp/Sources/HarnessMCP"
         ),
         .testTarget(
             name: "HarnessCoreTests",
