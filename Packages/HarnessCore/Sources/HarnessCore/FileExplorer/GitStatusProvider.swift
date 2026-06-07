@@ -47,7 +47,12 @@ public actor GitStatusProvider {
         var result: [String: GitStatusType] = [:]
 
         // Split on NUL; filter empty strings that appear after trailing NUL.
-        for entry in raw.split(separator: "\0", omittingEmptySubsequences: true) {
+        // Renames are encoded as two fields: "R  new-path\0old-path\0".
+        let entries = raw.split(separator: "\0", omittingEmptySubsequences: true)
+        var entryIndex = 0
+        while entryIndex < entries.count {
+            let entry = entries[entryIndex]
+            entryIndex += 1
             // Each entry is at least "XY " (3 chars) followed by the path.
             guard entry.count > 3 else { continue }
             let xy = entry.prefix(2)
@@ -56,14 +61,19 @@ public actor GitStatusProvider {
             // Use the index status (X) when the working-tree column (Y) is blank
             // (e.g. fully-staged additions). Untracked files have "??" in both.
             let workingTree = xy.last ?? " "
-            let index      = xy.first ?? " "
-            let effective  = workingTree == " " ? index : workingTree
+            let indexStatus = xy.first ?? " "
+            let effective  = workingTree == " " ? indexStatus : workingTree
 
             let status: GitStatusType
             switch effective {
             case "M":          status = .modified
             case "A":          status = .added
             case "D":          status = .deleted
+            case "R":
+                status = .renamed
+                if entryIndex < entries.count {
+                    entryIndex += 1
+                }
             case "?":          status = .untracked
             default:           status = .unmodified
             }

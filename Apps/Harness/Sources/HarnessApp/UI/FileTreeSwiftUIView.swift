@@ -24,7 +24,8 @@ final class FileTreeNode: Identifiable {
 ///   whenever *either* the directory or the active session changes.
 /// - `loadRoot()` runs filesystem scan and `git status` concurrently, then
 ///   merges the status map into each `FileNode.gitStatus`.
-/// - `NodeRow` renders a coloured dot and optional strikethrough per status.
+/// - `NodeRow` renders a coloured letter badge and optional strikethrough per
+///   status.
 ///
 /// **Live FSEvents watcher (F1-G):**
 /// - A second `.task(id:)` with the same key starts the watcher alongside
@@ -80,6 +81,13 @@ struct FileTreeSwiftUIView: View {
             }, onCancel: {
                 Task { await watcher.stopWatching() }
             })
+        }
+        .task(id: taskID) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                await loadRoot()
+            }
         }
     }
 
@@ -183,7 +191,7 @@ private struct NodeRow: View {
             }
             .help(node.node.path)
             Spacer()
-            gitStatusDot(node.node.gitStatus)
+            gitStatusBadge(node.node.gitStatus)
         }
         .onDrag {
             NSItemProvider(contentsOf: URL(fileURLWithPath: node.node.path)) ?? NSItemProvider()
@@ -216,15 +224,19 @@ private struct NodeRow: View {
 
     // MARK: Git status indicators
 
-    /// A small filled circle indicating the working-tree git status.
-    /// Hidden (clear / zero-size) for unmodified files so it takes no space.
+    /// A compact VS Code-style badge indicating the working-tree git status.
+    /// Hidden for unmodified files so clean rows stay visually quiet.
     @ViewBuilder
-    private func gitStatusDot(_ status: GitStatusType) -> some View {
+    private func gitStatusBadge(_ status: GitStatusType) -> some View {
         let color = gitStatusColor(status)
         if status != .unmodified {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
+            Text(gitStatusLetter(status))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+                .frame(width: 14, height: 14)
+                .background(color.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: HarnessDesign.Radius.badge, style: .continuous))
+                .help(gitStatusDescription(status))
         }
     }
 
@@ -233,8 +245,31 @@ private struct NodeRow: View {
         case .modified:   return .yellow
         case .added:      return .green
         case .deleted:    return .red
+        case .renamed:    return .blue
         case .untracked:  return .secondary
         case .unmodified: return .clear
+        }
+    }
+
+    private func gitStatusLetter(_ status: GitStatusType) -> String {
+        switch status {
+        case .modified:   return "M"
+        case .added:      return "A"
+        case .deleted:    return "D"
+        case .renamed:    return "R"
+        case .untracked:  return "U"
+        case .unmodified: return ""
+        }
+    }
+
+    private func gitStatusDescription(_ status: GitStatusType) -> String {
+        switch status {
+        case .modified:   return "Modified"
+        case .added:      return "Added"
+        case .deleted:    return "Deleted"
+        case .renamed:    return "Renamed"
+        case .untracked:  return "Untracked"
+        case .unmodified: return "Unmodified"
         }
     }
 

@@ -30,5 +30,6 @@ public enum GitStatusType: Sendable {
     case modified
     case added
     case deleted
+    case renamed
     case untracked
 }
