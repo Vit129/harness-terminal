@@ -62,18 +62,10 @@ final class MainExecutor: CommandExecutor {
         case .selectPane(let target):
             try selectPane(target: target, coordinator: coordinator)
         case .swapPane:
-            // Pane targets for swap-pane (next/previous) translate to swapping
-            // with the next/previous pane in flat order.
-            guard let workspace = coordinator.snapshot.activeWorkspace,
-                  let tab = workspace.activeTab,
-                  let sid = coordinator.activeSurfaceID,
-                  let activePane = panePathLookup(surfaceID: sid, in: tab.rootPane)
-            else { throw CommandExecutionError.noActiveSurface }
-            let panes = tab.rootPane.allPaneIDs()
-            guard panes.count >= 2, let idx = panes.firstIndex(of: activePane) else { return }
-            let nextIdx = (idx + 1) % panes.count
-            coordinator.requestDaemon(.swapPanes(srcPaneID: activePane, dstPaneID: panes[nextIdx]))
-            coordinator.syncFromDaemon()
+            // Route through the shared translator so next/previous/last and `-s`
+            // resolve identically to the CLI, compositor, and control mode (the
+            // old inline handler always swapped with the next pane).
+            try runViaTranslator(command, coordinator: coordinator)
         case .resizePane(let direction, let amount):
             try resizeActivePane(direction: direction, amount: amount, coordinator: coordinator)
         case .markPane(let set):
@@ -346,6 +338,11 @@ final class MainExecutor: CommandExecutor {
                 DisplayMessage.show("find-window: no matches for '\(pattern)'")
                 return
             }
+            // Distinguish "you named something that doesn't exist" (strict `-t`/`-s`
+            // resolution) from "there is nothing focused to act on".
+            if case let .targeted(spec, _) = command {
+                throw CommandExecutionError.targetNotFound(spec.raw)
+            }
             throw CommandExecutionError.noActiveSurface
         }
     }
@@ -432,6 +429,7 @@ final class MainExecutor: CommandExecutor {
         case .next: coordinator.cycleActivePane(forward: true)
         case .previous: coordinator.cycleActivePane(forward: false)
         case .last: coordinator.selectLastPane()
+        case .current: break // already focused — explicit no-op
         case .left, .right, .up, .down:
             guard let tab = coordinator.snapshot.activeWorkspace?.activeTab,
                   let sid = coordinator.activeSurfaceID,

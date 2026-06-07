@@ -88,7 +88,7 @@ final class TargetSpecTests: XCTestCase {
         let (snap, ids) = makeSnapshot()
         let base = CommandTarget(snapshot: snap, focusedTabID: ids["t0"])
         let r = base.resolving(TargetSpec.parse("api:1"), command: .killWindow)
-        XCTAssertEqual(r.tab?.id, ids["t1"])
+        XCTAssertEqual(r?.tab?.id, ids["t1"])
     }
 
     func testResolveWindowByIndexHonorsBaseIndex() {
@@ -96,7 +96,7 @@ final class TargetSpecTests: XCTestCase {
         let base = CommandTarget(snapshot: snap)
         // base-index 1 → window "1" is array position 0.
         let r = base.resolving(TargetSpec.parse("api:1"), command: .killWindow, baseIndex: 1)
-        XCTAssertEqual(r.tab?.id, ids["t0"])
+        XCTAssertEqual(r?.tab?.id, ids["t0"])
     }
 
     func testResolvePaneByIndex() {
@@ -104,17 +104,17 @@ final class TargetSpecTests: XCTestCase {
         let base = CommandTarget(snapshot: snap)
         // The split tab is window index 1 (base-index 0); t2 (window 2) is single-pane.
         let r = base.resolving(TargetSpec.parse("api:1.1"), command: .killPane)
-        XCTAssertEqual(r.tab?.id, ids["t1"])
-        XCTAssertEqual(r.paneID, ids["p2"]) // pane index 1 = second leaf
+        XCTAssertEqual(r?.tab?.id, ids["t1"])
+        XCTAssertEqual(r?.paneID, ids["p2"]) // pane index 1 = second leaf
     }
 
     func testResolvePaneMarkersLeftRight() {
         let (snap, ids) = makeSnapshot()
         let base = CommandTarget(snapshot: snap)
         let left = base.resolving(TargetSpec.parse("api:1.{left}"), command: .killPane)
-        XCTAssertEqual(left.paneID, ids["p1"])
+        XCTAssertEqual(left?.paneID, ids["p1"])
         let right = base.resolving(TargetSpec.parse("api:1.{right}"), command: .killPane)
-        XCTAssertEqual(right.paneID, ids["p2"])
+        XCTAssertEqual(right?.paneID, ids["p2"])
     }
 
     func testBareTokenResolvesByCommandLevel() {
@@ -122,31 +122,69 @@ final class TargetSpecTests: XCTestCase {
         let base = CommandTarget(snapshot: snap, focusedTabID: ids["t1"], focusedPaneID: ids["p1"])
         // For a window command, lone "2" is a window index.
         let win = base.resolving(TargetSpec.parse("2"), command: .killWindow)
-        XCTAssertEqual(win.tab?.id, ids["t2"])
+        XCTAssertEqual(win?.tab?.id, ids["t2"])
         // For a pane command, lone "1" is a pane index within the focused tab (t1).
         let pane = base.resolving(TargetSpec.parse("1"), command: .killPane)
-        XCTAssertEqual(pane.paneID, ids["p2"])
+        XCTAssertEqual(pane?.paneID, ids["p2"])
     }
 
     func testResolveSessionByName() {
         let (snap, ids) = makeSnapshot()
         let base = CommandTarget(snapshot: snap, focusedTabID: ids["t0"])
         let r = base.resolving(TargetSpec.parse("other:"), command: .killSession)
-        XCTAssertEqual(r.session?.id, ids["other"])
+        XCTAssertEqual(r?.session?.id, ids["other"])
     }
 
     func testWindowLastUsesMRU() {
         let (snap, ids) = makeSnapshot()
         let base = CommandTarget(snapshot: snap, focusedTabID: ids["t0"])
         let r = base.resolving(TargetSpec.parse("api:!"), command: .killWindow)
-        XCTAssertEqual(r.tab?.id, ids["t2"]) // api.lastActiveTabID
+        XCTAssertEqual(r?.tab?.id, ids["t2"]) // api.lastActiveTabID
     }
 
     func testEmptySpecKeepsFocus() {
         let (snap, ids) = makeSnapshot()
         let base = CommandTarget(snapshot: snap, focusedTabID: ids["t1"], focusedPaneID: ids["p2"])
         let r = base.resolving(TargetSpec.parse(""), command: .killPane)
-        XCTAssertEqual(r.tab?.id, ids["t1"])
-        XCTAssertEqual(r.paneID, ids["p2"])
+        XCTAssertEqual(r?.tab?.id, ids["t1"])
+        XCTAssertEqual(r?.paneID, ids["p2"])
+    }
+
+    // MARK: Strict resolution — a named component that doesn't match is nil,
+    // never a silent fall-through to the caller's focus (v1.7.1 policy).
+
+    func testUnknownSessionResolvesNil() {
+        let (snap, ids) = makeSnapshot()
+        let base = CommandTarget(snapshot: snap, focusedTabID: ids["t0"])
+        XCTAssertNil(base.resolving(TargetSpec.parse("bogus:"), command: .killSession))
+        XCTAssertNil(base.resolving(TargetSpec.parse("bogus:1"), command: .killWindow))
+        // A bare name parses as a session ref (tmux) — same strict miss.
+        XCTAssertNil(base.resolving(TargetSpec.parse("bogus"), command: .killPane))
+    }
+
+    func testOutOfRangeWindowResolvesNil() {
+        let (snap, ids) = makeSnapshot()
+        let base = CommandTarget(snapshot: snap, focusedTabID: ids["t0"])
+        XCTAssertNil(base.resolving(TargetSpec.parse("api:99"), command: .killWindow))
+        XCTAssertNil(base.resolving(TargetSpec.parse("99"), command: .killWindow))
+        XCTAssertNil(base.resolving(TargetSpec.parse("api:nosuchwindow"), command: .killWindow))
+    }
+
+    func testMissingPaneResolvesNil() {
+        let (snap, ids) = makeSnapshot()
+        let base = CommandTarget(snapshot: snap, focusedTabID: ids["t1"], focusedPaneID: ids["p1"])
+        XCTAssertNil(base.resolving(TargetSpec.parse("api:1.99"), command: .killPane))
+        XCTAssertNil(base.resolving(TargetSpec.parse("99"), command: .killPane))
+        let ghost = TargetSpec(pane: .byID(UUID()), raw: "%ghost")
+        XCTAssertNil(base.resolving(ghost, command: .killPane))
+    }
+
+    func testOmittedComponentsStillDefaultToFocus() {
+        let (snap, ids) = makeSnapshot()
+        let base = CommandTarget(snapshot: snap, focusedTabID: ids["t1"], focusedPaneID: ids["p1"])
+        // Session-only spec: window/pane default to that session's active chain.
+        let r = base.resolving(TargetSpec.parse("api:"), command: .killPane)
+        XCTAssertNotNil(r)
+        XCTAssertNotNil(r?.paneID)
     }
 }

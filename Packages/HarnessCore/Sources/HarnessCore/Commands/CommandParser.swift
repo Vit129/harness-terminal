@@ -151,6 +151,11 @@ public enum CommandParser {
         case "select-pane":
             if tokens.contains("-m") { return .markPane(set: true) }
             if tokens.contains("-M") { return .markPane(set: false) }
+            if let spec = try explicitPaneTargetSpec(from: tokens) {
+                // Absolute target (`%id`, `session:window.pane`, `{top}`, …): resolved at
+                // translate time; the inner relative target is ignored on this path.
+                return .targeted(spec, .selectPane(target: .next))
+            }
             let target = try paneTarget(from: tokens, defaultValue: .next)
             return .selectPane(target: target)
         // Convenience verbs for the directional cycle (`select-pane -t :.+/:.-` and the
@@ -173,8 +178,19 @@ public enum CommandParser {
             default: return .synchronizePanes(set: nil)
             }
         case "swap-pane":
+            // tmux `swap-pane [-s src] [-t dst]` — `-s` names the pane to act FROM
+            // (default: the caller's active pane); without `-t` the destination is
+            // the current pane (tmux behavior), spelled here as a self-target the
+            // translator resolves against the caller's focus.
+            let source = try explicitPaneTargetSpec(from: tokens, flag: "-s")
+            if let spec = try explicitPaneTargetSpec(from: tokens) {
+                return .targeted(spec, .swapPane(target: .next, source: source))
+            }
+            if source != nil, stringValue(for: "-t", in: tokens) == nil, !tokens.contains("-l") {
+                return .swapPane(target: .current, source: source)
+            }
             let target = try paneTarget(from: tokens, defaultValue: .next)
-            return .swapPane(target: target)
+            return .swapPane(target: target, source: source)
         case "new-window", "new-tab":
             return .newWindow
         case "kill-window", "kill-tab":
@@ -580,6 +596,30 @@ public enum CommandParser {
         return items
     }
 
+    /// Absolute (non-relative) `-t` pane target for select-pane/swap-pane: any value the
+    /// full `TargetSpec` grammar accepts (`%id`, `session:window.pane`, `{top}`, an index…).
+    /// Returns nil when the tokens carry a directional flag, a relative target (`:.+`/`:.-`/
+    /// `!` — `paneTarget`'s fast paths), or no `-t` at all. Throws — never silently
+    /// misroutes (the v1.7.1 policy) — when the value parses to nothing actionable (a bare
+    /// `:` or `.`); a *name* that doesn't exist parses fine and fails loudly at resolution
+    /// instead, matching tmux's "can't find session" behavior.
+    private static func explicitPaneTargetSpec(from tokens: [String], flag: String = "-t") throws -> TargetSpec? {
+        if flag == "-t" {
+            // Directional / relative forms are `paneTarget`'s fast paths, not specs.
+            guard !tokens.contains("-L"), !tokens.contains("-R"), !tokens.contains("-U"),
+                  !tokens.contains("-D"), !tokens.contains("-l")
+            else { return nil }
+        }
+        guard let raw = stringValue(for: flag, in: tokens) else { return nil }
+        if flag == "-t", [":.+", ":.-", "!"].contains(raw) { return nil }
+        let spec = TargetSpec.parse(raw)
+        guard !spec.isEmpty else {
+            throw CommandParseError.invalidArgument(
+                "unrecognized pane target '\(raw)' — use %id, session:window.pane, an index, {top}/{bottom}/{left}/{right}, or :.+/:.-/!")
+        }
+        return spec
+    }
+
     private static func paneTarget(from tokens: [String], defaultValue: Command.PaneTarget) throws -> Command.PaneTarget {
         if tokens.contains("-L") { return .left }
         if tokens.contains("-R") { return .right }
@@ -592,15 +632,17 @@ public enum CommandParser {
             case ":.-": return .previous
             case "!": return .last
             default:
-                // Silently routing an unrecognized -t to .next moved the wrong pane with no
-                // feedback; fail loudly instead (same policy as the v1.7 CLI flag validation).
+                // Unreachable from select-pane/swap-pane (`explicitPaneTargetSpec` intercepts
+                // absolute targets first) — kept as the loud backstop for any future caller,
+                // preserving the v1.7 no-silent-misroute policy.
                 throw CommandParseError.invalidArgument(
                     "unsupported pane target '\(target)' — use -t :.+, -t :.-, -t ! or -L/-R/-U/-D/-l")
             }
         }
         // A dangling -t (flag present, value missing) is a typo, not a request for the default.
         if tokens.contains("-t") {
-            throw CommandParseError.missingArgument("-t requires a pane target (:.+, :.-, or !)")
+            throw CommandParseError.missingArgument(
+                "-t requires a pane target (:.+, :.-, !, %id, or session:window.pane)")
         }
         return defaultValue
     }

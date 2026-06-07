@@ -15,7 +15,10 @@ public indirect enum Command: Codable, Sendable, Equatable {
     case killPane
     case zoomPane
     case selectPane(target: PaneTarget)
-    case swapPane(target: PaneTarget)
+    // tmux `swap-pane [-s src] [-t dst]`: `source` is the `-s` pane (nil = the
+    // caller's active pane); an absolute `-t` rides `.targeted`, a relative one
+    // rides `target`. Optional so pre-`-s` keybindings.json payloads still decode.
+    case swapPane(target: PaneTarget, source: TargetSpec?)
     case resizePane(direction: ResizeDirection, amount: Int)
     case markPane(set: Bool)                       // select-pane -m / -M
     case joinPane(direction: SplitDirection)       // join-pane -h/-v (marked → active)
@@ -131,6 +134,9 @@ public indirect enum Command: Codable, Sendable, Equatable {
     public enum PaneTarget: String, Codable, Sendable, Equatable {
         case left, right, up, down
         case next, previous, last
+        /// The caller's active pane — `swap-pane -s X` with no `-t` (tmux: the
+        /// source swaps with the *current* pane).
+        case current
     }
 
     public enum ChooseScope: String, Codable, Sendable, Equatable {
@@ -158,7 +164,8 @@ extension Command {
         case .killPane: return "kill-pane"
         case .zoomPane: return "zoom-pane"
         case let .selectPane(target): return "select-pane \(target.rawValue)"
-        case let .swapPane(target): return "swap-pane \(target.rawValue)"
+        case let .swapPane(target, source):
+            return "swap-pane\(source.map { " -s \($0.raw)" } ?? "") \(target.rawValue)"
         case let .resizePane(direction, amount): return "resize-pane -\(direction.rawValue.prefix(1).uppercased()) \(amount)"
         case let .markPane(set): return set ? "select-pane -m" : "select-pane -M"
         case let .joinPane(direction): return "join-pane -\(direction == .horizontal ? "v" : "h")"
