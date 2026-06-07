@@ -69,8 +69,9 @@ final class FileEditorView: NSView {
         scrollView.autohidesScrollers = true
         addSubview(scrollView)
 
-        textView.isEditable = false
+        textView.isEditable = true
         textView.isSelectable = true
+        textView.allowsUndo = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -81,6 +82,8 @@ final class FileEditorView: NSView {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
         scrollView.documentView = textView
 
         gutterView.translatesAutoresizingMaskIntoConstraints = false
@@ -121,11 +124,72 @@ final class FileEditorView: NSView {
         // Sync gutter on scroll
         NotificationCenter.default.addObserver(self, selector: #selector(textDidScroll), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         scrollView.contentView.postsBoundsChangedNotifications = true
+        // Track edits
+        NotificationCenter.default.addObserver(self, selector: #selector(textDidChange), name: NSText.didChangeNotification, object: textView)
     }
 
     @objc private func textDidScroll() {
         gutterView.needsDisplay = true
     }
+
+    @objc private func textDidChange() {
+        isModified = true
+        gutterView.needsDisplay = true
+    }
+
+    // MARK: - Editing
+
+    private var isModified = false
+
+    /// Save current content back to disk.
+    func save() {
+        guard !filePath.isEmpty, isModified else { return }
+        let expanded = (filePath as NSString).expandingTildeInPath
+        let content = textView.string
+        do {
+            try content.write(toFile: expanded, atomically: true, encoding: .utf8)
+            isModified = false
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    /// Show macOS standard find bar.
+    func showFindBar() {
+        textView.performFindPanelAction(NSTextFinder.Action.showFindInterface)
+    }
+
+    /// Show find & replace bar.
+    func showFindAndReplace() {
+        textView.performFindPanelAction(NSTextFinder.Action.showReplaceInterface)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard event.modifierFlags.contains(.command) else {
+            super.keyDown(with: event)
+            return
+        }
+        switch event.charactersIgnoringModifiers {
+        case "s":
+            save()
+        case "f":
+            if event.modifierFlags.contains(.shift) {
+                showFindAndReplace()
+            } else {
+                showFindBar()
+            }
+        case "z":
+            if event.modifierFlags.contains(.shift) {
+                textView.undoManager?.redo()
+            } else {
+                textView.undoManager?.undo()
+            }
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
 
     // MARK: - Display
 
