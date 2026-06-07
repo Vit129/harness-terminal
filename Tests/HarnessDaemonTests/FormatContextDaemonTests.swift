@@ -75,4 +75,48 @@ final class FormatContextDaemonTests: XCTestCase {
         }
         XCTAssertFalse(command?.isEmpty ?? true, "scan never committed a foreground command")
     }
+
+    /// `#{pane_active}` must reflect whether the named surface IS its tab's active pane —
+    /// not merely that a surface was named. Hooks routinely build a context around a
+    /// BACKGROUND pane (alert/bell, agent-state, pane-exited), where the pre-fix
+    /// `surfaceKey != nil` wrongly rendered "1" for every one of them.
+    func testPaneActiveReflectsActivePaneNotMerePresence() throws {
+        let registry = SurfaceRegistry()
+        let tab = try XCTUnwrap(registry.snapshot.activeWorkspace?.activeTab)
+        let firstPaneID = try XCTUnwrap(tab.rootPane.allPaneIDs().first)
+
+        guard case let .paneID(newPaneID) = registry.handle(
+            .newSplit(tabID: tab.id, paneID: firstPaneID, direction: .vertical)
+        ) else {
+            return XCTFail("expected paneID from split")
+        }
+
+        // Re-read the tab and let it name whichever pane the split left active — the test
+        // must not assume the split's focus policy, only that exactly one pane is active.
+        let split = try XCTUnwrap(registry.snapshot.activeWorkspace?.activeTab)
+        XCTAssertEqual(split.rootPane.allPaneIDs().count, 2)
+        let activePaneID = try XCTUnwrap(split.activePaneID)
+        let backgroundPaneID = try XCTUnwrap(split.rootPane.allPaneIDs().first { $0 != activePaneID })
+        XCTAssertTrue([firstPaneID, newPaneID].contains(activePaneID))
+
+        let activeSurface = try XCTUnwrap(surfaceID(forPaneID: activePaneID, in: registry.snapshot))
+        let backgroundSurface = try XCTUnwrap(surfaceID(forPaneID: backgroundPaneID, in: registry.snapshot))
+
+        let activeCtx = registry.buildFormatContext(surfaceKey: activeSurface.uuidString)
+        let backgroundCtx = registry.buildFormatContext(surfaceKey: backgroundSurface.uuidString)
+
+        XCTAssertEqual(FormatString.evaluate("#{pane_active}", context: activeCtx), "1")
+        XCTAssertEqual(
+            FormatString.evaluate("#{pane_active}", context: backgroundCtx), "0",
+            "a background pane must not report pane_active=1"
+        )
+    }
+
+    private func surfaceID(forPaneID paneID: PaneID, in snapshot: SessionSnapshot) -> SurfaceID? {
+        snapshot.workspaces
+            .flatMap { $0.sessions.flatMap(\.tabs) }
+            .flatMap { $0.rootPane.allLeaves() }
+            .first { $0.id == paneID }?
+            .surfaceID
+    }
 }

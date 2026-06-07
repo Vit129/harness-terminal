@@ -62,6 +62,39 @@ final class VersionBannerTests: XCTestCase {
         XCTAssertNil(store.loadLastSeenBuild())
     }
 
+    /// A failed ack must leave the persisted state empty, so a daemon RESTART re-reads
+    /// "never shown" and re-banners — the one-shot is gated on a durable ack, never an
+    /// in-memory per-run flag. (Same-run no-replay after a failed ack is covered by
+    /// `testFailedAckRetriesWithoutReplayingBanner`; this pins the across-restart half.)
+    func testFailedAckLeavesBannerPendingForNextLaunch() throws {
+        // A directory where the state file belongs makes every atomic write fail.
+        try FileManager.default.createDirectory(
+            at: HarnessPaths.versionStateURL, withIntermediateDirectories: true
+        )
+        let store = VersionBannerStore()
+        XCTAssertFalse(store.markSeen(), "an unwritable ack must report failure")
+        XCTAssertNil(store.loadLastSeenBuild(), "a failed ack must not read back as a recorded build")
+
+        // The next launch re-reads empty state → the banner is still pending either way.
+        XCTAssertEqual(
+            VersionBannerStore.decidePending(
+                lastSeenBuild: store.loadLastSeenBuild(),
+                currentBuild: HarnessVersion.build,
+                hadExistingLayout: false
+            ),
+            .welcome
+        )
+        XCTAssertEqual(
+            VersionBannerStore.decidePending(
+                lastSeenBuild: store.loadLastSeenBuild(),
+                currentBuild: HarnessVersion.build,
+                hadExistingLayout: true
+            ),
+            .whatsNew,
+            "a never-acked banner must replay on the next launch"
+        )
+    }
+
     // MARK: - Registry integration (spawns real PTYs)
 
     private func capture(_ registry: SurfaceRegistry, _ surfaceID: String) -> String {

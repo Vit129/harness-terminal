@@ -1154,11 +1154,16 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 session = owningSession
             }
         }
+        // #{pane_active} is true only when the named surface IS its tab's active pane —
+        // hooks frequently name a BACKGROUND pane (alert/bell, agent-state, pane-exited),
+        // so `surfaceKey != nil` would wrongly report 1. Mirror SnapshotQueryFormatter and
+        // the compositor: compare against the active pane's surface.
+        let activeSurfaceKey = tab?.activePaneID.flatMap { editor.surfaceID(forPaneID: $0)?.uuidString }
         var context = FormatContext(
             paneID: surfaceKey,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
-            paneActive: surfaceKey != nil,
+            paneActive: surfaceKey != nil && surfaceKey == activeSurfaceKey,
             paneIndex: nil,
             sessionName: session?.name.isEmpty == false ? session?.name : nil,
             tabName: tab?.title,
@@ -1383,6 +1388,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
         if versionAckRetryNeeded { versionAckRetryNeeded = !versionBannerStore.markSeen() }
         guard let banner = pendingVersionBanner else { return }
         pendingVersionBanner = nil
+        // Ack BEFORE the option check: suppressing the banner still consumes the one-shot.
         versionAckRetryNeeded = !versionBannerStore.markSeen()
         guard optionStore.get("update-banner")?.boolValue ?? true else { return }
         let bytes: Data
