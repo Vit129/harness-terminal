@@ -62,18 +62,10 @@ final class MainExecutor: CommandExecutor {
         case .selectPane(let target):
             try selectPane(target: target, coordinator: coordinator)
         case .swapPane:
-            // Pane targets for swap-pane (next/previous) translate to swapping
-            // with the next/previous pane in flat order.
-            guard let workspace = coordinator.snapshot.activeWorkspace,
-                  let tab = workspace.activeTab,
-                  let sid = coordinator.activeSurfaceID,
-                  let activePane = panePathLookup(surfaceID: sid, in: tab.rootPane)
-            else { throw CommandExecutionError.noActiveSurface }
-            let panes = tab.rootPane.allPaneIDs()
-            guard panes.count >= 2, let idx = panes.firstIndex(of: activePane) else { return }
-            let nextIdx = (idx + 1) % panes.count
-            coordinator.requestDaemon(.swapPanes(srcPaneID: activePane, dstPaneID: panes[nextIdx]))
-            coordinator.syncFromDaemon()
+            // Route through the shared translator so next/previous/last and `-s`
+            // resolve identically to the CLI, compositor, and control mode (the
+            // old inline handler always swapped with the next pane).
+            try runViaTranslator(command, coordinator: coordinator)
         case .resizePane(let direction, let amount):
             try resizeActivePane(direction: direction, amount: amount, coordinator: coordinator)
         case .markPane(let set):
@@ -335,11 +327,30 @@ final class MainExecutor: CommandExecutor {
         )
         switch CommandIPCTranslator.translate(command, target: focus, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex) {
         case let .requests(requests):
-            for request in requests { _ = coordinator.requestDaemon(request) }
+            // Daemon validation errors (unknown hook event, bad option scope, …) must
+            // reach the user — a silently-dropped .error reads as success (fail-loud
+            // policy). First error aborts the remainder.
+            for request in requests {
+                if case let .error(message)? = coordinator.requestDaemon(request) {
+                    coordinator.syncFromDaemon()
+                    throw CommandExecutionError.daemonError(message)
+                }
+            }
             coordinator.syncFromDaemon()
         case let .clientLocal(local):
             try dispatch(local)
         case .unresolved:
+            // find-window's no-match is a search result, not a focus problem — say so
+            // (matches the -C path and the compositor/control-mode wording).
+            if case let .findWindow(pattern, _, _, _) = command {
+                DisplayMessage.show("find-window: no matches for '\(pattern)'")
+                return
+            }
+            // Distinguish "you named something that doesn't exist" (strict `-t`/`-s`
+            // resolution) from "there is nothing focused to act on".
+            if case let .targeted(spec, _) = command {
+                throw CommandExecutionError.targetNotFound(spec.raw)
+            }
             throw CommandExecutionError.noActiveSurface
         }
     }
@@ -426,6 +437,7 @@ final class MainExecutor: CommandExecutor {
         case .next: coordinator.cycleActivePane(forward: true)
         case .previous: coordinator.cycleActivePane(forward: false)
         case .last: coordinator.selectLastPane()
+        case .current: break // already focused — explicit no-op
         case .left, .right, .up, .down:
             guard let tab = coordinator.snapshot.activeWorkspace?.activeTab,
                   let sid = coordinator.activeSurfaceID,
@@ -516,6 +528,12 @@ final class MainExecutor: CommandExecutor {
 
 @MainActor
 enum DisplayMessage {
+    /// `display-time` cache: a synchronous show-options IPC round-trip per toast
+    /// blocked the main actor (hook bursts fire many). The value changes rarely —
+    /// re-read at most every few seconds, like the compositor's applyOptions cache.
+    private static var cachedDisplayTimeMS = 750
+    private static var displayTimeFetchedAt = Date.distantPast
+
     /// Non-blocking transient toast anchored to the active window, with the
     /// message run through the `FormatString` evaluator so tokens like
     /// `#{pane_title}` / `#{session_name}` resolve (matching the status line).
@@ -523,11 +541,14 @@ enum DisplayMessage {
         let rendered = FormatString.evaluate(format, context: SessionCoordinator.shared.currentFormatContext())
         guard let host = (NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.contentView != nil }))?.contentView else { return }
         // `display-time` (ms, tmux) bounds the toast hold, same as the compositor's flash.
-        let ms = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)).flatMap { response -> Int? in
-            guard case let .options(entries) = response else { return nil }
-            return entries.first { $0.key == "display-time" }.flatMap { Int($0.value) }
-        } ?? 750
-        Toast.show(rendered, in: host, hold: max(Double(ms) / 1000, 0.1))
+        if Date().timeIntervalSince(displayTimeFetchedAt) > 5 {
+            displayTimeFetchedAt = Date()
+            cachedDisplayTimeMS = SessionCoordinator.shared.requestDaemon(.showOptions(scope: nil)).flatMap { response -> Int? in
+                guard case let .options(entries) = response else { return nil }
+                return entries.first { $0.key == "display-time" }.flatMap { Int($0.value) }
+            } ?? 750
+        }
+        Toast.show(rendered, in: host, hold: max(Double(cachedDisplayTimeMS) / 1000, 0.1))
     }
 }
 

@@ -29,7 +29,9 @@ final class DaemonCommandExecutor: @unchecked Sendable {
             for sub in commands { execute(sub, context: context) }
 
         case let .displayMessage(format):
-            _ = registry.handle(.displayMessage(format: format))
+            // Render with the HOOK's context — the event's subject (the renamed tab,
+            // the closed session), not the active chain the IPC handler would rebuild.
+            registry.postDisplayMessage(FormatString.evaluate(format, context: context))
 
         case let .runShell(shellCommand, captureToBuffer):
             registry.runShellForHook(shellCommand, captureToBuffer: captureToBuffer)

@@ -396,10 +396,13 @@ public struct SessionEditor: Sendable {
             linked.lastActivePaneID = nil
             return linked
         }
+        // tmux: the new member starts on the group's CURRENT window (focus then
+        // diverges per member) — the linked copy at the target's active position.
+        let activeIndex = target.tabs.firstIndex { $0.id == target.activeTabID } ?? 0
         let member = SessionGroup(
             name: name ?? "",
             tabs: linkedTabs,
-            activeTabID: linkedTabs.first?.id,
+            activeTabID: (linkedTabs.indices.contains(activeIndex) ? linkedTabs[activeIndex] : linkedTabs.first)?.id,
             sortOrder: (snapshot.workspaces[loc.workspaceIndex].sessions.map(\.sortOrder).max() ?? 0) + 1,
             groupID: groupID
         )
@@ -432,7 +435,8 @@ public struct SessionEditor: Sendable {
         guard let match = tabIndex(tabID: tabID) else { return }
         let owner = snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex]
         let source = owner.tabs[match.tabIndex]
-        for peer in groupPeers(of: owner.id) {
+        let peers = groupPeers(of: owner.id) // once — an O(sessions) scan
+        for peer in peers {
             var linked = source
             linked.id = UUID()
             linked.rootPane = Self.cloneWithFreshPaneIDs(source.rootPane)
@@ -443,12 +447,15 @@ public struct SessionEditor: Sendable {
                 .sessions[peer.sessionIndex].tabs.map(\.sortOrder).max() ?? 0) + 1
             snapshot.workspaces[peer.workspaceIndex].sessions[peer.sessionIndex].tabs.append(linked)
         }
-        if !groupPeers(of: owner.id).isEmpty { bumpRevision() }
+        if !peers.isEmpty { bumpRevision() }
     }
 
     /// Before closing `tabID` in a grouped session, find the peer copies of the same
-    /// window (tabs sharing its surface set) so the caller can close them too —
-    /// tmux: killing a window removes it from every group member.
+    /// window (tabs sharing any of its live surfaces) so the caller can close them
+    /// too — tmux: killing a window removes it from every group member. Overlap, not
+    /// set equality: per-window split layouts may diverge between members (a local
+    /// split adds a surface to one copy only), and the kill must still propagate —
+    /// same sharing predicate as `unlinkWindow`.
     public func groupCounterparts(of tabID: TabID) -> [TabID] {
         guard let match = tabIndex(tabID: tabID) else { return [] }
         let owner = snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex]
@@ -456,7 +463,7 @@ public struct SessionEditor: Sendable {
         guard !surfaces.isEmpty else { return [] }
         return groupPeers(of: owner.id).flatMap { peer in
             snapshot.workspaces[peer.workspaceIndex].sessions[peer.sessionIndex].tabs
-                .filter { Set($0.rootPane.allSurfaceIDs()) == surfaces }
+                .filter { !surfaces.isDisjoint(with: $0.rootPane.allSurfaceIDs()) }
                 .map(\.id)
         }
     }
@@ -599,6 +606,14 @@ public struct SessionEditor: Sendable {
     public mutating func updateTabCwd(surfaceID: SurfaceID, path: String) {
         guard let match = tabIndex(surfaceID: surfaceID) else { return }
         snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex].tabs[match.tabIndex].cwd = path
+        bumpRevision()
+    }
+
+    /// Foreground-command metadata (`#{pane_current_command}`), refreshed by the daemon's
+    /// metadata scan alongside cwd — same per-tab granularity as `updateTabCwd`.
+    public mutating func updateTabCurrentCommand(surfaceID: SurfaceID, command: String?) {
+        guard let match = tabIndex(surfaceID: surfaceID) else { return }
+        snapshot.workspaces[match.workspaceIndex].sessions[match.sessionIndex].tabs[match.tabIndex].currentCommand = command
         bumpRevision()
     }
 

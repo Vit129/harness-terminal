@@ -14,8 +14,10 @@ public final class SurfaceRegistry: @unchecked Sendable {
     public let hookRegistry = HookRegistry()
     private let persistedDefaultShell: String?
     /// tmux `show-messages`: recent rendered display-message lines (most recent last),
-    /// capped so a chatty hook can't grow the daemon. Guarded by `lock` like the editor.
+    /// capped so a chatty hook can't grow the daemon. Own lock (not `lock`): appends
+    /// come from both the IPC handler (lock held) and hook firing (hookQueue, no lock).
     private var messageLog: [String] = []
+    private let messageLogLock = NSLock()
     private static let messageLogCap = 50
     /// Opt-in lock/output instrumentation (off unless `HARNESS_DAEMON_METRICS=1`),
     /// surfaced via the `SIGUSR1` stats log. `DaemonServer` records output
@@ -354,18 +356,25 @@ public final class SurfaceRegistry: @unchecked Sendable {
             fireHookLocked(.afterKillTab)
             return .ok
         case let .closeSession(sessionID):
-            let closedSurfaces = editor.snapshot.workspaces
+            let closingSession = editor.snapshot.workspaces
                 .flatMap(\.sessions)
-                .first(where: { $0.id == sessionID })?
+                .first(where: { $0.id == sessionID })
+            let closedSurfaces = closingSession?
                 .tabs
                 .flatMap { $0.rootPane.allSurfaceIDs().map(\.uuidString) } ?? []
+            // Hook context captured BEFORE the close: `#{session_name}` must describe
+            // the session that closed, not whatever survives it.
+            let closedContext = buildFormatContext(
+                surfaceKey: (closingSession?.activeTab ?? closingSession?.tabs.first)?
+                    .rootPane.allSurfaceIDs().first?.uuidString
+            )
             guard editor.closeSession(sessionID) else { return .error("Session not found") }
             closeSurfaces(closedSurfaces)
             // Drop the session's per-session env so entries don't accumulate in environment.json.
             environmentStore.clearSession(sessionID.uuidString)
             ensureAllSnapshotSurfaces()
             commit()
-            fireHookLocked(.sessionClosed)
+            fireHookLocked(.sessionClosed, context: closedContext)
             return .ok
         case let .closeWorkspace(id):
             let workspaceSessionIDs = editor.snapshot.workspaces
@@ -601,12 +610,20 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // later OSC title doesn't clobber the chosen name.
             optionStore.set(.bool(false), key: "automatic-rename", scope: .tab, target: tabID.uuidString)
             commit()
-            fireHookLocked(.windowRenamed)
+            // Hook context follows the RENAMED tab (a `-t` can name a non-active one),
+            // like the OSC automatic-rename path — never the focused tab's.
+            fireHookLocked(.windowRenamed, surfaceKey: editor.snapshot.workspaces
+                .flatMap { $0.sessions.flatMap(\.tabs) }
+                .first(where: { $0.id == tabID })?
+                .rootPane.allSurfaceIDs().first?.uuidString)
             return .ok
         case let .renameSession(sessionID, name):
             guard editor.renameSession(sessionID, name: name) else { return .error("Session not found") }
             commit()
-            fireHookLocked(.sessionRenamed)
+            // Same misroute class: format against the RENAMED session's active tab.
+            let renamed = editor.snapshot.workspaces.flatMap(\.sessions).first { $0.id == sessionID }
+            fireHookLocked(.sessionRenamed, surfaceKey: (renamed?.activeTab ?? renamed?.tabs.first)?
+                .rootPane.allSurfaceIDs().first?.uuidString)
             return .ok
         case let .renameWorkspace(workspaceID, name):
             guard editor.renameWorkspace(workspaceID, name: name) else { return .error("Workspace not found") }
@@ -838,23 +855,37 @@ public final class SurfaceRegistry: @unchecked Sendable {
             }
             return .hooks(entries)
         case .showMessages:
+            messageLogLock.lock(); defer { messageLogLock.unlock() }
             return .text(messageLog.joined(separator: "\n"))
         case let .displayMessage(format):
             // Render via FormatString using whatever context the daemon can
             // build right now (active workspace/tab from snapshot). UI clients
             // observe the notification bus and decide how to surface it.
-            let context = buildFormatContext()
-            let text = FormatString.evaluate(format, context: context)
-            messageLog.append("[\(ISO8601DateFormatter().string(from: Date()))] \(text)")
-            if messageLog.count > Self.messageLogCap { messageLog.removeFirst(messageLog.count - Self.messageLogCap) }
-            NotificationBus.shared.post(AgentNotification(
-                surfaceID: nil,
-                daemonSurfaceID: nil,
-                title: "Harness",
-                body: text
-            ))
+            postDisplayMessage(FormatString.evaluate(format, context: buildFormatContext()))
             return .ok
         }
+    }
+
+    /// ISO8601DateFormatter is documented thread-safe; one instance instead of a
+    /// per-message allocation while serializing the message lock.
+    nonisolated(unsafe) private static let messageTimestamp = ISO8601DateFormatter()
+
+    /// Post an already-rendered display-message line: append to the `show-messages`
+    /// log and notify UI clients. Split from the IPC handler so hook-fired
+    /// display-message can render with the HOOK's context (the event's subject —
+    /// e.g. the closed session) instead of the active chain — which also means
+    /// hook-fired messages land in `show-messages` like client-sent ones.
+    func postDisplayMessage(_ text: String) {
+        messageLogLock.lock()
+        messageLog.append("[\(Self.messageTimestamp.string(from: Date()))] \(text)")
+        if messageLog.count > Self.messageLogCap { messageLog.removeFirst(messageLog.count - Self.messageLogCap) }
+        messageLogLock.unlock()
+        NotificationBus.shared.post(AgentNotification(
+            surfaceID: nil,
+            daemonSurfaceID: nil,
+            title: "Harness",
+            body: text
+        ))
     }
 
     private func subscribe(surfaceID: String) -> IPCResponse {
@@ -942,11 +973,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
         // the surface wasn't closed/replaced before committing (PID reuse safety). Capture the PID
         // the cwd was computed for so a respawn during the probe (same RealPty, new child) can't
         // commit the OLD child's cwd for the NEW one.
-        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String)] = snap.compactMap { key, session in
+        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String, command: String?)] = snap.compactMap { key, session in
             guard let uuid = UUID(uuidString: key), let result = session.probeWorkingDirectory() else {
                 return nil
             }
-            return (key, session, uuid, result.pid, result.cwd)
+            // Foreground command rides the same probe cycle (one extra ioctl + name lookup).
+            // Guarded by the same child PID so a respawn can't commit the old child's command.
+            let command = session.probeForegroundCommand()
+            return (key, session, uuid, result.pid, result.cwd, command?.pid == result.pid ? command?.command : nil)
         }
         guard !probed.isEmpty else { return }
 
@@ -964,37 +998,48 @@ public final class SurfaceRegistry: @unchecked Sendable {
             else { continue }
             // Re-read the tab's stored cwd under the lock; the proc-scan result (`entry.cwd`) was
             // computed off-lock so we never re-run that O(all-PIDs) walk while holding the lock.
-            let current = editor.snapshot.workspaces
+            let tab = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
                 .sessions
                 .flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })?
-                .cwd
-            guard current != entry.cwd else { continue }
-            editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
-            changed = true
+                .first(where: { $0.id == match.tabID })
+            if tab?.cwd != entry.cwd {
+                editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
+                changed = true
+            }
+            if let command = entry.command, tab?.currentCommand != command {
+                editor.updateTabCurrentCommand(surfaceID: entry.uuid, command: command)
+                changed = true
+            }
         }
         if changed { commit() }
     }
+
+    /// Count of identified clients, injected by `DaemonServer` (which owns the FDs) for
+    /// `#{session_attached}`. Must be safe to call under `lock` from any thread — the
+    /// server backs it with its own counter, never a hop onto the daemon queue.
+    public var attachedClientCountProvider: (@Sendable () -> Int)?
 
     /// Build a `FormatContext` from the current snapshot's active selection.
     /// Used by `display-message` and hook firing. Conservative: nil fields
     /// stay nil so format strings render an empty token instead of "(none)".
     public func buildFormatContext(surfaceKey: String? = nil, clientName: String? = nil) -> FormatContext {
         // When the event names a specific surface (split/kill/exit), resolve THAT
-        // pane's tab so tokens like #{pane_cwd} reflect the affected pane; otherwise
-        // fall back to the active selection.
+        // pane's tab AND its owning session, so tokens like #{pane_cwd} and
+        // #{session_name} reflect the affected pane — not the active selection.
         let workspace = editor.snapshot.activeWorkspace
-        let session = workspace?.activeSession
+        var session = workspace?.activeSession
         var tab = workspace?.activeTab
         if let surfaceKey, let match = editor.tab(forSurfaceKey: surfaceKey) {
-            let resolved = editor.snapshot.workspaces
+            let owningSession = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
-                .sessions.flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })
-            if let resolved { tab = resolved }
+                .sessions.first(where: { $0.tabs.contains { $0.id == match.tabID } })
+            if let resolved = owningSession?.tabs.first(where: { $0.id == match.tabID }) {
+                tab = resolved
+                session = owningSession
+            }
         }
-        return FormatContext(
+        var context = FormatContext(
             paneID: surfaceKey,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -1010,6 +1055,32 @@ public final class SurfaceRegistry: @unchecked Sendable {
             clientName: clientName,
             windowFlags: tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
         )
+        // Extended tmux-parity fields. PTY-backed values come from the live surface when the
+        // context names one (exact per-pane truth, unlike the per-tab scan metadata); the
+        // probes are single ioctls/syscalls — cheap enough at display-message/hook frequency.
+        context.paneCurrentCommand = tab?.currentCommand
+        if let surfaceKey, let live = sessions[surfaceKey] {
+            context.panePID = Int(live.currentChildPID)
+            if let command = live.probeForegroundCommand()?.command {
+                context.paneCurrentCommand = command
+            }
+            if let size = live.currentSize() {
+                context.paneWidth = size.cols
+                context.paneHeight = size.rows
+            }
+            context.historyBytes = live.historyBytes
+        }
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        context.sessionGroup = session.flatMap { editor.snapshot.groupName(of: $0) }
+        context.sessionAttached = attachedClientCountProvider?()
+        context.serverPID = Int(getpid())
+        return context
     }
 
     // MARK: - Hook firing
@@ -1017,9 +1088,11 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// Schedule the hooks bound to `event`. MUST be called with `lock` held: it reads
     /// the locked snapshot to build the context, then fires on `hookQueue` so the
     /// commands run after the current mutation commits and the lock is released.
-    private func fireHookLocked(_ event: HookEvent, surfaceKey: String? = nil) {
-        let context = buildFormatContext(surfaceKey: surfaceKey)
-        hookQueue.async { [weak self] in self?.hookRegistry.fire(event, context: context) }
+    /// `context` overrides the snapshot-derived one for events whose subject is gone
+    /// by fire time (session-closed captures its context before the mutation).
+    private func fireHookLocked(_ event: HookEvent, surfaceKey: String? = nil, context: FormatContext? = nil) {
+        let resolved = context ?? buildFormatContext(surfaceKey: surfaceKey)
+        hookQueue.async { [weak self] in self?.hookRegistry.fire(event, context: resolved) }
     }
 
     /// Client attach/detach originate in `DaemonServer` (which owns FDs), outside the

@@ -176,19 +176,85 @@ final class CommandParserTests: XCTestCase {
     func testPaneTargetSpecialFormsParse() throws {
         XCTAssertEqual(try CommandParser.parse("select-pane -t :.+"), .selectPane(target: .next))
         XCTAssertEqual(try CommandParser.parse("select-pane -t :.-"), .selectPane(target: .previous))
-        XCTAssertEqual(try CommandParser.parse("swap-pane -t !"), .swapPane(target: .last))
+        XCTAssertEqual(try CommandParser.parse("swap-pane -t !"), .swapPane(target: .last, source: nil))
     }
 
-    /// An unrecognized -t used to silently route to `.next`, moving the WRONG pane with no
-    /// feedback — it must throw like every other invalid argument.
-    func testPaneTargetInvalidValueThrows() {
-        XCTAssertThrowsError(try CommandParser.parse("select-pane -t bogus"))
-        XCTAssertThrowsError(try CommandParser.parse("swap-pane -t api:1.0")) { error in
+    /// Absolute `-t` targets parse via the full `TargetSpec` grammar into `.targeted` —
+    /// names that don't exist (`bogus`) parse fine and fail loudly at *resolution*, exactly
+    /// like tmux's "can't find session". Deliberate rewrite of the v1.7.1 throws-pin: the
+    /// no-silent-misroute policy moved from parse time to resolve time (see
+    /// `testPaneTargetEmptySpecStillThrows` for what parse still rejects).
+    func testPaneTargetAbsoluteFormsParseAsTargeted() throws {
+        guard case let .targeted(spec, inner) = try CommandParser.parse("swap-pane -t api:1.0") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(spec.session, .byName("api"))
+        XCTAssertEqual(spec.window, .byIndex(1))
+        XCTAssertEqual(spec.pane, .byIndex(0))
+        XCTAssertEqual(inner, .swapPane(target: .next, source: nil))
+
+        let paneID = UUID()
+        guard case let .targeted(byID, select) = try CommandParser.parse("select-pane -t %\(paneID.uuidString)") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(byID.pane, .byID(paneID))
+        XCTAssertEqual(select, .selectPane(target: .next))
+
+        // A lone `{top}` is level-ambiguous at parse (window vs pane) — it rides
+        // `bareToken` and resolves at the command's natural level.
+        guard case let .targeted(geometry, _) = try CommandParser.parse("select-pane -t {top}") else {
+            return XCTFail("expected .targeted")
+        }
+        XCTAssertEqual(geometry.bareToken, "{top}")
+
+        // A lone unknown name is a session/level-ambiguous ref — parses, resolves to nothing.
+        guard case .targeted = try CommandParser.parse("select-pane -t bogus") else {
+            return XCTFail("expected .targeted")
+        }
+    }
+
+    /// tmux `swap-pane -s <src>`: the source pane rides the command; without `-t`
+    /// the destination is the current pane.
+    func testSwapPaneSourceFlagParses() throws {
+        let paneID = UUID()
+        guard case let .swapPane(target, source) = try CommandParser.parse("swap-pane -s %\(paneID.uuidString)") else {
+            return XCTFail("expected bare swapPane with source")
+        }
+        XCTAssertEqual(target, .current, "-s without -t swaps with the current pane")
+        XCTAssertEqual(source?.pane, .byID(paneID))
+
+        guard case let .targeted(spec, .swapPane(_, src2)) = try CommandParser.parse(
+            "swap-pane -s %\(paneID.uuidString) -t api:1.0") else {
+            return XCTFail("expected targeted swapPane with source")
+        }
+        XCTAssertEqual(spec.session, .byName("api"))
+        XCTAssertEqual(src2?.pane, .byID(paneID))
+
+        // `-s` with a relative `-t` keeps the relative destination.
+        guard case let .swapPane(rel, src3) = try CommandParser.parse(
+            "swap-pane -s %\(paneID.uuidString) -t :.-") else {
+            return XCTFail("expected relative swapPane with source")
+        }
+        XCTAssertEqual(rel, .previous)
+        XCTAssertEqual(src3?.pane, .byID(paneID))
+    }
+
+    /// Relative fast paths are untouched by the absolute-target branch.
+    func testPaneTargetRelativeFormsStayRelative() throws {
+        XCTAssertEqual(try CommandParser.parse("select-pane -t :.+"), .selectPane(target: .next))
+        XCTAssertEqual(try CommandParser.parse("swap-pane -t !"), .swapPane(target: .last, source: nil))
+        XCTAssertEqual(try CommandParser.parse("select-pane -L"), .selectPane(target: .left))
+    }
+
+    /// What parse still rejects loudly: a `-t` value that parses to nothing actionable.
+    func testPaneTargetEmptySpecStillThrows() {
+        XCTAssertThrowsError(try CommandParser.parse("select-pane -t :")) { error in
             guard let parseError = error as? CommandParseError,
                   case .invalidArgument = parseError else {
                 return XCTFail("expected invalidArgument, got \(error)")
             }
         }
+        XCTAssertThrowsError(try CommandParser.parse("swap-pane -t :."))
     }
 
     /// A dangling -t (flag present, value missing) is a typo, not a request for the default.
@@ -334,6 +400,11 @@ final class CommandParserTests: XCTestCase {
             .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
         )
         XCTAssertThrowsError(try CommandParser.parse("find-window"))
+        // A `-t` value is a (currently unsupported) target, never the pattern.
+        XCTAssertEqual(
+            try CommandParser.parse("find-window -t somewhere build"),
+            .findWindow(pattern: "build", matchName: true, matchContent: false, matchTitle: true)
+        )
     }
 
     /// tmux's table name for the vi copy-mode table is `copy-mode-vi`; Harness's is
@@ -364,12 +435,45 @@ final class CommandParserTests: XCTestCase {
         XCTAssertEqual(try CommandParser.parse("respawn-window"), .respawnWindow(keepHistory: true))
         XCTAssertEqual(try CommandParser.parse("respawn-window -k"), .respawnWindow(keepHistory: false))
         XCTAssertEqual(try CommandParser.parse("show-messages"), .showMessages)
-        // respawn-window takes the universal -t.
+        // respawn-window takes the universal -t — and so does its alias.
         guard case let .targeted(spec, inner) = try CommandParser.parse("respawn-window -t :1") else {
             return XCTFail("expected .targeted")
         }
         XCTAssertEqual(spec.window, .byIndex(1))
         XCTAssertEqual(inner, .respawnWindow(keepHistory: true))
+        guard case .targeted = try CommandParser.parse("respawnw -t :1") else {
+            return XCTFail("respawnw alias must take the universal -t too")
+        }
+    }
+
+    /// `--if <format>` makes bindable set-hook condition-capable like CLI bind-hook.
+    func testSetHookParsesCondition() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(##"set-hook --if "#{?pane_active,1,}" after-new-tab "display-message hi""##),
+            .setHook(event: "after-new-tab", source: "display-message hi", condition: "#{?pane_active,1,}")
+        )
+    }
+
+    /// Values that begin with `-` survive once the positional run starts (getopt):
+    /// a quoted hook command with flags, a buffer payload, an env value. `--` ends
+    /// flag parsing explicitly for a leading-dash first positional.
+    func testDashPrefixedValuesAreNotSwallowed() throws {
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-hook after-new-tab splitw -h"#),
+            .setHook(event: "after-new-tab", source: "splitw -h", condition: nil),
+            "unquoted trailing flags belong to the hook command"
+        )
+        XCTAssertEqual(
+            try CommandParser.parse("set-environment PS1_SUFFIX -v"),
+            .setEnvironment(global: false, key: "PS1_SUFFIX", value: "-v")
+        )
+        XCTAssertEqual(
+            try CommandParser.parse(#"set-buffer -- "-rf""#),
+            .setBuffer(name: nil, text: "-rf"),
+            "-- ends flag parsing so a dash-leading payload parses"
+        )
+        // A bare key with no value still errors (tmux) rather than persisting "".
+        XCTAssertThrowsError(try CommandParser.parse("set-environment LONESOME"))
     }
 
     func testKnownVerbsAreAllParseable() {
