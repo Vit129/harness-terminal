@@ -617,10 +617,6 @@ private final class PaneSplitButtonsView: NSView {
         SessionCoordinator.shared.splitActivePane(direction: .horizontal)
     }
 
-    @objc private func splitV() {
-        SessionCoordinator.shared.splitActivePane(direction: .vertical)
-    }
-
     @objc private func closePane() {
         SessionCoordinator.shared.killActivePane()
     }

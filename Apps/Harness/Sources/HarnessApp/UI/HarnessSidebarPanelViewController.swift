@@ -1149,11 +1149,12 @@ final class HarnessSidebarPanelViewController: NSViewController {
         splitRight.toolTip = SplitDirection.horizontal.rawValue
         menu.addItem(splitRight)
 
-        let splitDown = NSMenuItem(title: "Split session down", action: #selector(splitSessionFromMenu(_:)), keyEquivalent: "")
-        splitDown.target = self
-        splitDown.representedObject = session.id
-        splitDown.toolTip = SplitDirection.vertical.rawValue
-        menu.addItem(splitDown)
+        menu.addItem(.separator())
+
+        let right = SessionCoordinator.shared.settings.sidebarOnRight
+        let moveSidebar = NSMenuItem(title: right ? "Move Sidebar to Left" : "Move Sidebar to Right", action: #selector(toggleSidebarPositionFromMenu), keyEquivalent: "")
+        moveSidebar.target = self
+        menu.addItem(moveSidebar)
 
         menu.addItem(.separator())
 
