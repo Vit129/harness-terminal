@@ -155,3 +155,128 @@ final class OptionStoreTests: XCTestCase {
         XCTAssertEqual(reader.get("status-left", scope: .global)?.stringValue, custom)
     }
 }
+
+final class FormatStringExtendedVariableTests: XCTestCase {
+    /// Mirrors `FormatStringTests.context()` — base fields only.
+    private func context() -> FormatContext {
+        FormatContext(
+            paneID: "pane-1",
+            paneTitle: "fish",
+            paneCwd: "/Users/dev/Code/harness",
+            paneActive: true,
+            paneIndex: 0,
+            sessionName: "work",
+            tabName: "editor",
+            tabIndex: 2,
+            workspaceName: "Default",
+            agentKind: "claude-code",
+            agentActivity: "working",
+            gitBranch: "main",
+            clientName: "Harness.app",
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
+    private func extendedContext() -> FormatContext {
+        var context = self.context()
+        context.panePID = 4242
+        context.paneCurrentCommand = "vim"
+        context.paneWidth = 120
+        context.paneHeight = 40
+        context.paneDead = false
+        context.historyBytes = 65536
+        context.sessionID = "AAAAAAAA-0000-0000-0000-000000000000"
+        context.windowID = "BBBBBBBB-0000-0000-0000-000000000000"
+        context.sessionWindows = 3
+        context.windowPanes = 2
+        context.windowActive = true
+        context.sessionAttached = 1
+        context.serverPID = 99
+        context.clientWidth = 200
+        context.clientHeight = 50
+        context.clientTTY = "/dev/ttys003"
+        context.clientTermname = "xterm-256color"
+        context.windowFlags = "Z#!"
+        return context
+    }
+
+    func testExtendedPaneAndSessionTokens() {
+        let context = extendedContext()
+        XCTAssertEqual(FormatString.evaluate("#{pane_pid}", context: context), "4242")
+        XCTAssertEqual(FormatString.evaluate("#{pane_current_command}", context: context), "vim")
+        XCTAssertEqual(FormatString.evaluate("#{pane_width}x#{pane_height}", context: context), "120x40")
+        XCTAssertEqual(FormatString.evaluate("#{pane_dead}", context: context), "0")
+        XCTAssertEqual(FormatString.evaluate("#{history_bytes}", context: context), "65536")
+        XCTAssertEqual(FormatString.evaluate("#{session_windows}/#{window_panes}", context: context), "3/2")
+        XCTAssertEqual(FormatString.evaluate("#{window_active}", context: context), "1")
+        XCTAssertEqual(FormatString.evaluate("#{session_attached}", context: context), "1")
+        XCTAssertEqual(FormatString.evaluate("#{pid}", context: context), "99")
+    }
+
+    /// Flag tokens share one literal convention: tmux's "1"/"0" — never "" for false.
+    /// (Conditionals treat "0" and "" as falsy alike; the literal output is the contract.)
+    func testFlagTokensRenderZeroOneUniformly() {
+        var context = FormatContext(paneActive: false)
+        context.paneDead = false
+        context.windowActive = false
+        XCTAssertEqual(
+            FormatString.evaluate("#{pane_active},#{pane_dead},#{window_active}", context: context),
+            "0,0,0"
+        )
+        XCTAssertEqual(
+            FormatString.evaluate("#{?pane_active,on,off}", context: context), "off",
+            "the literal 0 must stay falsy in conditionals"
+        )
+    }
+
+    /// IDs render with the tmux-style `$`/`@` prefixes so they round-trip into `-t` targets.
+    func testIdentifierTokensCarryTargetPrefixes() {
+        let context = extendedContext()
+        XCTAssertEqual(
+            FormatString.evaluate("#{session_id}", context: context),
+            "$AAAAAAAA-0000-0000-0000-000000000000"
+        )
+        XCTAssertEqual(
+            FormatString.evaluate("#{window_id}", context: context),
+            "@BBBBBBBB-0000-0000-0000-000000000000"
+        )
+    }
+
+    /// Alert flags split out of `#{window_flags}` as 0/1 vars ("Z#!" = zoomed+activity+bell).
+    func testAlertFlagVariablesDeriveFromWindowFlags() {
+        let context = extendedContext()
+        XCTAssertEqual(FormatString.evaluate("#{window_activity_flag}", context: context), "1")
+        XCTAssertEqual(FormatString.evaluate("#{window_bell_flag}", context: context), "1")
+        XCTAssertEqual(FormatString.evaluate("#{window_silence_flag}", context: context), "0")
+        XCTAssertEqual(FormatString.evaluate("#{window_zoomed_flag}", context: context), "1")
+    }
+
+    func testPaneDeadStatusOnlyWhenDead() {
+        var context = extendedContext()
+        XCTAssertEqual(FormatString.evaluate("#{pane_dead_status}", context: context), "")
+        context.paneDead = true
+        context.paneExitStatus = 3
+        XCTAssertEqual(FormatString.evaluate("#{pane_dead}", context: context), "1")
+        XCTAssertEqual(FormatString.evaluate("#{pane_dead_status}", context: context), "3")
+    }
+
+    func testClientAndServerTokens() {
+        let context = extendedContext()
+        XCTAssertEqual(FormatString.evaluate("#{client_width}x#{client_height}", context: context), "200x50")
+        XCTAssertEqual(FormatString.evaluate("#{client_tty}", context: context), "/dev/ttys003")
+        XCTAssertEqual(FormatString.evaluate("#{client_termname}", context: context), "xterm-256color")
+        XCTAssertEqual(FormatString.evaluate("#{version}", context: context), HarnessVersion.short)
+        XCTAssertFalse(FormatString.evaluate("#{socket_path}", context: context).isEmpty)
+        let hostShort = FormatString.evaluate("#{host_short}", context: context)
+        XCTAssertFalse(hostShort.isEmpty)
+        XCTAssertFalse(hostShort.contains("."))
+    }
+
+    /// Unset extended fields render as empty tokens, not literals — the contract every
+    /// status-line conditional relies on.
+    func testUnsetExtendedFieldsRenderEmpty() {
+        let plain = context()
+        XCTAssertEqual(FormatString.evaluate("#{pane_pid}#{session_id}#{session_group}#{client_width}", context: plain), "")
+        XCTAssertEqual(FormatString.evaluate("#{window_active}", context: plain), "")
+    }
+}

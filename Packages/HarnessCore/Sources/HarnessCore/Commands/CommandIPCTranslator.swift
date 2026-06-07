@@ -144,7 +144,12 @@ public enum CommandIPCTranslator {
         switch command {
         // MARK: Targeting — resolve `-t` then run the inner verb against it.
         case let .targeted(spec, inner):
-            let resolved = target.resolving(spec, command: inner, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
+            // STRICT: a named component that doesn't match makes the whole command
+            // `.unresolved` — every targeted verb (kill/respawn/send-keys/…) fails
+            // loudly on a bad `-t` instead of acting on the caller's focus.
+            guard let resolved = target.resolving(
+                spec, command: inner, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+            ) else { return .unresolved }
             // For "select" verbs with an explicit target, selecting *is* focusing
             // the resolved window/pane (absolute), not a relative step.
             switch inner {
@@ -154,6 +159,15 @@ public enum CommandIPCTranslator {
             case .selectWindow:
                 guard let ws = resolved.workspace, let tab = resolved.tab else { return .unresolved }
                 return .requests([.selectTab(workspaceID: ws.id, tabID: tab.id)])
+            case let .swapPane(_, source):
+                // tmux `swap-pane [-s src] -t X`: X names the DESTINATION; the pane to
+                // act from is `-s` (default: the caller's active pane). Translating
+                // against `resolved` would swap X with X's own neighbor.
+                guard let src = swapSource(source, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex),
+                      let dst = resolved.paneID, dst != src else {
+                    return .unresolved
+                }
+                return .requests([.swapPanes(srcPaneID: src, dstPaneID: dst)])
             default:
                 return translate(inner, target: resolved, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
             }
@@ -231,16 +245,20 @@ public enum CommandIPCTranslator {
         case let .selectPane(paneTarget):
             return selectPane(paneTarget, target: target)
 
-        case let .swapPane(paneTarget):
-            guard let pane = target.paneID else { return .unresolved }
+        case let .swapPane(paneTarget, source):
+            // `-s X` swaps X with the destination; no `-s` swaps the caller's pane.
+            // Relative destinations stay relative to the caller's focus (tmux).
+            guard let src = swapSource(source, target: target, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex),
+                  let current = target.paneID else { return .unresolved }
             let neighbor: PaneID?
             switch paneTarget {
+            case .current: neighbor = current
             case .next, .right, .down: neighbor = target.pane(offset: 1)
             case .previous, .left, .up: neighbor = target.pane(offset: -1)
             case .last: neighbor = target.tab?.lastActivePaneID
             }
-            guard let dst = neighbor, dst != pane else { return .unresolved }
-            return .requests([.swapPanes(srcPaneID: pane, dstPaneID: dst)])
+            guard let dst = neighbor, dst != src else { return .unresolved }
+            return .requests([.swapPanes(srcPaneID: src, dstPaneID: dst)])
 
         case let .joinPane(direction):
             guard let dst = target.paneID, let src = target.markedPaneID, src != dst else { return .unresolved }
@@ -248,9 +266,11 @@ public enum CommandIPCTranslator {
 
         case let .movePane(direction, source):
             // move-pane = join-pane with an explicit `-s` source (the daemon op is
-            // identical). Resolve the source pane against the same snapshot.
-            let srcTarget = target.resolving(source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex)
-            guard let src = srcTarget.paneID, let dst = target.paneID, src != dst else { return .unresolved }
+            // identical). Resolve the source pane against the same snapshot — strictly,
+            // so a mistyped `-s` never silently moves the focused pane.
+            guard let srcTarget = target.resolving(
+                source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+            ), let src = srcTarget.paneID, let dst = target.paneID, src != dst else { return .unresolved }
             return .requests([.joinPane(sourcePaneID: src, destPaneID: dst, direction: layoutDirection(for: direction))])
 
         case .renumberWindows:
@@ -376,9 +396,26 @@ public enum CommandIPCTranslator {
 
     // MARK: Helpers
 
+    /// `-s` source pane for swap-pane: nil spec = the caller's active pane; a spec
+    /// that doesn't resolve returns nil so the verb fails loudly upstream.
+    private static func swapSource(
+        _ source: TargetSpec?,
+        target: CommandTarget,
+        baseIndex: Int,
+        paneBaseIndex: Int
+    ) -> PaneID? {
+        guard let source else { return target.paneID }
+        guard let resolved = target.resolving(
+            source, command: .killPane, baseIndex: baseIndex, paneBaseIndex: paneBaseIndex
+        ) else { return nil }
+        return resolved.paneID
+    }
+
     private static func selectPane(_ paneTarget: Command.PaneTarget, target: CommandTarget) -> CommandTranslation {
         guard let tab = target.tab, let current = target.paneID else { return .unresolved }
         switch paneTarget {
+        case .current:
+            return .requests([.selectPane(tabID: tab.id, paneID: current)])
         case .next:
             guard let dst = target.pane(offset: 1) else { return .unresolved }
             return .requests([.selectPane(tabID: tab.id, paneID: dst)])

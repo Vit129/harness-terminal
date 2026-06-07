@@ -492,6 +492,36 @@ final class DaemonRoundTripTests: XCTestCase {
         wait(for: [detached], timeout: 5)
     }
 
+    /// `#{session_attached}` must count subscription-registered clients (the GUI and
+    /// `harness-cli attach` never call identifyClient). Regression for the off-queue
+    /// mirror only updating on identify/disconnect, reading 0 with real clients attached.
+    func testSessionAttachedCountsSubscriptionClients() throws {
+        let client = DaemonClient()
+        guard case let .surfaces(surfaces) = try client.request(.listSurfaces), let target = surfaces.first else {
+            return XCTFail("expected a default surface")
+        }
+        let marker = "ATTACHED_\(UUID().uuidString.prefix(8))"
+        let rendered = expectation(description: "display-message rendered")
+        rendered.assertForOverFulfill = false
+        let body = AtomicBox<String>()
+        let token = NotificationCenter.default.addObserver(
+            forName: NotificationBus.shared.notificationPosted, object: nil, queue: .main
+        ) { note in
+            guard let n = note.userInfo?["notification"] as? AgentNotification,
+                  n.body.contains(marker) else { return }
+            body.set(n.body)
+            rendered.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        // Register via subscription only — exactly how the GUI and attach clients connect.
+        let subscription = try client.subscribeSurfaceOutput(surfaceID: target.surfaceID, label: "count-test") { _, _ in }
+        defer { subscription.cancel() }
+        _ = try client.request(.displayMessage(format: "\(marker)=#{session_attached}"))
+        wait(for: [rendered], timeout: 5)
+        XCTAssertEqual(body.value, "\(marker)=1", "subscription client must be counted")
+    }
+
     /// A frame that de-frames cleanly but carries no request (a `{}` / `{"request":null}`
     /// envelope, e.g. from a newer client or schema skew) must get an explicit `.error` reply,
     /// not silence — otherwise the client blocks until its timeout. Regression for the daemon

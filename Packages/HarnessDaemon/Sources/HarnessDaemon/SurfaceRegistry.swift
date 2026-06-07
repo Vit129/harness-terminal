@@ -13,6 +13,15 @@ public final class SurfaceRegistry: @unchecked Sendable {
     public let environmentStore = EnvironmentStore()
     public let hookRegistry = HookRegistry()
     private let persistedDefaultShell: String?
+    /// One-shot first-run / post-update banner, consumed by the first freshly created
+    /// surface (see `injectVersionBannerIfPending`). nil when disabled (tests, embedded
+    /// registries) or once shown for this build.
+    private var pendingVersionBanner: PendingVersionBanner?
+    private let versionBannerStore = VersionBannerStore()
+    /// Set when the seen-build ack failed to reach disk (full disk, permissions): retried
+    /// on later surface creations — without re-rendering the banner — so a transient write
+    /// failure can't replay the one-shot card on the next daemon start.
+    private var versionAckRetryNeeded = false
     /// Opt-in lock/output instrumentation (off unless `HARNESS_DAEMON_METRICS=1`),
     /// surfaced via the `SIGUSR1` stats log. `DaemonServer` records output
     /// notifications and backlog through this same instance.
@@ -35,16 +44,42 @@ public final class SurfaceRegistry: @unchecked Sendable {
     private let monitorLock = NSLock()
     private var monitorTimer: DispatchSourceTimer?
 
-    public init() {
+    public init(enableVersionBanner: Bool = false) {
         let defaultShell = HarnessSettings.load().defaultShell
         let trimmedDefaultShell = defaultShell.trimmingCharacters(in: .whitespacesAndNewlines)
         persistedDefaultShell = trimmedDefaultShell.isEmpty ? nil : defaultShell
+        // Captured before `store.load()` materializes anything: "no layout.json" is what
+        // distinguishes a true first install (welcome banner) from an update (what's-new).
+        let hadExistingLayout = FileManager.default.fileExists(atPath: HarnessPaths.snapshotURL.path)
+        if enableVersionBanner {
+            let lastSeen = versionBannerStore.loadLastSeenBuild()
+            pendingVersionBanner = VersionBannerStore.decidePending(
+                lastSeenBuild: lastSeen,
+                currentBuild: HarnessVersion.build,
+                hadExistingLayout: hadExistingLayout
+            )
+            // A downgrade shows nothing, but records the lower build so the eventual
+            // re-upgrade banners again.
+            if pendingVersionBanner == nil, let lastSeen, lastSeen != HarnessVersion.build {
+                versionBannerStore.markSeen()
+            }
+        }
         editor.snapshot = store.load()
         if editor.snapshot.workspaces.isEmpty {
             editor.snapshot = SessionSnapshot()
             try? store.saveImmediately(editor.snapshot)
         }
         ensureAllSnapshotSurfaces()
+        // A first install has no layout to restore — the seeded default tab IS the first
+        // surface the user ever sees, so the welcome banner lands there instead of waiting
+        // for an explicit new-tab. Updates keep restored panes untouched (banner waits for
+        // the first user-created surface).
+        if !hadExistingLayout, pendingVersionBanner != nil,
+           let firstID = editor.snapshot.workspaces.first?.sessions.first?.tabs.first?
+               .rootPane.allSurfaceIDs().first,
+           let firstSession = sessions[firstID.uuidString] {
+            injectVersionBannerIfPending(into: firstSession, columns: 80)
+        }
         cleanupOrphanScrollbackFiles()
         // Wire hook execution: bound commands run server-side via the registry's own
         // handlers. `fire` invokes this on `hookQueue` (off-lock), so re-entering
@@ -258,7 +293,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
                     shell: shell,
                     rows: 24,
                     cols: 80,
-                    scrollbackBytes: nil
+                    scrollbackBytes: nil,
+                    freshlyCreated: true
                 )
             }
             commit()
@@ -471,7 +507,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 shell: shell,
                 rows: 24,
                 cols: 80,
-                scrollbackBytes: nil
+                scrollbackBytes: nil,
+                freshlyCreated: true
             ).map { .surfaceID($0) } ?? .error("Failed to launch shell")
         case let .ensureSurface(surfaceID, cwd, shell, rows, cols, scrollbackBytes):
             return createOrEnsureSurface(
@@ -906,11 +943,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
         // the surface wasn't closed/replaced before committing (PID reuse safety). Capture the PID
         // the cwd was computed for so a respawn during the probe (same RealPty, new child) can't
         // commit the OLD child's cwd for the NEW one.
-        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String)] = snap.compactMap { key, session in
+        let probed: [(key: String, session: RealPty, uuid: UUID, pid: pid_t, cwd: String, command: String?)] = snap.compactMap { key, session in
             guard let uuid = UUID(uuidString: key), let result = session.probeWorkingDirectory() else {
                 return nil
             }
-            return (key, session, uuid, result.pid, result.cwd)
+            // Foreground command rides the same probe cycle (one extra ioctl + name lookup).
+            // Guarded by the same child PID so a respawn can't commit the old child's command.
+            let command = session.probeForegroundCommand()
+            return (key, session, uuid, result.pid, result.cwd, command?.pid == result.pid ? command?.command : nil)
         }
         guard !probed.isEmpty else { return }
 
@@ -928,18 +968,27 @@ public final class SurfaceRegistry: @unchecked Sendable {
             else { continue }
             // Re-read the tab's stored cwd under the lock; the proc-scan result (`entry.cwd`) was
             // computed off-lock so we never re-run that O(all-PIDs) walk while holding the lock.
-            let current = editor.snapshot.workspaces
+            let tab = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
                 .sessions
                 .flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })?
-                .cwd
-            guard current != entry.cwd else { continue }
-            editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
-            changed = true
+                .first(where: { $0.id == match.tabID })
+            if tab?.cwd != entry.cwd {
+                editor.updateTabCwd(surfaceID: entry.uuid, path: entry.cwd)
+                changed = true
+            }
+            if let command = entry.command, tab?.currentCommand != command {
+                editor.updateTabCurrentCommand(surfaceID: entry.uuid, command: command)
+                changed = true
+            }
         }
         if changed { commit() }
     }
+
+    /// Count of identified clients, injected by `DaemonServer` (which owns the FDs) for
+    /// `#{session_attached}`. Must be safe to call under `lock` from any thread — the
+    /// server backs it with its own counter, never a hop onto the daemon queue.
+    public var attachedClientCountProvider: (@Sendable () -> Int)?
 
     /// Build a `FormatContext` from the current snapshot's active selection.
     /// Used by `display-message` and hook firing. Conservative: nil fields
@@ -949,16 +998,18 @@ public final class SurfaceRegistry: @unchecked Sendable {
         // pane's tab so tokens like #{pane_cwd} reflect the affected pane; otherwise
         // fall back to the active selection.
         let workspace = editor.snapshot.activeWorkspace
-        let session = workspace?.activeSession
+        var session = workspace?.activeSession
         var tab = workspace?.activeTab
         if let surfaceKey, let match = editor.tab(forSurfaceKey: surfaceKey) {
-            let resolved = editor.snapshot.workspaces
+            let owningSession = editor.snapshot.workspaces
                 .first(where: { $0.id == match.workspaceID })?
-                .sessions.flatMap { $0.tabs }
-                .first(where: { $0.id == match.tabID })
-            if let resolved { tab = resolved }
+                .sessions.first(where: { $0.tabs.contains { $0.id == match.tabID } })
+            if let resolved = owningSession?.tabs.first(where: { $0.id == match.tabID }) {
+                tab = resolved
+                session = owningSession
+            }
         }
-        return FormatContext(
+        var context = FormatContext(
             paneID: surfaceKey,
             paneTitle: tab?.title,
             paneCwd: tab?.cwd,
@@ -974,6 +1025,31 @@ public final class SurfaceRegistry: @unchecked Sendable {
             clientName: clientName,
             windowFlags: tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
         )
+        // Extended tmux-parity fields. PTY-backed values come from the live surface when the
+        // context names one (exact per-pane truth, unlike the per-tab scan metadata); the
+        // probes are single ioctls/syscalls — cheap enough at display-message/hook frequency.
+        context.paneCurrentCommand = tab?.currentCommand
+        if let surfaceKey, let live = sessions[surfaceKey] {
+            context.panePID = Int(live.currentChildPID)
+            if let command = live.probeForegroundCommand()?.command {
+                context.paneCurrentCommand = command
+            }
+            if let size = live.currentSize() {
+                context.paneWidth = size.cols
+                context.paneHeight = size.rows
+            }
+            context.historyBytes = live.historyBytes
+        }
+        context.paneDead = tab.map { $0.exitStatus != nil }
+        context.paneExitStatus = tab?.exitStatus
+        context.sessionID = session?.id.uuidString
+        context.windowID = tab?.id.uuidString
+        context.sessionWindows = session?.tabs.count
+        context.windowPanes = tab?.rootPane.allPaneIDs().count
+        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
+        context.sessionAttached = attachedClientCountProvider?()
+        context.serverPID = Int(getpid())
+        return context
     }
 
     // MARK: - Hook firing
@@ -1081,13 +1157,17 @@ public final class SurfaceRegistry: @unchecked Sendable {
         onSnapshotCommitted?(revision)
     }
 
+    /// `freshlyCreated` marks a surface the user just asked for (new tab/session/split/
+    /// `createSurface`) as opposed to a boot restore or reattach revival — only a fresh
+    /// surface may consume the pending first-run / what's-new banner.
     private func createOrEnsureSurface(
         surfaceID: String,
         cwd: String?,
         shell: String?,
         rows: UInt16,
         cols: UInt16,
-        scrollbackBytes: Int?
+        scrollbackBytes: Int?,
+        freshlyCreated: Bool = false
     ) -> String? {
         if sessions[surfaceID] != nil {
             // Existing surface: do NOT resize here. A surface's geometry is owned by the
@@ -1127,6 +1207,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
             // by `processMonitors`. Lives for the surface's lifetime (cleared on teardown).
             _ = session.subscribe { [weak self] data, _ in self?.noteSurfaceOutput(surfaceKey: surfaceID, data: data) }
             sessions[surfaceID] = session
+            if freshlyCreated { injectVersionBannerIfPending(into: session, columns: Int(cols)) }
             // A dead retained pane (`remain-on-exit`) carries its exit status until revived —
             // this spawn IS the revival, so clear it. Idempotent: a plain ensure on a live
             // surface reports no change and commits nothing.
@@ -1138,6 +1219,28 @@ public final class SurfaceRegistry: @unchecked Sendable {
             fputs("HarnessDaemon surface launch failed for \(surfaceID): \(error)\n", harnessStderr)
             return nil
         }
+    }
+
+    /// Consume the pending one-shot banner: render at the surface's spawn width and write
+    /// it into the surface's output stream (scrollback + fan-out, like real shell output).
+    /// The `update-banner` option (default on) suppresses the output; either way the state
+    /// file records the current build immediately, so the banner never repeats — not on
+    /// later surfaces, and not after a daemon restart. The on-screen render stays
+    /// at-most-once per run regardless; only the durable ack is retried on failure.
+    private func injectVersionBannerIfPending(into session: RealPty, columns: Int) {
+        if versionAckRetryNeeded { versionAckRetryNeeded = !versionBannerStore.markSeen() }
+        guard let banner = pendingVersionBanner else { return }
+        pendingVersionBanner = nil
+        versionAckRetryNeeded = !versionBannerStore.markSeen()
+        guard optionStore.get("update-banner")?.boolValue ?? true else { return }
+        let bytes: Data
+        switch banner {
+        case .welcome:
+            bytes = TerminalBanner.welcome(version: HarnessVersion.short, columns: columns)
+        case .whatsNew:
+            bytes = TerminalBanner.whatsNew(ReleaseNotes.current, columns: columns)
+        }
+        session.injectSyntheticOutput(bytes)
     }
 
     private func shellCandidate(for requested: String?) -> String {
@@ -1187,6 +1290,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
         sessions[surfaceID]?.launchedShellForTesting
     }
 
+    /// Only called for a tab the user just created (`newTab`/`newTabInWorkspace`), so the
+    /// spawn is `freshlyCreated` — eligible for the one-shot version banner.
     private func ensureTabSurfaces(tabID: TabID, shell: String?) {
         let tabs = editor.snapshot.workspaces.flatMap { workspace in workspace.sessions.flatMap { $0.tabs } }
         guard let tab = tabs.first(where: { $0.id == tabID })
@@ -1198,11 +1303,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 shell: shell,
                 rows: 24,
                 cols: 80,
-                scrollbackBytes: nil
+                scrollbackBytes: nil,
+                freshlyCreated: true
             )
         }
     }
 
+    /// Only called for a session the user just created (`newSession`) — see
+    /// `ensureTabSurfaces` on `freshlyCreated`.
     private func ensureSessionSurfaces(sessionID: SessionID, shell: String?) {
         let allSessions = editor.snapshot.workspaces.flatMap { $0.sessions }
         guard let session = allSessions.first(where: { $0.id == sessionID })
@@ -1215,7 +1323,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
                     shell: shell,
                     rows: 24,
                     cols: 80,
-                    scrollbackBytes: nil
+                    scrollbackBytes: nil,
+                    freshlyCreated: true
                 )
             }
         }
