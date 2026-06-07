@@ -64,6 +64,16 @@ public func sysClose(_ fd: Int32) -> Int32 {
     close(fd)
 }
 
+/// `dup(2)`, wrapped for the same portable-spelling reason as the others. Used to take a private,
+/// stable duplicate of a fd before a blocking syscall, so a concurrent close()+recycle of the
+/// original fd number can't redirect the syscall onto an unrelated descriptor (the dup keeps the
+/// original open file description alive and owns a fd number the OS won't recycle until it closes).
+@inline(__always)
+@discardableResult
+public func sysDup(_ fd: Int32) -> Int32 {
+    dup(fd)
+}
+
 /// `connect(2)`, wrapped so callers (e.g. `EndpointConnector`, which has its own `connect(_:)`
 /// overload) can reach the POSIX one without name ambiguity.
 @inline(__always)

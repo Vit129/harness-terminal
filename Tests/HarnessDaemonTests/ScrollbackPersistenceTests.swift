@@ -20,7 +20,7 @@ final class ScrollbackPersistenceTests: XCTestCase {
     }
 
     private func makePty(id: String) throws -> RealPty {
-        try RealPty(
+        let pty = try RealPty(
             id: id,
             cwd: NSTemporaryDirectory(),
             shell: "/bin/sh",
@@ -29,6 +29,8 @@ final class ScrollbackPersistenceTests: XCTestCase {
             scrollbackBytes: 64 * 1024,
             scrollbackURL: scrollbackURL
         )
+        pty.start() // reading/exit-watching is now owner-initiated (deferred from init)
+        return pty
     }
 
     func testHistoryReplaysAfterRespawnFromDisk() throws {

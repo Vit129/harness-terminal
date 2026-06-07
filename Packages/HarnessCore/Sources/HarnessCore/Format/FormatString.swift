@@ -166,7 +166,16 @@ public enum FormatString {
         case "%": result = b == 0 ? 0 : a.truncatingRemainder(dividingBy: b)
         default: result = a + b
         }
-        return result == result.rounded() ? String(Int(result)) : String(result)
+        // Only stringify as an integer when the value is finite, whole, AND fits in Int.
+        // `Int(Double)` traps on infinite/NaN or out-of-range magnitudes (e.g.
+        // `#{e|*|1e10|1e10}` = 1e20 > Int.max, or an operand that parses to +inf), and
+        // status formats re-render every frame, so a trap here would crash-loop the
+        // renderer / daemon — the same "degrade to text, never crash" invariant the
+        // negative-width clamp upholds.
+        if result.isFinite, result == result.rounded(), let whole = Int(exactly: result) {
+            return String(whole)
+        }
+        return String(result)
     }
 
     /// Split into at most `max` pieces by `delim` (no nesting awareness — for `s///` parts).

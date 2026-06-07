@@ -1442,9 +1442,25 @@ final class SessionCoordinator: NSObject {
         return nil
     }
 
+    /// The tab-canonical surface used to key a notification's dedup entry: the first leaf of the
+    /// tab owning `surfaceID`. `pushNewRemoteNotifications` (insert + prune) keys every entry by a
+    /// waiting tab's `allSurfaceIDs().first`, so `handleNotification` must use the same anchor —
+    /// keying by the raw ringing surface meant a bell in any non-first split pane produced a key the
+    /// prune dropped on the very next snapshot, defeating the spam guard for that pane.
+    private func canonicalNotificationSurface(for surfaceID: SurfaceID) -> SurfaceID {
+        for workspace in snapshot.workspaces {
+            for session in workspace.sessions {
+                for tab in session.tabs where tab.rootPane.allSurfaceIDs().contains(surfaceID) {
+                    return tab.rootPane.allSurfaceIDs().first ?? surfaceID
+                }
+            }
+        }
+        return surfaceID
+    }
+
     func handleNotification(for surfaceID: SurfaceID, event: NotificationEvent, title: String, body: String) {
-        let key = "\(surfaceID.uuidString)|\(body)"
-        // Already pinged for this exact surface+message and it's still pending: just re-assert the
+        let key = "\(canonicalNotificationSurface(for: surfaceID).uuidString)|\(body)"
+        // Already pinged for this exact tab+message and it's still pending: just re-assert the
         // ring and return. A program spamming the bell (body is the constant "Bell") would
         // otherwise drive a full daemon notify + snapshot round-trip per `\a` on the main thread.
         // The key is cleared once the tab stops being `.waiting` (see `pushNewRemoteNotifications`),

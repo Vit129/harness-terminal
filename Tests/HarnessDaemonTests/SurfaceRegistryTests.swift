@@ -91,6 +91,47 @@ final class SurfaceRegistryTests: XCTestCase {
         XCTAssertNil(tab()?.exitStatus, "revival must clear the recorded exit status")
     }
 
+    /// Regression (BH-009): `respawn-pane` is the canonical verb for reviving a dead
+    /// `remain-on-exit` pane, but it used to hard-fail "Surface not found" because the RealPty was
+    /// already dropped from `sessions` on the natural exit. It must instead recreate the surface.
+    func testRespawnPaneRevivesNaturallyExitedRemainOnExitPane() throws {
+        try skipUnlessLiveDaemonTests() // depends on the spawned shell executing `exit`
+        let registry = SurfaceRegistry()
+        guard case let .surfaces(initial) = registry.handle(.listSurfaces), let target = initial.first else {
+            return XCTFail("expected a default surface")
+        }
+        let sid = target.surfaceID
+        func tab() -> Tab? {
+            registry.snapshot.workspaces.flatMap(\.sessions).flatMap(\.tabs)
+                .first { $0.rootPane.allSurfaceIDs().map(\.uuidString).contains(sid) }
+        }
+
+        func killAndAwaitDeath() -> Bool {
+            usleep(400_000)
+            _ = registry.handle(.sendData(surfaceID: sid, data: Data("exit 5\n".utf8)))
+            for _ in 0 ..< 100 {
+                if tab()?.exitStatus != nil { return true }
+                usleep(100_000)
+            }
+            return false
+        }
+
+        XCTAssertTrue(killAndAwaitDeath(), "the pane must be retained with an exit status")
+
+        // Dead-revive, keep-history path: must succeed and clear the exit status (not "Surface not found").
+        guard case .ok = registry.handle(.respawnPane(surfaceID: sid, keepHistory: true)) else {
+            return XCTFail("respawn-pane must revive a dead remain-on-exit pane")
+        }
+        XCTAssertNil(tab()?.exitStatus, "respawn revival must clear the recorded exit status")
+
+        // Kill it again, then exercise the dead-revive `-k` (clear-history) branch specifically.
+        XCTAssertTrue(killAndAwaitDeath(), "the revived pane must die again on a second exit")
+        guard case .ok = registry.handle(.respawnPane(surfaceID: sid, keepHistory: false)) else {
+            return XCTFail("respawn-pane -k must revive a dead pane (clearing history)")
+        }
+        XCTAssertNil(tab()?.exitStatus, "respawn -k revival must clear the recorded exit status")
+    }
+
     /// Scoped option reads resolve by exact target (falling back only toward broader scopes),
     /// so a nil-target non-global option is stored but unreachable by every read path. The
     /// daemon must reject it rather than persist a dead entry.

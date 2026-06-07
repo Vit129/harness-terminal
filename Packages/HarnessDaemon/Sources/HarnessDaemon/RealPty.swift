@@ -55,6 +55,9 @@ public final class RealPty: @unchecked Sendable {
     private var master: Int32 = -1
     private var childPID: pid_t = -1
     private var isClosed = false
+    /// Set once `start()` has begun reading/watching, so it runs at most once. The spawning init
+    /// forks the child but defers reading/watching until the owner has wired the exit handler.
+    private var started = false
     /// Monotonic child-generation counter. Bumped on every spawn/respawn/close so a
     /// stale `watchForExit`/read-source from a prior generation (e.g. the shell we just
     /// SIGTERM'd during a respawn) bails out instead of tearing down — or firing
@@ -74,9 +77,16 @@ public final class RealPty: @unchecked Sendable {
     /// generation older than every live escalation's `dyingGeneration` is recorded it can never
     /// be queried again; the set is pruned to a small bound on insert. Guarded by `lifecycleLock`.
     private var reapedGenerations: Set<UInt64> = []
-    /// Bound on `reapedGenerations`. Only generations with an outstanding kill-escalation timer
-    /// (≤ a handful at once) are ever queried, so a small cap can't drop a still-needed entry —
-    /// when over the cap we evict the lowest generations, which are necessarily the oldest/dead.
+    /// Generations with an outstanding SIGKILL-escalation timer — the ONLY generations whose
+    /// reaped-ness is ever queried (`scheduleKillEscalation`). A reaped generation must stay in
+    /// `reapedGenerations` until its escalation fires, or the escalation would read "not reaped"
+    /// and SIGKILL a possibly-recycled PID. So eviction must never drop a generation in this set.
+    /// Bounded by how many escalations can be live at once (killGrace / respawn interval) — small.
+    /// Guarded by `lifecycleLock`.
+    private var pendingEscalations: Set<UInt64> = []
+    /// Soft bound on `reapedGenerations`: evict down to this many, but NEVER an entry whose
+    /// escalation is still pending (see `pendingEscalations`) — a fixed cap alone could drop a
+    /// reaped generation that still has a live timer when ≥cap reaps land inside one grace window.
     private static let maxReapedGenerationsTracked = 32
     private let lifecycleLock = NSLock()
 
@@ -192,6 +202,14 @@ public final class RealPty: @unchecked Sendable {
         return reapedGenerations.count
     }
 
+    /// Test hook: mark `gen` as having a live SIGKILL escalation (as `scheduleKillEscalation`
+    /// does), so the prune-protection for still-pending escalations can be exercised deterministically.
+    func markEscalationPendingForTesting(_ gen: UInt64) {
+        lifecycleLock.lock()
+        pendingEscalations.insert(gen)
+        lifecycleLock.unlock()
+    }
+
     /// `TERM_PROGRAM` / `TERM_PROGRAM_VERSION` exported to the child — the terminal-identity the
     /// daemon advertises so capability-detecting tools (Claude Code) recognize Harness and enable
     /// the Kitty keyboard protocol. Empty = not set. Captured at init and reused verbatim on
@@ -288,13 +306,32 @@ public final class RealPty: @unchecked Sendable {
         freeChildStrings()
         lifecycleLock.lock()
         generation &+= 1
-        let gen = generation
         self.master = spawned.master
         self.childPID = spawned.pid
         lifecycleLock.unlock()
         AgentDetector.registerRootPID(spawned.pid, forSurfaceKey: id)
-        startReading(fd: spawned.master, generation: gen)
-        watchForExit(pid: spawned.pid, generation: gen)
+        // NB: reading + exit-watching are NOT started here — see `start()`. The child is forked
+        // (so its buffered output and eventual exit are captured once we begin), but the owner must
+        // wire `onExit`/`onOutput` before we can deliver an exit: a child that dies in the
+        // init→assign window (execve failure → instant EOF) would otherwise fire `onExit` while it
+        // is still nil, losing the exit and leaking the dead surface.
+    }
+
+    /// Begin reading output and watching for the child's exit. Deliberately separate from `init`
+    /// so the owner wires `onExit`/`onOutput` FIRST (see the note in the spawning init). Assigning
+    /// the handlers before this call also gives the cross-thread reads on the read/watch threads a
+    /// clean happens-before — the handlers are write-once, set before `start()` dispatches the
+    /// read source and exit watcher — so there is no formal data race on them. Idempotent.
+    public func start() {
+        lifecycleLock.lock()
+        guard !started, !isClosed, master >= 0, childPID > 0 else { lifecycleLock.unlock(); return }
+        started = true
+        let fd = master
+        let pid = childPID
+        let gen = generation
+        lifecycleLock.unlock()
+        startReading(fd: fd, generation: gen)
+        watchForExit(pid: pid, generation: gen)
     }
 
     /// No-spawn initializer for deterministic unit tests of the reap-record bookkeeping
@@ -317,15 +354,24 @@ public final class RealPty: @unchecked Sendable {
         // Off the caller's thread (see `writeQueue`): the daemon must never block on a full PTY.
         writeQueue.async { [weak self] in
             guard let self else { return }
+            // Take a PRIVATE dup of the master under the lock rather than writing the bare
+            // snapshot. A PTY write blocks when the buffer is flow-controlled (C-s) or full, and
+            // the loop re-issues after EINTR/partial writes — a wide window during which close()/
+            // respawn() can sysClose(master) and let the OS recycle that fd number to an unrelated
+            // descriptor (another surface's PTY, a client socket, the listen socket). Writing input
+            // bytes there would corrupt it. The dup owns a distinct fd the OS won't recycle until we
+            // close it and keeps the original PTY open, so the write can only ever reach this PTY.
             self.lifecycleLock.lock()
             let fd = self.master
+            let dupFd = fd >= 0 ? sysDup(fd) : -1
             self.lifecycleLock.unlock()
-            guard fd >= 0 else { return }
+            guard dupFd >= 0 else { return }
+            defer { sysClose(dupFd) }
             data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
                 guard let base = buffer.baseAddress else { return }
                 var written = 0
                 while written < buffer.count {
-                    let result = sysWrite(fd, base.advanced(by: written), buffer.count - written)
+                    let result = sysWrite(dupFd, base.advanced(by: written), buffer.count - written)
                     if result < 0 {
                         if errno == EINTR { continue }
                         break
@@ -556,11 +602,16 @@ public final class RealPty: @unchecked Sendable {
     }
 
     public func resize(rows: UInt16, cols: UInt16) {
+        // Same TOCTOU shape as write(): snapshot-then-unlocked ioctl can land on a recycled fd if
+        // close()/respawn() runs in between (here it would resize a *different* surface's PTY).
+        // Dup under the lock so the winsize ioctl can only ever reach this surface's master.
         lifecycleLock.lock()
         let fd = master
+        let dupFd = fd >= 0 ? sysDup(fd) : -1
         lifecycleLock.unlock()
-        guard fd >= 0 else { return }
-        _ = harness_pty_set_winsize(fd, rows, cols)
+        guard dupFd >= 0 else { return }
+        defer { sysClose(dupFd) }
+        _ = harness_pty_set_winsize(dupFd, rows, cols)
     }
 
     public func currentWorkingDirectory() -> String? {
@@ -653,10 +704,16 @@ public final class RealPty: @unchecked Sendable {
     /// reaps the zombie.
     private func scheduleKillEscalation(pid: pid_t, dyingGeneration: UInt64) {
         guard pid > 0 else { return }
+        // Mark this generation as having a live escalation BEFORE arming the timer, so the reap
+        // bookkeeping won't evict its (eventual) reaped-record out from under the query below.
+        lifecycleLock.lock()
+        pendingEscalations.insert(dyingGeneration)
+        lifecycleLock.unlock()
         killQueue.asyncAfter(deadline: .now() + killGrace) { [weak self] in
             guard let self else { return }
             self.lifecycleLock.lock()
             let alreadyReaped = self.reapedGenerations.contains(dyingGeneration)
+            self.pendingEscalations.remove(dyingGeneration)
             self.lifecycleLock.unlock()
             // Already reaped ⇒ the watcher's waitpid returned and the PID may be recycled — don't
             // signal it. Still unreaped but the process is gone (kill(pid,0)!=0) ⇒ nothing to do.
@@ -1026,8 +1083,13 @@ public final class RealPty: @unchecked Sendable {
     /// timer are queried, so evicting the lowest entries over the cap is always safe.
     private func recordReapedGenerationLocked(_ gen: UInt64) {
         reapedGenerations.insert(gen)
+        // Evict the lowest generation that has NO pending escalation. A generation whose SIGKILL
+        // escalation is still armed must stay queryable until that timer fires, even if ≥cap newer
+        // reaps land inside its 2.5s grace — otherwise the escalation would read "not reaped" and
+        // signal a recycled PID. Protected entries are few (bounded by live escalations), so the
+        // set stays small; once an escalation fires its generation becomes evictable again.
         while reapedGenerations.count > Self.maxReapedGenerationsTracked,
-              let lowest = reapedGenerations.min() {
+              let lowest = reapedGenerations.subtracting(pendingEscalations).min() {
             reapedGenerations.remove(lowest)
         }
     }

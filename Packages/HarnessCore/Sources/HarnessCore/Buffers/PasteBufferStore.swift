@@ -63,18 +63,28 @@ public final class PasteBufferStore: @unchecked Sendable {
         return buffers.max(by: { $0.createdAt < $1.createdAt })
     }
 
-    /// Insert or replace a buffer. Returns the final name (auto-generated when
-    /// `name` is nil).
+    /// Insert or replace a buffer. Returns the final name (auto-generated when `name` is nil), or
+    /// `nil` when the payload alone exceeds the total byte budget and is refused.
     @discardableResult
-    public func set(_ data: Data, name: String? = nil) -> String {
+    public func set(_ data: Data, name: String? = nil) -> String? {
         lock.lock()
+        // Refuse a single buffer larger than the whole byte budget. Inserting it would force the
+        // byte-eviction loop to drop every other buffer AND then itself, leaving an empty store
+        // persisted as `[]` (silent, irreversible loss) while still returning a name as if it
+        // succeeded. Reject it: existing buffers are preserved and nothing is written.
+        guard data.count <= configuration.maxTotalBytes else {
+            lock.unlock()
+            return nil
+        }
         let final: String
         if let name { final = name } else { final = "buffer\(nextAutoIndex)"; nextAutoIndex += 1 }
+        // Remove any same-named buffer and append, so the just-set buffer is always the NEWEST
+        // entry. Eviction drops oldest-first, so a fresh set survives a byte-cap trim even when it
+        // replaced an older buffer that sat at a lower (older) position.
         if let index = buffers.firstIndex(where: { $0.name == final }) {
-            buffers[index] = Buffer(name: final, data: data)
-        } else {
-            buffers.append(Buffer(name: final, data: data))
+            buffers.remove(at: index)
         }
+        buffers.append(Buffer(name: final, data: data))
         evictIfNeeded()
         let toSave = buffers
         lock.unlock()
@@ -110,8 +120,10 @@ public final class PasteBufferStore: @unchecked Sendable {
             buffers.removeFirst()
         }
         var total = buffers.reduce(0) { $0 + $1.data.count }
-        while total > configuration.maxTotalBytes, let first = buffers.first {
-            total -= first.data.count
+        // Keep at least the newest buffer (set() appends it last): never let the byte cap empty the
+        // store. set() already rejects a lone oversized buffer; this is the defense-in-depth floor.
+        while total > configuration.maxTotalBytes, buffers.count > 1 {
+            total -= buffers[0].data.count
             buffers.removeFirst()
         }
     }

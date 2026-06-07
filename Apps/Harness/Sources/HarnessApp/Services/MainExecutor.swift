@@ -96,18 +96,12 @@ final class MainExecutor: CommandExecutor {
             cycleActiveTab(coordinator: coordinator, forward: false)
         case .selectWindow(let index):
             selectTab(coordinator: coordinator, atIndex: index)
-        case .moveWindow(let index):
-            if let workspace = coordinator.snapshot.activeWorkspace,
-               let tabID = workspace.activeTab?.id {
-                coordinator.requestDaemon(.reorderTab(workspaceID: workspace.id, tabID: tabID, toIndex: index))
-                coordinator.syncFromDaemon()
-            }
-        case .swapWindow(let index):
-            if let workspace = coordinator.snapshot.activeWorkspace,
-               let tabID = workspace.activeTab?.id {
-                coordinator.requestDaemon(.swapTab(workspaceID: workspace.id, tabID: tabID, withIndex: index))
-                coordinator.syncFromDaemon()
-            }
+        case .moveWindow, .swapWindow:
+            // Route through the shared translator so the `-t :N` window NUMBER is mapped to an
+            // array position with base-index applied — identical to the CLI, compositor, and hook
+            // executor. The old inline handlers passed the raw number straight to reorderTab/swapTab,
+            // landing one slot off select-window under a non-zero `base-index`.
+            try runViaTranslator(command, coordinator: coordinator)
         case .newSession(let name):
             if let workspaceID = coordinator.snapshot.activeWorkspaceID {
                 // tmux `new-session` starts in the default directory (not the active
@@ -568,9 +562,17 @@ enum RunShell {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: shell)
             process.arguments = ["-lc", command]
-            let out = Pipe()
-            process.standardOutput = out
-            process.standardError = Pipe()
+            // Only stdout is captured, and only with -b; stderr is never used. Route every UNUSED
+            // stream to /dev/null instead of an undrained Pipe: an unread pipe that fills (~64 KiB)
+            // blocks the child on write() so it never exits, deadlocking readDataToEndOfFile()/
+            // waitUntilExit() and permanently leaking this GCD worker thread.
+            let out: Pipe? = captureToBuffer ? Pipe() : nil
+            if let out {
+                process.standardOutput = out
+            } else {
+                process.standardOutput = FileHandle.nullDevice
+            }
+            process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
             } catch {
@@ -578,7 +580,7 @@ enum RunShell {
                 DispatchQueue.main.async { MainActor.assumeIsolated { DisplayMessage.show("run-shell failed: \(error.localizedDescription)") } }
                 return
             }
-            let data = captureToBuffer ? out.fileHandleForReading.readDataToEndOfFile() : Data()
+            let data = out?.fileHandleForReading.readDataToEndOfFile() ?? Data()
             process.waitUntilExit()
             if captureToBuffer, !data.isEmpty {
                 DispatchQueue.main.async {
@@ -596,8 +598,11 @@ enum RunShell {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: shell)
             process.arguments = ["-lc", command]
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
+            // if-shell only needs the exit status — discard output to /dev/null. Undrained Pipes
+            // would deadlock waitUntilExit() once the child writes >64 KiB to either stream (the
+            // child blocks on a full pipe and never exits), hanging the branch and leaking a thread.
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
             let success: Bool
             if (try? process.run()) != nil {
                 process.waitUntilExit()

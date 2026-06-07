@@ -72,6 +72,25 @@ final class RealPtyReapRecordTests: XCTestCase {
         }
     }
 
+    /// Regression (BH-020): a reaped generation whose SIGKILL escalation is still pending must NOT
+    /// be evicted by the cap, even when ≥cap newer reaps land inside its grace window — otherwise
+    /// the escalation reads "not reaped" and could SIGKILL a recycled PID. The protected entry
+    /// survives; unprotected older entries are still evicted normally.
+    func testPendingEscalationGenerationSurvivesEviction() {
+        let pty = RealPty(forTesting: ())
+        // gen 1 is reaped but its escalation is still armed.
+        pty.recordReapedGenerationForTesting(1)
+        pty.markEscalationPendingForTesting(1)
+        // Flood the set with far more than the cap of newer reaps (none of which is protected).
+        for gen in 2 ... 100 { pty.recordReapedGenerationForTesting(UInt64(gen)) }
+
+        XCTAssertTrue(pty.wasGenerationReapedForTesting(1),
+                      "a generation with a pending escalation must never be evicted")
+        // The newest are still retained, and an old UNprotected generation was evicted as usual.
+        XCTAssertTrue(pty.wasGenerationReapedForTesting(100))
+        XCTAssertFalse(pty.wasGenerationReapedForTesting(2), "old unprotected generations still evict")
+    }
+
     /// An EVICTED reap-generation must read back exactly like one that was NEVER recorded: not
     /// reaped. That is the SIGKILL-relevant fact — the escalation only suppresses a kill when the
     /// generation is still in the set, so an evicted (old) generation falls through to deliver

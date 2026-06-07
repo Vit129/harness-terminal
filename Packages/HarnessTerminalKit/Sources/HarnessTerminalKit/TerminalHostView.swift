@@ -556,7 +556,13 @@ public final class TerminalHostView: NSView {
     /// client's hold (subscription + size vote) on the surface while the PTY keeps running. The
     /// session stays alive for `reattachToDaemonSurface()` (or another client) to re-grab.
     public func detachFromDaemonSurface() {
-        guard outputSubscription != nil else { return }   // already detached — keep one overlay
+        // Short-circuit only when ALREADY intentionally detached (true idempotency). Guarding on a
+        // nil subscription instead would early-return during a daemon-crash reconnect (the stream
+        // already dropped `outputSubscription` to nil) WITHOUT setting `intentionallyDetached` — so
+        // the in-flight reconnect's `onAttached`, which gates on `!intentionallyDetached`, would
+        // re-grab the surface the user explicitly released. Setting the flag tears the reconnect
+        // down: its probe drops its subscription and no further retries are scheduled.
+        guard !intentionallyDetached else { return }
         intentionallyDetached = true // suppress auto-reconnect: this detach is deliberate
         outputSubscription?.cancel()
         outputSubscription = nil

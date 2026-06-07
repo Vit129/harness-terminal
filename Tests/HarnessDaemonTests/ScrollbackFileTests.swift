@@ -109,6 +109,31 @@ final class ScrollbackFileTests: XCTestCase {
         XCTAssertTrue(ScrollbackFile.loadTail(url: fileURL, maxBytes: 4096).isEmpty)
     }
 
+    /// Regression: a gapless flood used to grow the in-RAM `pending` buffer without bound
+    /// (the debounce perpetually re-armed and never fired). The size cap must force flushes
+    /// mid-flood so bytes reach disk and RAM stays bounded — verified here via correctness:
+    /// the newest output survives and the file is compacted, despite no flush during the loop.
+    func testSustainedFloodStaysBoundedAndPersistsCorrectTail() throws {
+        let fileURL = url()
+        let cap = 64 * 1024
+        let file = ScrollbackFile(url: fileURL, retentionCap: cap)
+        // ~1 MiB in 4 KiB chunks, NO flush between — far past both the retention cap and the
+        // 256 KiB pending cap, so the size cap (not the timer) must drive persistence.
+        let chunk = Data(repeating: UInt8(ascii: "x"), count: 4 * 1024)
+        for _ in 0..<256 { file.append(chunk) }
+        let marker = Data("END-OF-FLOOD".utf8)
+        file.append(marker)
+        file.flush() // serializes behind every queued append; drains whatever the cap left
+
+        let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int)
+        // Compacted to ~the retention cap, NOT the ~1 MiB produced.
+        XCTAssertLessThanOrEqual(size, cap + 1024)
+        // The most-recent bytes survive the flood + compaction.
+        let tail = ScrollbackFile.loadTail(url: fileURL, maxBytes: cap)
+        XCTAssertTrue(tail.suffix(marker.count).elementsEqual(marker),
+                      "most-recent output must survive the flood")
+    }
+
     /// A new `ScrollbackFile` over an existing log keeps appending to it (the cross-restart
     /// continuity path), rather than truncating.
     func testReopenAppendsToExistingLog() throws {

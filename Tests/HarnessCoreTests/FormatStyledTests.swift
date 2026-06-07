@@ -65,6 +65,20 @@ final class FormatStyledTests: XCTestCase {
         XCTAssertEqual(FormatString.evaluate("#{e|/|7|2}", context: ctx), "3.5")
     }
 
+    func testMathOperatorOverflowDoesNotCrash() {
+        // Regression: `String(Int(result))` traps when the whole-valued result exceeds
+        // Int's range or is infinite. Must degrade to a textual Double, never crash —
+        // reaching the assertions below at all proves no trap fired.
+        // 1e10 * 1e10 = 1e20 > Int.max (~9.22e18) but whole-valued.
+        let overflow = FormatString.evaluate("#{e|*|10000000000|10000000000}", context: ctx)
+        XCTAssertFalse(overflow.isEmpty)
+        XCTAssertTrue(overflow.contains("e+20") || overflow == "100000000000000000000", overflow)
+        // An operand that parses to +inf.
+        XCTAssertEqual(FormatString.evaluate("#{e|+|1e400|0}", context: ctx).lowercased(), "inf")
+        // Sanity: an in-range whole result still renders as a bare integer.
+        XCTAssertEqual(FormatString.evaluate("#{e|*|1000000|1000000}", context: ctx), "1000000000000")
+    }
+
     func testInvalidRegexDegradesGracefully() {
         // An unparseable pattern must not throw — match → "", substitute → unchanged string.
         XCTAssertEqual(FormatString.evaluate("#{m:(,abc}", context: ctx), "")
