@@ -95,7 +95,7 @@ struct FileTreeSwiftUIView: View {
         HStack(spacing: HarnessDesign.Spacing.xs) {
             Image(systemName: "point.3.connected.trianglepath.dotted")
                 .font(.system(size: 10, weight: .medium))
-            Text(name)
+            Text("Git · \(name)")
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)

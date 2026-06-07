@@ -263,8 +263,12 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     }
 
     func tabBarDidReorder(tabID: TabID, toIndex: Int) {
-        guard let workspaceID = SessionCoordinator.shared.snapshot.activeWorkspaceID else { return }
-        SessionCoordinator.shared.reorderTab(workspaceID: workspaceID, tabID: tabID, toIndex: toIndex)
+        let coordinator = SessionCoordinator.shared
+        guard let workspaceID = coordinator.snapshot.activeWorkspaceID,
+              let workspace = coordinator.snapshot.activeWorkspace,
+              let session = workspace.sessions.first(where: { $0.tabs.contains(where: { $0.id == tabID }) })
+        else { return }
+        coordinator.reorderSession(workspaceID: workspaceID, sessionID: session.id, toIndex: toIndex)
     }
 
     func tabBarDidRequestCloseOthers(tabID: TabID) {

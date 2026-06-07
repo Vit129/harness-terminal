@@ -27,7 +27,9 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Harness"
+        window.title = Bundle.main.bundleIdentifier == "com.robert.harness.preview"
+            ? "Harness Preview"
+            : "Harness"
         window.isRestorable = false
         // Allow a genuinely narrow window (single-pane / sidebar-collapsed use). The
         // sidebar can be hidden (⌘\), so we don't reserve room for it in the floor.

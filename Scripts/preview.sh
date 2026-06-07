@@ -15,6 +15,10 @@ swift build --product harness-cli
 
 BUILD_DIR="$ROOT/.build/debug"
 
+pkill -f "$APP/Contents/MacOS/Harness" 2>/dev/null || true
+pkill -f "$APP/Contents/MacOS/HarnessDaemon" 2>/dev/null || true
+rm -f "$PREVIEW_HOME/harness.sock" "$PREVIEW_HOME/daemon.pid"
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$ROOT/.build/debug/Harness" "$APP/Contents/MacOS/Harness"
@@ -101,8 +105,7 @@ Preview CLI while it is running:
 
 EOF
 
-# PREVIEW_SIGNPOSTS=1: turn on the frame signposter (FrameSignposter). `open` strips the shell
-# environment, so the flag travels as a launch argument (NSArgumentDomain → UserDefaults).
+# PREVIEW_SIGNPOSTS=1: turn on the frame signposter (FrameSignposter).
 if [[ "${PREVIEW_SIGNPOSTS:-0}" == "1" ]]; then
   open -n "$APP" --args -HARNESS_FRAME_SIGNPOSTS 1
 else

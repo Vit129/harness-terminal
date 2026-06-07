@@ -141,9 +141,9 @@ final class TerminalTabBarView: NSView {
     /// Update titles/status of existing pills without rebuilding, for live PWD /
     /// title / agent updates. Falls back to a full reload if the set of tabs changed.
     func refreshMetadata(tabs: [Tab], activeTabID: TabID?) {
-        let currentIDs = Set(self.tabs.map(\.id))
-        let newIDs = Set(tabs.map(\.id))
-        if currentIDs != newIDs || self.tabs.count != tabs.count {
+        let currentOrder = self.tabs.map(\.id)
+        let newOrder = tabs.map(\.id)
+        if currentOrder != newOrder {
             reload(tabs: tabs, activeTabID: activeTabID)
             return
         }

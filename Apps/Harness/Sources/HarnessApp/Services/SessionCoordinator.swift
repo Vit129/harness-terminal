@@ -497,8 +497,39 @@ final class SessionCoordinator: NSObject {
     }
 
     func addSession(to workspaceID: WorkspaceID, cwd: String? = nil, name: String? = nil) {
-        requestDaemon(.newSession(workspaceID: workspaceID, cwd: cwd ?? activeTabCWD ?? settings.defaultCWD, name: name, shell: settings.defaultShell))
+        let resolvedCWD = cwd ?? activeTabCWD ?? settings.defaultCWD
+        let targetRoot = HarnessDesign.projectGroupRootPath(for: resolvedCWD)
+        let targetIndex: Int?
+        if let sessions = snapshot.activeWorkspace?.sessions {
+            var matchIndex: Int?
+            for index in sessions.indices.reversed() {
+                let session = sessions[index]
+                let path = (session.activeTab ?? session.tabs.first)?.cwd ?? ""
+                if HarnessDesign.projectGroupRootPath(for: path) == targetRoot {
+                    matchIndex = index
+                    break
+                }
+            }
+            targetIndex = matchIndex.map { $0 + 1 }
+        } else {
+            targetIndex = nil
+        }
+
+        guard case let .sessionID(sessionID)? = requestDaemon(.newSession(
+            workspaceID: workspaceID,
+            cwd: resolvedCWD,
+            name: name,
+            shell: settings.defaultShell
+        )) else {
+            syncFromDaemon()
+            return
+        }
         syncFromDaemon()
+        if let targetIndex,
+           let workspace = snapshot.activeWorkspace,
+           workspace.sessions.firstIndex(where: { $0.id == sessionID }) != targetIndex {
+            reorderSession(workspaceID: workspaceID, sessionID: sessionID, toIndex: targetIndex)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             SurfaceShellTracker.shared.bumpScan()
         }
