@@ -529,7 +529,7 @@ Per-agent guides: [docs/agent-hooks/](docs/agent-hooks/). Daemon hooks (`hooks.j
 ## Build and test
 
 ```bash
-make build | preview | preview-stop | preview-clean | release | package | dmg | smoke-dmg | sign | appcast | finalize | hotfix-release | icon | clean
+make build | preview | preview-stop | preview-clean | release | release-notes | package | dmg | smoke-dmg | sign | appcast | finalize | hotfix-release | icon | clean
 xcodegen generate
 swift test                                    # fast, deterministic
 HARNESS_LIVE_DAEMON_TESTS=1 swift test        # + real shell / socket tests
@@ -538,6 +538,8 @@ HARNESS_LIVE_DAEMON_TESTS=1 swift test        # + real shell / socket tests
 `make package` is an alias for `make release`. Optional marketing video targets (`video-dev`, `video-render`, …) live in the Makefile and run under `marketing/video` — see [marketing/README.md](marketing/README.md).
 
 **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): **Build & test (macOS)** on `macos-15` (Xcode 16) — full `swift test` + non-blocking benchmarks; **Build & test (Linux, headless daemon)** — daemon/CLI/core/engine only (no GUI/renderer/compositor).
+
+**Release prep:** after updating CHANGELOG.md, run `make release-notes` — it regenerates `GeneratedReleaseNotes.swift` (the post-update "what's new" terminal banner) from the top changelog block. `ReleaseNotesGuardTests` and a `package-app.sh` guard fail on stale notes.
 
 **Release order (do not reorder):** `make release` → `make sign` → `make dmg` → `Scripts/finalize-release.sh`. `dmg`/`sign` operate on the **existing** `Harness.app` and must NOT re-run `release` (a rebuild would clobber the signature with an unsigned bundle). `package-app.sh` resolves + verifies `Sparkle.framework` and **fails** the build if it's missing (the app links Sparkle and would crash when the menu touches the updater). `sign-and-notarize.sh` fails loud when notarization creds are absent (unless `--sign-only`) and `codesign --verify --deep --strict` after signing/stapling; `finalize-release.sh` single-sources the version/TAG from the built `Info.plist`, reads the signing identity back from the signed app, auto-detects the repo via `gh`, and never masks the `spctl` Gatekeeper check.
 
@@ -628,6 +630,7 @@ Global menu shortcuts are defined in `MainMenuBuilder`, not `KeyTableSet.root` (
 | Dragging a tab moves the whole window | the tab strip sits in the `.fullSizeContentView` titlebar drag region and AppKit treats a pill drag as a window move | `TabPillView.mouseDownCanMoveWindow = false` — pills reorder via their own `mouseDragged` → `onDragChanged`; the empty tab-bar background keeps the default `true` so it still drags the window |
 | Sidebar won't fully collapse | Divider min clamped at 200 | Set `SplitChromeDelegate.allowFullCollapse` during the programmatic collapse so the divider can reach 0 |
 | No agent chip | Proc-tree miss | `AgentTitleInference` |
+| First-run tour / what's-new banner missing or repeating | `version-state.json` out of sync, or banner suppressed | One-shot per build: daemon records the build in `version-state.json` when the first *user-created* surface consumes it (`SurfaceRegistry.injectVersionBannerIfPending`; rendered by `TerminalBanner`, notes from `GeneratedReleaseNotes.swift`). Delete the file to re-show; `update-banner off` option suppresses. Only `HarnessDaemonMain` enables it (`DaemonServer(enableVersionBanner: true)`) — embedded/test registries never banner |
 | Xcode build fails | Stale project | `xcodegen generate` |
 
 ---

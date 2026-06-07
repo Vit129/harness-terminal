@@ -150,7 +150,7 @@ daemonLog("HarnessDaemon starting (HARNESS_HOME=\(HarnessPaths.applicationSuppor
 // PTY masters (which can't use that option) and is the only protection on Linux.
 ignoreSIGPIPE()
 
-let server = DaemonServer()
+let server = DaemonServer(enableVersionBanner: true)
 nonisolated(unsafe) var hasShutDown = false
 let shutdownLock = NSLock()
 

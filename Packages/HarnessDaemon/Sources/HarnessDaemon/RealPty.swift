@@ -900,6 +900,18 @@ public final class RealPty: @unchecked Sendable {
         subscribersLock.unlock()
     }
 
+    /// Inject daemon-originated bytes into this surface's output stream. They flow through
+    /// the same path as PTY reads (`handleOutput`: scrollback ring + persisted file +
+    /// subscriber fan-out), so they render in every attached client and replay on reattach
+    /// exactly like real shell output. Hopped onto `readQueue` — the queue every read
+    /// wakeup runs on — so the injection serializes against live chunks instead of tearing
+    /// one, and `handleOutput`'s queue-confined state stays confined. Used for the one-shot
+    /// first-run / post-update banner.
+    public func injectSyntheticOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        readQueue.async { [weak self] in self?.handleOutput(data) }
+    }
+
 
     private func startReading(fd: Int32, generation gen: UInt64) {
         guard fd >= 0 else { return }
