@@ -28,6 +28,8 @@ final class FileEditorView: NSView {
 
     func load(path: String) {
         filePath = path
+        isModified = false
+        exitInsertMode()
         quickLookContainer.isHidden = true
         let expanded = (path as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded)
@@ -69,7 +71,7 @@ final class FileEditorView: NSView {
         scrollView.autohidesScrollers = true
         addSubview(scrollView)
 
-        textView.isEditable = true
+        textView.isEditable = false
         textView.isSelectable = true
         textView.allowsUndo = true
         textView.drawsBackground = false
@@ -137,9 +139,98 @@ final class FileEditorView: NSView {
         gutterView.needsDisplay = true
     }
 
+    // MARK: - Git Diff Gutter
+
+    enum DiffLineType { case added, modified, deleted }
+
+    private func loadGitDiff() {
+        let path = filePath
+        Task.detached(priority: .utility) {
+            let diffLines = await Self.parseGitDiff(for: path)
+            await MainActor.run { [weak self] in
+                self?.gutterView.diffLines = diffLines
+                self?.gutterView.needsDisplay = true
+            }
+        }
+    }
+
+    private static func parseGitDiff(for path: String) async -> [Int: DiffLineType] {
+        let dir = (path as NSString).deletingLastPathComponent
+        let file = (path as NSString).lastPathComponent
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["diff", "--unified=0", "--", file]
+        process.currentDirectoryURL = URL(fileURLWithPath: dir)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do { try process.run() } catch { return [:] }
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return [:] }
+
+        var result: [Int: DiffLineType] = [:]
+        // Parse @@ -a,b +c,d @@ hunks
+        for line in output.components(separatedBy: "\n") {
+            guard line.hasPrefix("@@") else { continue }
+            // Extract +start,count
+            guard let plusRange = line.range(of: "+") else { continue }
+            let afterPlus = line[plusRange.upperBound...]
+            guard let spaceOrComma = afterPlus.firstIndex(where: { $0 == "," || $0 == " " }) else { continue }
+            let startStr = String(afterPlus[..<spaceOrComma])
+            guard let start = Int(startStr) else { continue }
+            var count = 1
+            if afterPlus[spaceOrComma] == "," {
+                let afterComma = afterPlus[afterPlus.index(after: spaceOrComma)...]
+                if let end = afterComma.firstIndex(of: " ") {
+                    count = Int(afterComma[..<end]) ?? 1
+                }
+            }
+            // Check if it's add or modify by looking at the - side
+            let hasRemoved = line.contains("-") && !line.hasPrefix("---")
+            let type: DiffLineType = count == 0 ? .deleted : (hasRemoved ? .modified : .added)
+            if count == 0 {
+                result[start] = .deleted
+            } else {
+                for i in start..<(start + count) {
+                    result[i] = type
+                }
+            }
+        }
+        return result
+    }
+
     // MARK: - Editing
 
     private var isModified = false
+    private(set) var isInsertMode = false
+
+    private func enterInsertMode() {
+        isInsertMode = true
+        textView.isEditable = true
+        modeLabel.stringValue = "-- INSERT --"
+        modeLabel.isHidden = false
+    }
+
+    private func exitInsertMode() {
+        isInsertMode = false
+        textView.isEditable = false
+        modeLabel.stringValue = ""
+        modeLabel.isHidden = true
+    }
+
+    private lazy var modeLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        label.textColor = HarnessDesign.chrome.accent
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 52),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+        ])
+        return label
+    }()
 
     /// Save current content back to disk.
     func save() {
@@ -154,37 +245,39 @@ final class FileEditorView: NSView {
         }
     }
 
-    /// Show macOS standard find bar.
     func showFindBar() {
         textView.performFindPanelAction(NSTextFinder.Action.showFindInterface)
     }
 
-    /// Show find & replace bar.
     func showFindAndReplace() {
         textView.performFindPanelAction(NSTextFinder.Action.showReplaceInterface)
     }
 
     override func keyDown(with event: NSEvent) {
-        guard event.modifierFlags.contains(.command) else {
-            super.keyDown(with: event)
+        let cmd = event.modifierFlags.contains(.command)
+        let key = event.charactersIgnoringModifiers ?? ""
+
+        if cmd {
+            switch key {
+            case "s": save()
+            case "f":
+                if event.modifierFlags.contains(.shift) { showFindAndReplace() }
+                else { showFindBar() }
+            case "z":
+                if event.modifierFlags.contains(.shift) { textView.undoManager?.redo() }
+                else { textView.undoManager?.undo() }
+            default: super.keyDown(with: event)
+            }
             return
         }
-        switch event.charactersIgnoringModifiers {
-        case "s":
-            save()
-        case "f":
-            if event.modifierFlags.contains(.shift) {
-                showFindAndReplace()
-            } else {
-                showFindBar()
-            }
-        case "z":
-            if event.modifierFlags.contains(.shift) {
-                textView.undoManager?.redo()
-            } else {
-                textView.undoManager?.undo()
-            }
-        default:
+
+        if !isInsertMode {
+            // Normal mode: 'i' enters insert
+            if key == "i" { enterInsertMode(); return }
+            super.keyDown(with: event)
+        } else {
+            // Insert mode: Esc exits
+            if event.keyCode == 53 { exitInsertMode(); return }
             super.keyDown(with: event)
         }
     }
@@ -203,6 +296,7 @@ final class FileEditorView: NSView {
         textView.textStorage?.setAttributedString(attributed)
         textView.scrollToBeginningOfDocument(nil)
         gutterView.needsDisplay = true
+        loadGitDiff()
     }
 
     private func showMessage(_ message: String) {
@@ -239,6 +333,7 @@ final class FileEditorView: NSView {
 @MainActor
 final class LineNumberGutterView: NSView {
     weak var textView: NSTextView?
+    var diffLines: [Int: FileEditorView.DiffLineType] = [:]
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -268,7 +363,6 @@ final class LineNumberGutterView: NSView {
         ]
 
         var lineNumber = 1
-        // Count lines before visible range
         text.enumerateSubstrings(in: NSRange(location: 0, length: charRange.location), options: [.byLines, .substringNotRequired]) { _, _, _, _ in
             lineNumber += 1
         }
@@ -279,6 +373,18 @@ final class LineNumberGutterView: NSView {
             let glyphIdx = layoutManager.glyphIndexForCharacter(at: range.location)
             var lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIdx, effectiveRange: nil)
             lineRect.origin.y += inset - visibleRect.origin.y
+
+            // Draw diff mark (3px bar on left edge)
+            if let diffType = self.diffLines[lineNumber] {
+                let color: NSColor
+                switch diffType {
+                case .added: color = .systemGreen
+                case .modified: color = .systemYellow
+                case .deleted: color = .systemRed
+                }
+                color.setFill()
+                NSRect(x: 0, y: lineRect.origin.y, width: 3, height: lineRect.height).fill()
+            }
 
             let numStr = "\(lineNumber)" as NSString
             let strSize = numStr.size(withAttributes: attrs)
