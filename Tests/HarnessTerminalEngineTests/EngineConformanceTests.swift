@@ -294,9 +294,11 @@ final class EngineConformanceTests: XCTestCase {
         XCTAssertFalse(term.modes.synchronizedOutput)
         term.feed("\u{1b}[?2026h")
         XCTAssertTrue(term.modes.synchronizedOutput, "CSI ?2026h begins a synchronized frame")
-        // DECRQM query while set → reports state 1 (set).
+        // DECRQM query for 2026/2027 is intentionally left unanswered: probing programs query
+        // them at shell startup, before the tty is in raw mode, and the reply gets echoed back
+        // as literal text by the line editor (matches terminals that don't implement DECRPM here).
         term.feed("\u{1b}[?2026$p")
-        XCTAssertEqual(String(decoding: responses, as: UTF8.self), "\u{1b}[?2026;1$y")
+        XCTAssertTrue(responses.isEmpty, "DECRQM for mode 2026 should not produce a reply")
         term.feed("\u{1b}[?2026l")
         XCTAssertFalse(term.modes.synchronizedOutput, "CSI ?2026l ends the frame")
     }

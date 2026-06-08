@@ -191,8 +191,11 @@ final class KittyKeyboardTests: XCTestCase {
         term.onResponse = { responses.append($0) }
         term.feed("\u{1b}[>5u")             // push flags 5
         XCTAssertEqual(term.modes.kittyKeyboardFlags, 5)
-        term.feed("\u{1b}[?u")              // query → CSI ? 5 u
-        XCTAssertEqual(String(decoding: responses, as: UTF8.self), "\u{1b}[?5u")
+        // Query reply is intentionally suppressed: probing programs query this at shell
+        // startup, before the tty is in raw mode, and the reply gets echoed back as literal
+        // text by the line editor (matches terminals that don't implement this query).
+        term.feed("\u{1b}[?u")
+        XCTAssertTrue(responses.isEmpty, "Kitty keyboard query should not produce a reply")
         term.feed("\u{1b}[<u")              // pop
         XCTAssertEqual(term.modes.kittyKeyboardFlags, 0)
     }
