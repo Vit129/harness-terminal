@@ -35,6 +35,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
     private let fileTreeView = WorkspaceFileTreeView()
     private let fileViewerVC = FileViewerViewController()
     private let gitPanelView = GitPanelView()
+    private let searchPanelView = SearchPanelView()
     private let footer = NSView()
     /// Opens the Agent Inbox popover (every running agent, waiting first). Stored so
     /// the popover can anchor to it. Created in `setupFooter`.
@@ -638,6 +639,21 @@ final class HarnessSidebarPanelViewController: NSViewController {
         ])
     }
 
+    private func setupSearchPanel() {
+        searchPanelView.isHidden = true
+        view.addSubview(searchPanelView)
+        NSLayoutConstraint.activate([
+            searchPanelView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
+            searchPanelView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            searchPanelView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            searchPanelView.bottomAnchor.constraint(equalTo: footer.topAnchor),
+        ])
+        searchPanelView.onOpenFile = { [weak self] path, _ in
+            guard let self, let split = self.view.window?.contentViewController as? MainSplitViewController else { return }
+            split.contentVC.openFileTab(path: path)
+        }
+    }
+
     private func setupAgentPanel() {
         agentChatPanel.translatesAutoresizingMaskIntoConstraints = false
         agentChatPanel.isHidden = true
@@ -685,7 +701,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             fileTreeView.isHidden = fileViewerVC.view.isHidden == false
         }
         gitPanelView.isHidden = index != 2
-        agentChatPanel.isHidden = index != 3
+        searchPanelView.isHidden = index != 3
+        agentChatPanel.isHidden = index != 4
         switch index {
         case 1:
             sectionLabel.stringValue = "FILES"
@@ -701,6 +718,11 @@ final class HarnessSidebarPanelViewController: NSViewController {
                 gitPanelView.clearRoot()
             }
         case 3:
+            sectionLabel.stringValue = "SEARCH"
+            if let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
+                searchPanelView.updateRoot(path: cwd)
+            }
+        case 4:
             sectionLabel.stringValue = "AGENT"
             // [ACP SHELVED] connectAgentIfNeeded()
         default:
