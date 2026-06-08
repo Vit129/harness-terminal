@@ -6,7 +6,7 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
-## [Unreleased]
+## [2.2.1] - 2026-06-08
 
 ### Fixed
 - **Git panel "Changes" row layout.** Rows now pin to the full list width instead of
