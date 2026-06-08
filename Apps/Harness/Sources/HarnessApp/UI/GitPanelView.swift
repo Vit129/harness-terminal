@@ -4,6 +4,7 @@ import HarnessCore
 @MainActor
 final class GitPanelView: NSView {
     private var currentPath: String?
+    private var refreshTimer: Timer?
 
     // Top tabs: Changes | History | Worktrees
     private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
@@ -41,6 +42,18 @@ final class GitPanelView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        guard window != nil else { return }
+        // Working-tree edits happen outside the panel (terminal, editor, other processes),
+        // so poll while visible rather than relying solely on panel-driven refreshes.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refresh() }
+        }
+    }
 
     func updateRoot(path: String) {
         guard path != currentPath else { return }
@@ -350,6 +363,50 @@ final class GitPanelView: NSView {
         }
     }
 
+    @objc private func showCommitDetail(_ sender: NSClickGestureRecognizer) {
+        guard let path = currentPath,
+              let card = sender.view,
+              let hash = card.identifier?.rawValue else { return }
+        Task {
+            let detail = await runGit(["show", "--stat", "--patch", hash], in: path)
+            presentCommitDetail(detail.isEmpty ? "No details available." : detail, anchor: card)
+        }
+    }
+
+    private func presentCommitDetail(_ text: String, anchor: NSView) {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.string = text
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.translatesAutoresizingMaskIntoConstraints = false
+
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
+        contentView.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: contentView.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            textView.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+
+        let controller = NSViewController()
+        controller.view = contentView
+
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+    }
+
     @objc private func toggleStage(_ sender: NSButton) {
         guard let path = currentPath, let file = sender.toolTip else { return }
         // After click, .on means user wants to stage, .off means unstage
@@ -448,7 +505,8 @@ final class GitPanelView: NSView {
     private func makeHistoryCard(_ line: String) -> NSView {
         let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
         guard parts.count >= 4 else { return makeLabel(line) }
-        let hash = String(parts[0].prefix(7))
+        let fullHash = parts[0]
+        let hash = String(fullHash.prefix(7))
         let author = parts[1]
         let time = parts[2]
         let subject = parts[3]
@@ -456,6 +514,8 @@ final class GitPanelView: NSView {
         let card = NSView()
         card.wantsLayer = true
         card.translatesAutoresizingMaskIntoConstraints = false
+        card.identifier = NSUserInterfaceItemIdentifier(fullHash)
+        card.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showCommitDetail(_:))))
 
         // Subject line
         let subjectLabel = NSTextField(labelWithString: subject)

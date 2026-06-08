@@ -642,9 +642,12 @@ public final class TerminalEmulator: VTParserHandler {
 
     /// DECRPM reply `CSI ? Ps ; Pm $ y` — Pm: 0 not recognized, 1 set, 2 reset. Lets a program
     /// detect support (e.g. `?2026$p` for synchronized output) before using it.
-    /// Modes 2026/2027 are suppressed — their replies race with shell startup (canonical mode)
-    /// and get echoed as garbage text by zsh/Starship before raw mode kicks in.
+    ///
+    /// Modes 2026/2027 are skipped: probing programs query them at shell startup, before the
+    /// tty is in raw mode, so the reply gets echoed back as literal text by the line editor
+    /// (matches the behavior of terminals that simply don't implement DECRPM for these modes).
     private func reportPrivateMode(_ p: Int) {
+        if p == 2026 || p == 2027 { return }
         let state: Int
         switch p {
         case 7: state = current.autowrap ? 1 : 2
@@ -656,7 +659,6 @@ public final class TerminalEmulator: VTParserHandler {
         case 1004: state = modes.focusReporting ? 1 : 2
         case 1007: state = modes.alternateScroll ? 1 : 2
         case 2004: state = modes.bracketedPaste ? 1 : 2
-        case 2026: return // suppress — race with shell startup
         case 1: state = modes.cursorKeysApplication ? 1 : 2
         default: state = 0 // not recognized
         }
@@ -685,7 +687,9 @@ public final class TerminalEmulator: VTParserHandler {
             }
             if modes.kittyKeyboardStack.isEmpty { modes.kittyKeyboardStack.append(next) }
             else { modes.kittyKeyboardStack[modes.kittyKeyboardStack.count - 1] = next }
-        case 0x3F: // '?' — query: suppress reply (races with shell startup echo)
+        case 0x3F: // '?' — query: reply with the current flags
+            // Skipped: probing programs query this at shell startup, before the tty is in raw
+            // mode, so the reply gets echoed back as literal text (see reportPrivateMode above).
             break
         default:
             break
