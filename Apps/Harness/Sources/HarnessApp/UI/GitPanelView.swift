@@ -81,7 +81,12 @@ final class GitPanelView: NSView {
         source.setEventHandler { [weak self] in
             self?.watchDebounce?.cancel()
             let work = DispatchWorkItem { [weak self] in
-                Task { @MainActor [weak self] in await self?.refresh() }
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { [weak self] in
+                        guard let self else { return }
+                        Task { await self.refresh() }
+                    }
+                }
             }
             self?.watchDebounce = work
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5, execute: work)
