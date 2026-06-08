@@ -4,7 +4,9 @@ import HarnessCore
 @MainActor
 final class GitPanelView: NSView {
     private var currentPath: String?
-    private var refreshTimer: Timer?
+    private nonisolated(unsafe) var watchSource: DispatchSourceFileSystemObject?
+    private nonisolated(unsafe) var watchFd: Int32 = -1
+    private nonisolated(unsafe) var watchDebounce: DispatchWorkItem?
 
     // Top tabs: Changes | History | Worktrees
     private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
@@ -45,24 +47,56 @@ final class GitPanelView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-        guard window != nil else { return }
-        // Working-tree edits happen outside the panel (terminal, editor, other processes),
-        // so poll while visible rather than relying solely on panel-driven refreshes.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+        if window != nil {
+            startWatching()
+        } else {
+            stopWatching()
         }
     }
 
     func updateRoot(path: String) {
         guard path != currentPath else { return }
         currentPath = path
+        startWatching()
         Task { [weak self] in await self?.refresh() }
     }
 
     func clearRoot() {
         currentPath = nil
+        stopWatching()
+    }
+
+    private func startWatching() {
+        stopWatching()
+        guard let path = currentPath else { return }
+        let gitDir = path + "/.git"
+        let fd = open(gitDir, O_EVTONLY)
+        guard fd >= 0 else { return }
+        watchFd = fd
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete],
+            queue: .global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            self?.watchDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                Task { @MainActor [weak self] in await self?.refresh() }
+            }
+            self?.watchDebounce = work
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5, execute: work)
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        watchSource = source
+    }
+
+    private func stopWatching() {
+        watchSource?.cancel()
+        watchSource = nil
+        watchDebounce?.cancel()
+        watchDebounce = nil
+        if watchFd >= 0 { watchFd = -1 }
     }
 
     private func setup() {
