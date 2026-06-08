@@ -421,7 +421,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         let panel = NSView()
         panel.wantsLayer = true
         let c = HarnessDesign.chrome
-        panel.layer?.backgroundColor = c.terminalBackground.cgColor
+        // No opaque background — let window vibrancy show through (same as terminal)
         panel.layer?.borderColor = c.border.cgColor
         panel.layer?.borderWidth = 1
         panel.translatesAutoresizingMaskIntoConstraints = false

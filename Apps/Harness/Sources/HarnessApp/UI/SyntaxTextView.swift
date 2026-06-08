@@ -299,7 +299,8 @@ private final class SyntaxLineNumberGutterView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let textView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
         let c = HarnessDesign.chrome
-        c.sidebarBackground.withAlphaComponent(0.5).setFill()
+        // Don't draw opaque gutter background — let window vibrancy through
+        NSColor.clear.setFill()
         dirtyRect.fill()
 
         let visibleRect = textView.enclosingScrollView?.contentView.bounds ?? textView.visibleRect

@@ -13,7 +13,7 @@ final class FileEditorTabBarView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         layer?.borderColor = HarnessDesign.chrome.border.cgColor
         layer?.borderWidth = 0
         // Bottom border only

@@ -11,6 +11,9 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ### Fixed
 - **File preview text rendering.** Reverted NSTextView layout changes that caused text
   to be invisible (zero-width text container). Preview now reliably displays file content.
+- **File preview background matches terminal.** Removed opaque backgrounds from editor
+  panel, tab bar, and gutter — window vibrancy now shows through identically to the
+  terminal pane.
 - **File path handling.** Strip surrounding quotes and resolve symlinks when opening
   file paths from terminal clicks or sidebar.
 

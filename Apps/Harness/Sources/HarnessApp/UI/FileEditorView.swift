@@ -66,6 +66,7 @@ final class FileEditorView: NSView {
 
     private func setup() {
         wantsLayer = true
+        layer?.backgroundColor = .clear
 
         syntaxView.translatesAutoresizingMaskIntoConstraints = false
         syntaxView.onSave = { [weak self] text in
