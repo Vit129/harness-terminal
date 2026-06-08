@@ -28,6 +28,7 @@
 | 13 | Preview/production session isolation | ✅ Done |
 | 14 | File preview: no-reparent constraint split (40/60) | ✅ Done |
 | 15 | File preview: brighter syntax colors + chrome bg | ✅ Done |
+| 16 | Sidebar session card: icon scans all tabs + title always tracks live folder (matches tab bar) | ✅ Done |
 
 ### Recent_Lessons
 

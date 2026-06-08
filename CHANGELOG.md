@@ -16,6 +16,10 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 - **File preview rendering.** The text editor pane now draws an explicit dark background
   and brighter foreground text, fixing a black-screen/invisible-text regression when
   previewing files.
+- **Sidebar session card consistency with the tab bar.** Session rows now derive their
+  agent icon from any tab in the session (not just the active one) and always show the
+  active tab's live folder/agent name as the title, instead of a custom session name that
+  could go stale once the session `cd`'d to a different project.
 
 ### Changed
 - **Git "Changes" row redesign.** Each row now shows a colored status badge (M/A/D/U),

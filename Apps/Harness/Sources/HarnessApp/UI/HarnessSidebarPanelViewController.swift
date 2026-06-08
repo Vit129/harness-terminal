@@ -2173,14 +2173,12 @@ final class SessionCardRowView: NSView {
         let tab = session.activeTab ?? session.tabs.first ?? Tab()
         let folder = HarnessDesign.shortenPath(tab.cwd)
         let folderName = HarnessDesign.pathDisplayName(tab.cwd)
-        let displayedAgentKind = tab.agent?.kind ?? AgentTitleInference.kind(from: tab.title)
+        let displayedAgentKind = session.tabs.lazy.compactMap { $0.agent?.kind ?? AgentTitleInference.kind(from: $0.title) }.first
         let defaultTitle = displayedAgentKind?.displayName ?? folderName
-        // Treat the name as dynamic (show current cwd) when it was auto-assigned from
-        // the original folder name — i.e. user never explicitly renamed it.
-        let nameIsDynamic = session.name.isEmpty || session.name == folderName
-            || session.name == (tab.cwd as NSString).lastPathComponent
-        titleLabel.stringValue = nameIsDynamic ? defaultTitle : session.name
-        toolTip = nameIsDynamic ? (displayedAgentKind != nil ? "\(defaultTitle) — \(folder)" : folder) : "\(session.name) — \(folder)"
+        // Mirror the tab bar: title always tracks the active tab's live cwd/agent rather
+        // than a custom name that goes stale once the session cd's elsewhere.
+        titleLabel.stringValue = defaultTitle
+        toolTip = displayedAgentKind != nil ? "\(defaultTitle) — \(folder)" : folder
 
         var metaParts: [String] = []
         metaParts.append(String(session.id.uuidString.prefix(8)))
