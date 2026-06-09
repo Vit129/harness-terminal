@@ -86,7 +86,7 @@ final class TerminalTabBarView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.backgroundColor = HarnessDesign.chrome.terminalBackground.cgColor
         bottomBorder.backgroundColor = HarnessDesign.chrome.border.cgColor
         bottomBorder.frame = CGRect(x: 0, y: 0, width: 10000, height: 1)
         layer?.addSublayer(bottomBorder)
@@ -162,6 +162,7 @@ final class TerminalTabBarView: NSView {
     }
 
     func applyChrome() {
+        layer?.backgroundColor = HarnessDesign.chrome.terminalBackground.cgColor
         bottomBorder.backgroundColor = HarnessDesign.chrome.border.cgColor
         for pill in orderedPills {
             pill.applyChrome(isActive: pill.tabID == activeTabID)
