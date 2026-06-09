@@ -25,7 +25,28 @@ terminal background color in its render pass. The editor panel has no equivalent
 3. Do the same for `FileEditorView`, `FileEditorTabBarView`, and gutter.
 4. Listen for opacity setting changes and update the layers dynamically.
 
+## Actual Fix (2026-06-09)
+
+Only `fileEditorPanel` (NSView) needed a background — all subviews (`FileEditorView`,
+`FileEditorTabBarView`, `SyntaxTextView`, gutter) were already transparent and composite
+correctly over the panel layer. Metal renderer not involved: editor uses AppKit layers.
+
+Added `refreshEditorPanelFill()` in `ContentAreaViewController`:
+```swift
+private func refreshEditorPanelFill() {
+    guard let panel = fileEditorPanel else { return }
+    let opacity = CGFloat(HarnessSettings.clampedOpacity(SessionCoordinator.shared.settings.backgroundOpacity))
+    panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
+        .withAlphaComponent(opacity).cgColor
+}
+```
+Wired into `applyChrome()` (theme/opacity changes) and `showFileEditorSplit()` (panel creation).
+
+Pattern mirrors chrome sidebar: `terminalBackground × opacity` over the window-wide blur.
+
 ## Status
-- [ ] Investigate Metal renderer opacity application
-- [ ] Apply matching opacity to editor panel layers
-- [ ] Verify both sides match at various opacity %
+- [x] Investigate Metal renderer opacity application
+- [x] Apply matching opacity to editor panel layers
+- [x] Verify both sides match at various opacity %
+
+**Done — 2026-06-09. Ready to archive.**

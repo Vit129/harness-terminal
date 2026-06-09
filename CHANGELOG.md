@@ -6,6 +6,15 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [2.2.3] - 2026-06-09
+
+### Fixed
+- **File editor opacity parity with terminal.** The file editor panel now respects the
+  Background Opacity slider in Settings > Appearance. Previously the editor always showed
+  full window vibrancy regardless of the opacity setting; now it applies
+  `terminalBackground × opacity` to the panel layer — matching how the terminal chrome
+  and sidebar handle translucency.
+
 ## [2.2.2] - 2026-06-08
 
 ### Fixed

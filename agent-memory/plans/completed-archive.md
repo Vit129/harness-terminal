@@ -43,3 +43,10 @@ All plans below are **done** and merged into main.
 ## Panel Session Performance (v1.3.0)
 - All P1–P6 perf fixes merged
 - F1: File tree auto-update per session (git status dots, FSEvents watcher)
+
+## P6 — File Editor Opacity Parity (v2.2.3 / Unreleased, 2026-06-09)
+- `refreshEditorPanelFill()` in `ContentAreaViewController` — applies `terminalBackground × opacity` to the `fileEditorPanel` CALayer
+- Wired into `applyChrome()` (responds to theme/opacity changes) and `showFileEditorSplit()` (panel creation)
+- Subviews (FileEditorView, FileEditorTabBarView, SyntaxTextView, gutter) required no changes — all already transparent
+- Key insight: Metal renderer handles terminal alpha itself; AppKit-only panels must apply it explicitly to their layer
+- `HarnessSettings.clampedOpacity` returns `Float` — must cast to `CGFloat` for `withAlphaComponent`

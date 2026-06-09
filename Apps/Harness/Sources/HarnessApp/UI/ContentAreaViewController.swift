@@ -35,6 +35,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     func applyChrome() {
         HarnessDesign.makeClear(view)
         refreshTerminalHostFill()
+        refreshEditorPanelFill()
         titleStrip.applyColors()
         tabBar.applyChrome()
         paneContainer?.applyChrome()
@@ -68,6 +69,13 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         terminalHost.layer?.backgroundColor = opacity >= 1
             ? HarnessChrome.current.terminalBackground.cgColor
             : NSColor.clear.cgColor
+    }
+
+    private func refreshEditorPanelFill() {
+        guard let panel = fileEditorPanel else { return }
+        let opacity = CGFloat(HarnessSettings.clampedOpacity(SessionCoordinator.shared.settings.backgroundOpacity))
+        panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
+            .withAlphaComponent(opacity).cgColor
     }
 
     override func viewDidLoad() {
@@ -486,6 +494,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         terminalHostLeading = leading
 
         fileEditorPanel = panel
+        refreshEditorPanelFill()
     }
 
     private func hideFileEditorSplit() {

@@ -29,6 +29,7 @@
 | 14 | File preview: no-reparent constraint split (40/60) | ✅ Done |
 | 15 | File preview: brighter syntax colors + chrome bg | ✅ Done |
 | 16 | Sidebar session card: icon scans all tabs + title always tracks live folder (matches tab bar) | ✅ Done |
+| 17 | P6 — File editor opacity parity with terminal (refreshEditorPanelFill) | ✅ Done |
 
 ### Recent_Lessons
 
@@ -37,6 +38,7 @@
 - **RL-003:** sortOrder must persist to UserDefaults on every drag, not just on quit
 - **RL-004:** Never reparent Metal terminal surfaces for file preview split — causes 1-2s black screen (CASE-003). Use constraint-based sibling panel instead.
 - **RL-005:** DispatchSource on .main queue directly (not .global with async hop) for Swift 6 MainActor isolation.
+- **RL-006:** AppKit panels alongside Metal surfaces must apply opacity explicitly to their CALayer (`terminalBackground × opacity`). Metal handles its own alpha; AppKit panels don't. `HarnessSettings.clampedOpacity` returns `Float` — cast to `CGFloat` for `withAlphaComponent`. Hook into `applyChrome()` + panel-creation site. (CASE-011)
 
 ### Decisions_In_Force
 
