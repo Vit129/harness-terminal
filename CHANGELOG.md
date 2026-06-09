@@ -6,6 +6,15 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [Unreleased]
+
+### Fixed
+- **Sidebar group header buttons on FHD displays.** The `+` (new session in group) and `…`
+  (group options) buttons in the session group header now use `SoftIconButton` instead of
+  `NSButton` with `.inline` bezelStyle. The old bezel style rendered a visible native
+  AppKit background on non-Retina (FHD) screens, making these icons look different from
+  the footer `+` button. Both now share the same layer-driven, bezel-free chrome.
+
 ## [2.2.2] - 2026-06-08
 
 ### Fixed
