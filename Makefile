@@ -1,14 +1,13 @@
-.PHONY: run install build bench preview preview-stop preview-clean release release-notes package dmg smoke-dmg sign appcast finalize hotfix-release icon clean video-skills video-dev video-check video-render video-doctor
+.PHONY: run install install-no-build build bench preview preview-stop preview-clean release release-notes package dmg smoke-dmg sign appcast finalize hotfix-release icon clean video-skills video-dev video-check video-render video-doctor
 
 run:
 	./Scripts/run.sh app
 
 install:
-	swift build
-	Scripts/package-app.sh debug
-	codesign --force --sign - --deep Harness.app >/dev/null
-	cp -R Harness.app /Applications/Harness.app
-	@echo "✅ Installed to /Applications/Harness.app"
+	./Scripts/install-app.sh
+
+install-no-build:
+	./Scripts/install-app.sh --no-build
 
 build:
 	swift build
