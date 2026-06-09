@@ -36,6 +36,10 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
     public var lastActivityAt: Date
     /// The most recent notification body, when the tab is waiting.
     public var notificationText: String?
+    /// The tab's working directory — used to derive a short project name for display.
+    public var cwd: String
+    /// The tab's git branch at the time of the snapshot.
+    public var gitBranch: String?
 
     /// Human-readable agent name, derived from `kind` (the single source of truth).
     /// Used by the text formatter and the GUI; JSON consumers read the canonical
@@ -54,7 +58,9 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
         activity: AgentActivity,
         waiting: Bool,
         lastActivityAt: Date,
-        notificationText: String? = nil
+        notificationText: String? = nil,
+        cwd: String = "",
+        gitBranch: String? = nil
     ) {
         self.workspaceName = workspaceName
         self.sessionID = sessionID
@@ -68,5 +74,7 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
         self.waiting = waiting
         self.lastActivityAt = lastActivityAt
         self.notificationText = notificationText
+        self.cwd = cwd
+        self.gitBranch = gitBranch
     }
 }

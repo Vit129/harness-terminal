@@ -1213,7 +1213,9 @@ public struct SessionEditor: Sendable {
                         activity: agent.activity,
                         waiting: tab.status == .waiting,
                         lastActivityAt: agent.lastActivityAt,
-                        notificationText: tab.notificationText
+                        notificationText: tab.notificationText,
+                        cwd: tab.cwd,
+                        gitBranch: tab.gitBranch
                     ))
                 }
             }

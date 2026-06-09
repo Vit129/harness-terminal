@@ -137,23 +137,27 @@ private final class AgentInboxRowView: NSView {
         dot.applyStyle()
         dot.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleText = agent.tabTitle.isEmpty
-            ? (agent.sessionName.isEmpty ? "Terminal" : agent.sessionName)
-            : agent.tabTitle
-        let title = NSTextField(labelWithString: titleText)
+        // Title: agent name ("Claude Code", "Kiro", …)
+        let title = NSTextField(labelWithString: agent.agentName)
         title.font = .systemFont(ofSize: 12.5, weight: .semibold)
         title.textColor = HarnessDesign.chrome.textPrimary
         title.lineBreakMode = .byTruncatingTail
         title.translatesAutoresizingMaskIntoConstraints = false
 
-        // "Claude Code · waiting · 3m" — name, state (waiting overrides activity), age.
-        let state = agent.waiting ? "waiting" : agent.activity.rawValue
-        let age = AgentListFormatter.age(from: agent.lastActivityAt)
-        let bodyLabel = NSTextField(labelWithString: "\(agent.agentName) · \(state) · \(age)")
+        // Body: "project (branch) · tab-title · workspace"
+        let bodyLabel = NSTextField(labelWithString: agentDetail(agent))
         bodyLabel.font = .systemFont(ofSize: 11)
         bodyLabel.textColor = HarnessDesign.chrome.textTertiary
         bodyLabel.lineBreakMode = .byTruncatingTail
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        // Trailing time ("now", "2m", …)
+        let timeLabel = NSTextField(labelWithString: AgentListFormatter.age(from: agent.lastActivityAt))
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
+        timeLabel.textColor = HarnessDesign.chrome.textTertiary
+        timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        timeLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let textStack = NSStackView(views: [title, bodyLabel])
         textStack.orientation = .vertical
@@ -163,11 +167,16 @@ private final class AgentInboxRowView: NSView {
 
         addSubview(dot)
         addSubview(textStack)
+        addSubview(timeLabel)
         NSLayoutConstraint.activate([
             dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            timeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            timeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
             textStack.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 10),
-            textStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: timeLabel.leadingAnchor, constant: -8),
             textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         applyChrome()
@@ -204,4 +213,21 @@ private final class AgentInboxRowView: NSView {
             ? c.textPrimary.withAlphaComponent(0.06).cgColor
             : NSColor.clear.cgColor
     }
+}
+
+/// Mirrors `AgentNotchProjection.agentDetail`: `project (branch) · tab-title · workspace`.
+private func agentDetail(_ agent: AgentSessionSummary) -> String {
+    var parts: [String] = []
+    let path = (agent.cwd as NSString).lastPathComponent
+    if !path.isEmpty {
+        parts.append(agent.gitBranch.map { "\(path) (\($0))" } ?? path)
+    }
+    if !agent.tabTitle.isEmpty, agent.tabTitle != agent.agentName, agent.tabTitle != path {
+        parts.append(agent.tabTitle)
+    }
+    parts.append(agent.workspaceName)
+    if !agent.sessionName.isEmpty, agent.sessionName != path {
+        parts.append(agent.sessionName)
+    }
+    return parts.joined(separator: " · ")
 }
