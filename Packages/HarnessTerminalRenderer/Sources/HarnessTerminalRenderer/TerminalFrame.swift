@@ -350,8 +350,8 @@ public struct FrameBuilder {
             colorRendering: colorRendering,
             colorGamut: colorGamut,
             cursorStyle: cursorStyle,
-            selectionBackground: selectionBackground,
-            selectionForeground: selectionForeground,
+            selectionBackground: selectionBackground ?? theme.selectionBackground,
+            selectionForeground: selectionForeground ?? theme.selectionForeground,
             searchBackground: searchBackground,
             searchForeground: searchForeground,
             promptGutterEnabled: promptGutterEnabled

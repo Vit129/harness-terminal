@@ -1,12 +1,20 @@
 import AppKit
 import HarnessCore
+import CoreServices
 
 @MainActor
 final class GitPanelView: NSView {
     private var currentPath: String?
-    private nonisolated(unsafe) var watchSource: DispatchSourceFileSystemObject?
-    private nonisolated(unsafe) var watchFd: Int32 = -1
+    private nonisolated(unsafe) var watchStream: FSEventStreamRef?
+    private nonisolated(unsafe) var contextPointer: UnsafeMutableRawPointer?
     private nonisolated(unsafe) var watchDebounce: DispatchWorkItem?
+
+    private final class WatcherContext: @unchecked Sendable {
+        let onChange: @MainActor () -> Void
+        init(onChange: @MainActor @escaping () -> Void) {
+            self.onChange = onChange
+        }
+    }
 
     // Top tabs: Changes | History | Worktrees
     private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
@@ -69,29 +77,63 @@ final class GitPanelView: NSView {
     private func startWatching() {
         stopWatching()
         guard let path = currentPath else { return }
-        let gitDir = path + "/.git"
-        let fd = open(gitDir, O_EVTONLY)
-        guard fd >= 0 else { return }
-        watchFd = fd
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .rename, .delete],
-            queue: .main
-        )
-        source.setEventHandler { [weak self] in
+
+        let contextWrapper = WatcherContext { [weak self] in
             self?.debouncedRefresh()
         }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-        watchSource = source
+        let ptr = UnsafeMutableRawPointer(Unmanaged.passRetained(contextWrapper).toOpaque())
+        contextPointer = ptr
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: ptr,
+            retain: nil,
+            release: nil,
+            copyDescription: nil
+        )
+
+        let callback: FSEventStreamCallback = { (streamRef, clientInfo, numEvents, eventPaths, eventFlags, eventIds) in
+            guard let clientInfo = clientInfo else { return }
+            let wrapper = Unmanaged<WatcherContext>.fromOpaque(clientInfo).takeUnretainedValue()
+            Task { @MainActor in
+                wrapper.onChange()
+            }
+        }
+
+        let paths = [path] as CFArray
+        guard let stream = FSEventStreamCreate(
+            nil,
+            callback,
+            &context,
+            paths,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.5,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
+        ) else {
+            Unmanaged<WatcherContext>.fromOpaque(ptr).release()
+            contextPointer = nil
+            return
+        }
+
+        let queue = DispatchQueue.global(qos: .utility)
+        FSEventStreamSetDispatchQueue(stream, queue)
+        FSEventStreamStart(stream)
+        watchStream = stream
     }
 
     private func stopWatching() {
-        watchSource?.cancel()
-        watchSource = nil
+        if let stream = watchStream {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            watchStream = nil
+        }
+        if let ptr = contextPointer {
+            Unmanaged<WatcherContext>.fromOpaque(ptr).release()
+            contextPointer = nil
+        }
         watchDebounce?.cancel()
         watchDebounce = nil
-        if watchFd >= 0 { watchFd = -1 }
     }
 
     private func debouncedRefresh() {

@@ -123,7 +123,15 @@ final class SyntaxTextView: NSView {
             }
             return
         }
-        super.mouseDown(with: event)
+        textView.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        textView.mouseDragged(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        textView.mouseUp(with: event)
     }
 
     private func setup() {

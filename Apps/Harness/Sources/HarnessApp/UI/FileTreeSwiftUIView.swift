@@ -9,6 +9,7 @@ final class FileTreeNode: Identifiable {
     let id: String
     let node: FileNode
     var children: [FileTreeNode]?
+    var isExpanded: Bool = false
 
     init(node: FileNode) {
         self.id = node.id
@@ -193,6 +194,30 @@ struct FileTreeSwiftUIView: View {
         }
     }
 
+    private func getCurrentBranch() async -> String? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                process.arguments = ["rev-parse", "--abbrev-ref", "HEAD"]
+                process.currentDirectoryURL = URL(fileURLWithPath: rootPath)
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = Pipe()
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: data, encoding: .utf8) ?? ""
+                    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    continuation.resume(returning: trimmed.isEmpty ? nil : trimmed)
+                } catch {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
     private func refreshGitBranch() {
         gitBranch = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.gitBranch
     }
@@ -230,6 +255,11 @@ struct FileTreeSwiftUIView: View {
             }
         }
         rootNodes = reconciled
+
+        let branch = await getCurrentBranch()
+        if gitBranch != branch {
+            gitBranch = branch
+        }
     }
 }
 
@@ -243,20 +273,19 @@ private struct NodeRow: View {
     let watcher: FileTreeWatcher
     let gitStatus: [String: GitStatusType]
     let onPreview: (FileNode) -> Void
-    @State private var isExpanded = false
 
     var body: some View {
         if node.node.isDirectory {
-            DisclosureGroup(isExpanded: $isExpanded) {
+            DisclosureGroup(isExpanded: Binding(get: { node.isExpanded }, set: { node.isExpanded = $0 })) {
                 ForEach(node.children ?? []) { child in
                     NodeRow(node: child, rootPath: rootPath, watcher: watcher, gitStatus: gitStatus, onPreview: onPreview)
                 }
             } label: {
                 rowLabel(systemImage: "folder")
                     .contentShape(Rectangle())
-                    .onTapGesture { isExpanded.toggle() }
+                    .onTapGesture { node.isExpanded.toggle() }
             }
-            .onChange(of: isExpanded) { _, expanded in
+            .onChange(of: node.isExpanded) { _, expanded in
                 if expanded {
                     Task { await loadChildren() }
                 } else {

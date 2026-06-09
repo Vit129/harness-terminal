@@ -1,4 +1,5 @@
 import Foundation
+import CoreServices
 
 public actor FileTreeWatcher {
     private static let excludedDirectoryNames: Set<String> = [
@@ -37,75 +38,90 @@ public actor FileTreeWatcher {
 
     // MARK: - FSEvents live watcher (F1-G)
 
-    /// Opaque box that holds a `DispatchSourceFileSystemObject` without
-    /// requiring it to be `Sendable`. The actor serialises all access.
-    private final class SourceBox {
-        let source: DispatchSourceFileSystemObject
-        let fd: Int32
-        init(source: DispatchSourceFileSystemObject, fd: Int32) {
-            self.source = source
-            self.fd = fd
+    private final class WatcherContext: @unchecked Sendable {
+        let onChange: @MainActor () -> Void
+        init(onChange: @MainActor @escaping () -> Void) {
+            self.onChange = onChange
         }
     }
 
-    // nonisolated(unsafe) is safe here: SourceBox is only ever touched from
-    // within the actor's executor (startWatching / stopWatching).
-    private nonisolated(unsafe) var watchBox: SourceBox?
-    private nonisolated(unsafe) var debounceItem: DispatchWorkItem?
+    private final class FSEventStreamBox {
+        private var streamRef: FSEventStreamRef?
+        private var contextPointer: UnsafeMutableRawPointer?
 
-    /// Start watching `rootPath` for filesystem changes (branch switch, file
-    /// add/delete/modify). Fires `onChange` on the **main actor** after a
-    /// 500 ms debounce so rapid git operations coalesce into one refresh.
-    ///
-    /// We watch the `.git` directory instead of the project root because:
-    /// - `HEAD` changes on every `git checkout` / `git commit`
-    /// - `index` changes on every `git add` / `git rm` / `git reset`
-    /// - Watching root directly fires on every file save (too noisy)
-    ///
-    /// Falls back to watching `rootPath` itself for non-git directories.
+        init(streamRef: FSEventStreamRef, contextPointer: UnsafeMutableRawPointer) {
+            self.streamRef = streamRef
+            self.contextPointer = contextPointer
+        }
+
+        func stop() {
+            guard let streamRef = streamRef else { return }
+            FSEventStreamStop(streamRef)
+            FSEventStreamInvalidate(streamRef)
+            FSEventStreamRelease(streamRef)
+            self.streamRef = nil
+
+            if let contextPointer = contextPointer {
+                Unmanaged<WatcherContext>.fromOpaque(contextPointer).release()
+                self.contextPointer = nil
+            }
+        }
+
+        deinit {
+            stop()
+        }
+    }
+
+    private var watchBox: FSEventStreamBox?
+
+    /// Start watching `rootPath` for filesystem changes recursively using FSEvents.
+    /// Fires `onChange` on the **main actor** after events are received.
     public func startWatching(rootPath: String, onChange: @MainActor @escaping () -> Void) {
         stopWatching()
 
-        // Prefer .git dir so branch switches fire without root noise.
-        let gitDir = rootPath + "/.git"
-        let isGitRepo = fileManager.fileExists(atPath: gitDir)
-        let watchPath = isGitRepo ? gitDir : rootPath
+        let contextWrapper = WatcherContext(onChange: onChange)
+        let contextPointer = UnsafeMutableRawPointer(Unmanaged.passRetained(contextWrapper).toOpaque())
 
-        let fd = open(watchPath, O_EVTONLY)
-        guard fd >= 0 else { return }
-
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .rename, .delete, .extend],
-            queue: DispatchQueue.global(qos: .utility)
+        var context = FSEventStreamContext(
+            version: 0,
+            info: contextPointer,
+            retain: nil,
+            release: nil,
+            copyDescription: nil
         )
 
-        let box = SourceBox(source: source, fd: fd)
-        watchBox = box
-
-        source.setEventHandler { [weak self] in
-            guard let self else { return }
-            // Cancel previous pending bounce and schedule a new one.
-            self.debounceItem?.cancel()
-            let work = DispatchWorkItem {
-                Task { @MainActor in onChange() }
+        let callback: FSEventStreamCallback = { (streamRef, clientInfo, numEvents, eventPaths, eventFlags, eventIds) in
+            guard let clientInfo = clientInfo else { return }
+            let wrapper = Unmanaged<WatcherContext>.fromOpaque(clientInfo).takeUnretainedValue()
+            Task { @MainActor in
+                wrapper.onChange()
             }
-            self.debounceItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
         }
 
-        source.setCancelHandler {
-            close(fd)
+        let paths = [rootPath] as CFArray
+        guard let stream = FSEventStreamCreate(
+            nil,
+            callback,
+            &context,
+            paths,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.5,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
+        ) else {
+            Unmanaged<WatcherContext>.fromOpaque(contextPointer).release()
+            return
         }
 
-        source.resume()
+        let queue = DispatchQueue.global(qos: .utility)
+        FSEventStreamSetDispatchQueue(stream, queue)
+        FSEventStreamStart(stream)
+
+        self.watchBox = FSEventStreamBox(streamRef: stream, contextPointer: contextPointer)
     }
 
-    /// Stop the active filesystem watcher and release its file descriptor.
+    /// Stop the active filesystem watcher.
     public func stopWatching() {
-        debounceItem?.cancel()
-        debounceItem = nil
-        watchBox?.source.cancel()
+        watchBox?.stop()
         watchBox = nil
     }
 
