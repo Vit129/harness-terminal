@@ -74,6 +74,7 @@ final class TerminalTabBarView: NSView {
     private var visibleStart = 0
     private var visibleCount = 0
     private var currentPillWidth: CGFloat = 0
+    private let bottomBorder = CALayer()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -84,7 +85,11 @@ final class TerminalTabBarView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        HarnessDesign.applyTabBarChrome(to: self)
+        wantsLayer = true
+        layer?.backgroundColor = HarnessDesign.chrome.terminalBackground.cgColor
+        bottomBorder.backgroundColor = HarnessDesign.chrome.border.cgColor
+        bottomBorder.frame = CGRect(x: 0, y: 0, width: 10000, height: 1)
+        layer?.addSublayer(bottomBorder)
 
         newTabButton.setSymbol("plus", accessibilityDescription: "New tab", pointSize: 11, weight: .medium)
         newTabButton.toolTip = "New tab (⌘T)"
@@ -103,6 +108,7 @@ final class TerminalTabBarView: NSView {
 
         let height = heightAnchor.constraint(equalToConstant: HarnessDesign.tabBarHeight)
         height.priority = .defaultHigh
+        height.isActive = true
     }
 
     override var mouseDownCanMoveWindow: Bool { true }
@@ -157,7 +163,8 @@ final class TerminalTabBarView: NSView {
     }
 
     func applyChrome() {
-        HarnessDesign.applyTabBarChrome(to: self)
+        layer?.backgroundColor = HarnessDesign.chrome.terminalBackground.cgColor
+        bottomBorder.backgroundColor = HarnessDesign.chrome.border.cgColor
         for pill in orderedPills {
             pill.applyChrome(isActive: pill.tabID == activeTabID)
         }

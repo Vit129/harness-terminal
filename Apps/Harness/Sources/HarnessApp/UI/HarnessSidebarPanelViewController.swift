@@ -1898,8 +1898,8 @@ private final class SessionGroupHeaderRowView: NSView {
     private let rightStack = NSStackView()
     private let disclosureImage = NSImageView()
     private let label = NSTextField(labelWithString: "")
-    private let addButton = NSButton()
-    private let optionsButton = NSButton()
+    private let addButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+    private let optionsButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     private var isCollapsed = false
     private var isHovered = false
     private var trackingArea: NSTrackingArea?
@@ -1922,31 +1922,19 @@ private final class SessionGroupHeaderRowView: NSView {
         label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        addButton.title = ""
-        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New session in group")?
-            .withSymbolConfiguration(HarnessDesign.symbolConfig(pointSize: HarnessDesign.IconSize.small, weight: .semibold))
-        addButton.imagePosition = .imageOnly
-        addButton.alignment = .center
-        addButton.bezelStyle = .inline
-        addButton.isBordered = false
+        addButton.setSymbol("plus", accessibilityDescription: "New session in group", pointSize: 10, weight: .medium)
+        addButton.toolTip = "New session in group"
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.target = self
         addButton.action = #selector(addClicked)
-        addButton.toolTip = "New session in group"
         addButton.setContentHuggingPriority(.required, for: .horizontal)
         addButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        optionsButton.title = ""
-        optionsButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Group options")?
-            .withSymbolConfiguration(HarnessDesign.symbolConfig(pointSize: HarnessDesign.IconSize.small, weight: .semibold))
-        optionsButton.imagePosition = .imageOnly
-        optionsButton.alignment = .center
-        optionsButton.bezelStyle = .inline
-        optionsButton.isBordered = false
+        optionsButton.setSymbol("ellipsis", accessibilityDescription: "Group options", pointSize: 10, weight: .medium)
+        optionsButton.toolTip = "Group options"
         optionsButton.translatesAutoresizingMaskIntoConstraints = false
         optionsButton.target = self
         optionsButton.action = #selector(optionsClicked)
-        optionsButton.toolTip = "Group options"
         optionsButton.setContentHuggingPriority(.required, for: .horizontal)
         optionsButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -1978,11 +1966,11 @@ private final class SessionGroupHeaderRowView: NSView {
             disclosureImage.widthAnchor.constraint(equalToConstant: 16),
             disclosureImage.heightAnchor.constraint(equalToConstant: 12),
 
-            addButton.widthAnchor.constraint(equalToConstant: 16),
-            addButton.heightAnchor.constraint(equalToConstant: 16),
+            addButton.widthAnchor.constraint(equalToConstant: 20),
+            addButton.heightAnchor.constraint(equalToConstant: 20),
 
-            optionsButton.widthAnchor.constraint(equalToConstant: 16),
-            optionsButton.heightAnchor.constraint(equalToConstant: 16),
+            optionsButton.widthAnchor.constraint(equalToConstant: 20),
+            optionsButton.heightAnchor.constraint(equalToConstant: 20),
         ])
     }
 
@@ -2051,12 +2039,7 @@ private final class SessionGroupHeaderRowView: NSView {
         let c = HarnessDesign.chrome
         label.textColor = isHovered ? c.textPrimary : c.textSecondary
         disclosureImage.contentTintColor = isHovered ? c.textPrimary : c.textSecondary
-
-        let buttonColor = isHovered ? c.textSecondary : c.textTertiary
-        addButton.contentTintColor = buttonColor
         addButton.alphaValue = isHovered ? 1 : 0
-
-        optionsButton.contentTintColor = buttonColor
         optionsButton.alphaValue = isHovered ? 1 : 0
     }
 }
