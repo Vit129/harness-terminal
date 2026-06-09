@@ -6,15 +6,6 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
-## [Unreleased]
-
-### Fixed
-- **Sidebar group header buttons on FHD displays.** The `+` (new session in group) and `…`
-  (group options) buttons in the session group header now use `SoftIconButton` instead of
-  `NSButton` with `.inline` bezelStyle. The old bezel style rendered a visible native
-  AppKit background on non-Retina (FHD) screens, making these icons look different from
-  the footer `+` button. Both now share the same layer-driven, bezel-free chrome.
-
 ## [2.2.2] - 2026-06-08
 
 ### Fixed
@@ -25,9 +16,14 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
   terminal pane.
 - **File path handling.** Strip surrounding quotes and resolve symlinks when opening
   file paths from terminal clicks or sidebar.
-- **Terminal tab bar background.** The terminal tab bar now uses a clear background with a
-  single bottom border, matching the file-editor tab bar instead of the elevated
-  sidebar-tinted backdrop it previously displayed.
+- **Sidebar group header buttons on FHD displays.** The `+` (new session in group) and `…`
+  (group options) buttons in the session group header now use `SoftIconButton` instead of
+  `NSButton` with `.inline` bezelStyle. The old bezel style rendered a visible native
+  AppKit background on non-Retina (FHD) screens, making these icons look different from
+  the footer `+` button. Both now share the same layer-driven, bezel-free chrome.
+- **Terminal tab bar background.** The terminal tab bar now uses a flat background matching
+  the terminal canvas color with a single bottom border, replacing the elevated
+  sidebar-tinted glass backdrop. This aligns it visually with the file-editor tab bar.
 
 ### Added
 - **Draggable file editor divider.** The editor/terminal split can now be resized by
