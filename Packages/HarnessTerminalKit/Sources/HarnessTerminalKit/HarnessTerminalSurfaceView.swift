@@ -1020,11 +1020,11 @@ public final class HarnessTerminalSurfaceView: NSView {
     private func configureEmulatorCallbacks() {
         let emulator = emulatorState.emulator
         emulator.onResponse = { [weak self] data in
-            if Thread.isMainThread {
-                self?.onInput?(data)
-            } else {
-                DispatchQueue.main.async { [weak self] in self?.onInput?(data) }
-            }
+            // Terminal query replies (DSR/DA/XTVERSION/OSC color queries) must go back to the PTY
+            // immediately, while the querying program is still in raw/no-echo mode. Hopping through
+            // main can delay the reply until the program exits and the shell re-enables ECHO, which
+            // makes the reply appear as literal text in the prompt.
+            self?.onInput?(data)
         }
         emulator.onTitleChange = { [weak self] title in
             if Thread.isMainThread {

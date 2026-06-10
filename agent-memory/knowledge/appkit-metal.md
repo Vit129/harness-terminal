@@ -16,27 +16,37 @@ Metal CALayer composites above all sibling layers regardless of `zPosition`. Sta
 
 **Pattern:** Keep overlays as small hit-test-passthrough views with high zPosition. Never cover the full Metal surface.
 
-## NSView Layer Opacity — Chrome Parity Pattern (CASE-011)
+## NSView Layer Opacity — Preview Parity Pattern (CASE-011)
 
 AppKit NSViews that sit alongside Metal surfaces (file editor, sidebar chrome) must
 explicitly apply opacity to their CALayer background to match the terminal's translucency.
 Simply leaving `backgroundColor = .clear` makes them rely on raw window vibrancy, which
 ignores the user's opacity slider.
 
+File editor/preview panels are a special case: raw opacity parity can still look too
+transparent beside terminal content. The terminal renderer applies opacity to the default
+canvas, but terminal programs may paint opaque cell backgrounds. Preview text usually sits
+over a transparent AppKit canvas, so the panel needs a denser compensated alpha.
+
 **Pattern:**
 ```swift
 let opacity = CGFloat(HarnessSettings.clampedOpacity(settings.backgroundOpacity))
+let editorOpacity = min(1, opacity + (1 - opacity) * 0.55)
 panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
-    .withAlphaComponent(opacity).cgColor
+    .withAlphaComponent(editorOpacity).cgColor
 ```
 
 **Key points:**
 - Call this in `applyChrome()` (responds to theme/opacity changes) AND at panel-creation time.
 - `HarnessSettings.clampedOpacity` returns `Float` — cast to `CGFloat` for `withAlphaComponent`.
+- Use compensated alpha for the editor/preview panel; use raw opacity only for chrome surfaces
+  that do not need to visually match terminal-rendered content.
 - Subviews (`scrollView`, `textView`, gutter) that already draw transparent don't need changes;
   the panel layer background shows through them automatically.
 - The terminal host uses a different approach (clear when translucent, solid when opaque)
   because the Metal renderer handles its own alpha; AppKit-only panels must do it themselves.
+- `PaneContainerView.refreshChrome(snapshot:)` should call `applyChrome()` directly; an empty
+  host lookup loop creates warning noise and does not refresh panel colors.
 
 **Files:** `ContentAreaViewController.swift` → `refreshEditorPanelFill()` / `applyChrome()`
 

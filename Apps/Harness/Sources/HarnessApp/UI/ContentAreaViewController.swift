@@ -74,8 +74,9 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     private func refreshEditorPanelFill() {
         guard let panel = fileEditorPanel else { return }
         let opacity = CGFloat(HarnessSettings.clampedOpacity(SessionCoordinator.shared.settings.backgroundOpacity))
+        let editorOpacity = min(1, opacity + (1 - opacity) * 0.55)
         panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
-            .withAlphaComponent(opacity).cgColor
+            .withAlphaComponent(editorOpacity).cgColor
     }
 
     override func viewDidLoad() {
@@ -578,13 +579,7 @@ final class PaneContainerView: NSView {
     }
 
     func refreshChrome(snapshot: SessionSnapshot) {
-        guard let tab = snapshot.activeWorkspace?.activeTab else { return }
-        for surfaceID in tab.rootPane.allSurfaceIDs() {
-            if let match = tabFor(surfaceID: surfaceID, in: snapshot),
-               let host = TerminalPaneRegistryAccess.host(for: surfaceID)
-            {
-            }
-        }
+        applyChrome()
     }
 
     private func tabFor(surfaceID: SurfaceID, in snapshot: SessionSnapshot) -> Tab? {

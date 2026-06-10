@@ -614,10 +614,10 @@ final class GitPanelView: NSView {
         return nil
     }
 
-    @objc private func toggleStage(_ sender: NSButton) {
+    @objc private func toggleStage(_ sender: StageToggleButton) {
         guard let path = currentPath, let file = sender.toolTip else { return }
-        // After click, .on means user wants to stage, .off means unstage
-        let wantsStaged = sender.state == .on
+        let wantsStaged = !sender.isStaged
+        sender.isStaged = wantsStaged
         NSLog("[GitPanel] toggleStage: file=%@ wantsStaged=%d path=%@", file, wantsStaged ? 1 : 0, path)
         Task {
             let result = await runGit(wantsStaged ? ["add", file] : ["restore", "--staged", file], in: path)
@@ -735,9 +735,11 @@ final class GitPanelView: NSView {
 
         let badge = makeStatusBadge(letter: letter, color: color)
 
-        let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleStage(_:)))
-        check.state = isStaged ? .on : .off
-        check.toolTip = file; check.controlSize = .small
+        let check = StageToggleButton()
+        check.isStaged = isStaged
+        check.toolTip = file
+        check.target = self
+        check.action = #selector(toggleStage(_:))
 
         let name = NSTextField(labelWithString: (file as NSString).lastPathComponent)
         name.font = .systemFont(ofSize: 12)
@@ -935,6 +937,50 @@ final class GitPanelView: NSView {
                 }
             }
         }
+    }
+}
+
+private final class StageToggleButton: NSButton {
+    var isStaged = false {
+        didSet { updateAppearance() }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        imagePosition = .imageOnly
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.borderWidth = 1
+        widthAnchor.constraint(equalToConstant: 16).isActive = true
+        heightAnchor.constraint(equalToConstant: 16).isActive = true
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.systemBlue
+        layer?.backgroundColor = isStaged ? accent.cgColor : NSColor.black.withAlphaComponent(0.28).cgColor
+        layer?.borderColor = (isStaged ? accent : HarnessDesign.chrome.border).cgColor
+        image = isStaged
+            ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Staged")
+            : nil
+        image?.isTemplate = true
+        contentTintColor = .white
+        setAccessibilityLabel(isStaged ? "Unstage file" : "Stage file")
     }
 }
 
