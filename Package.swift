@@ -67,6 +67,9 @@ let platformTargets: [Target] = [
         name: "HarnessApp",
         dependencies: [
             "HarnessCore",
+            // Engine types (e.g. TerminalProgressReport) surface through HarnessTerminalKit's
+            // public delegate API, so the app consumes the engine module directly.
+            "HarnessTerminalEngine",
             "HarnessTerminalKit",
             "HarnessTheme",
             "HarnessLSP",

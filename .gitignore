@@ -47,3 +47,5 @@ marketing/video/*.webm
 dist/
 graphify-out/cache/
 graphify-out/GRAPH_TREE.html
+# Dated graphify snapshot dirs (e.g. graphify-out/2026-06-10/) — duplicates of graph.json
+graphify-out/20*/
