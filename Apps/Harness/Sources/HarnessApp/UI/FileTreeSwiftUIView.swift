@@ -46,8 +46,16 @@ struct FileTreeSwiftUIView: View {
     @State private var gitBranch: String?
     /// Kept alive across expands so child nodes inherit the same status map.
     @State private var currentGitStatus: [String: GitStatusType] = [:]
+    @AppStorage("HarnessFileTreeShowsHiddenFiles") private var showsHiddenFiles = false
+    @AppStorage("HarnessFileTreeShowsHiddenFolders") private var showsHiddenFolders = false
 
-    private var taskID: String { "\(sessionID?.uuidString ?? "nil")|\(rootPath)|\(gitBranch ?? "nil")" }
+    private var scanOptions: FileTreeScanOptions {
+        FileTreeScanOptions(showsHiddenFiles: showsHiddenFiles, showsHiddenFolders: showsHiddenFolders)
+    }
+
+    private var taskID: String {
+        "\(sessionID?.uuidString ?? "nil")|\(rootPath)|\(gitBranch ?? "nil")|\(showsHiddenFiles)|\(showsHiddenFolders)"
+    }
 
     @State private var searchText: String = ""
 
@@ -78,6 +86,16 @@ struct FileTreeSwiftUIView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                hiddenToggle(
+                    isOn: $showsHiddenFiles,
+                    systemImage: "doc",
+                    help: showsHiddenFiles ? "Hide hidden files" : "Show hidden files"
+                )
+                hiddenToggle(
+                    isOn: $showsHiddenFolders,
+                    systemImage: "folder",
+                    help: showsHiddenFolders ? "Hide hidden folders" : "Show hidden folders"
+                )
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
@@ -86,7 +104,14 @@ struct FileTreeSwiftUIView: View {
                     branchChip(gitBranch)
                 }
                 ForEach(filteredNodes) { node in
-                    NodeRow(node: node, rootPath: rootPath, watcher: watcher, gitStatus: currentGitStatus, onPreview: onPreview)
+                    NodeRow(
+                        node: node,
+                        rootPath: rootPath,
+                        watcher: watcher,
+                        scanOptions: scanOptions,
+                        gitStatus: currentGitStatus,
+                        onPreview: onPreview
+                    )
                 }
             }
             .listStyle(.sidebar)
@@ -150,6 +175,21 @@ struct FileTreeSwiftUIView: View {
             trailing: HarnessDesign.horizontalInset
         ))
         .listRowBackground(Color.clear)
+    }
+
+    private func hiddenToggle(isOn: SwiftUI.Binding<Bool>, systemImage: String, help: String) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isOn.wrappedValue ? Color.accentColor : Color.secondary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func showBranchSwitcher() {
@@ -225,7 +265,7 @@ struct FileTreeSwiftUIView: View {
     private func loadRoot() async {
         let statusProvider = GitStatusProvider()
         async let gitStatusTask  = statusProvider.status(rootPath: rootPath)
-        async let rawNodesTask   = (try? watcher.scan(rootPath: rootPath)) ?? []
+        async let rawNodesTask   = (try? watcher.scan(rootPath: rootPath, options: scanOptions)) ?? []
         let (status, rawNodes)   = await (gitStatusTask, rawNodesTask)
 
         currentGitStatus = status
@@ -271,6 +311,7 @@ private struct NodeRow: View {
     let node: FileTreeNode
     let rootPath: String
     let watcher: FileTreeWatcher
+    let scanOptions: FileTreeScanOptions
     let gitStatus: [String: GitStatusType]
     let onPreview: (FileNode) -> Void
 
@@ -278,7 +319,14 @@ private struct NodeRow: View {
         if node.node.isDirectory {
             DisclosureGroup(isExpanded: Binding(get: { node.isExpanded }, set: { node.isExpanded = $0 })) {
                 ForEach(node.children ?? []) { child in
-                    NodeRow(node: child, rootPath: rootPath, watcher: watcher, gitStatus: gitStatus, onPreview: onPreview)
+                    NodeRow(
+                        node: child,
+                        rootPath: rootPath,
+                        watcher: watcher,
+                        scanOptions: scanOptions,
+                        gitStatus: gitStatus,
+                        onPreview: onPreview
+                    )
                 }
             } label: {
                 rowLabel(systemImage: "folder")
@@ -474,7 +522,7 @@ private struct NodeRow: View {
     private func loadChildren() async {
         guard node.children?.isEmpty == true else { return }
         do {
-            let childNodes = try await watcher.expand(node: node.node, gitStatus: gitStatus)
+            let childNodes = try await watcher.expand(node: node.node, gitStatus: gitStatus, options: scanOptions)
             node.children = childNodes.map { FileTreeNode(node: $0) }
         } catch {
             node.children = []

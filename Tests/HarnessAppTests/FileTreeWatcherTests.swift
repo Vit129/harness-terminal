@@ -18,10 +18,12 @@ final class FileTreeWatcherTests: XCTestCase {
         XCTAssertEqual(nodes.last?.isDirectory, false)
     }
 
-    func testScanExcludesHiddenFilesAndNoiseDirectories() async throws {
+    func testScanExcludesHiddenFilesHiddenFoldersAndNoiseDirectoriesByDefault() async throws {
         let root = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         try writeFile(root.appendingPathComponent(".env"))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".config"), withIntermediateDirectories: true)
+        try writeFile(root.appendingPathComponent(".config").appendingPathComponent("settings.json"))
         try writeFile(root.appendingPathComponent("visible.txt"))
         for name in [".git", "node_modules", ".build", "DerivedData"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
@@ -31,6 +33,40 @@ final class FileTreeWatcherTests: XCTestCase {
         let nodes = try await FileTreeWatcher().scan(rootPath: root.path)
 
         XCTAssertEqual(nodes.map(\.name), ["visible.txt"])
+    }
+
+    func testScanCanIncludeHiddenFilesWithoutHiddenFolders() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeFile(root.appendingPathComponent(".env"))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".config"), withIntermediateDirectories: true)
+        try writeFile(root.appendingPathComponent("visible.txt"))
+
+        let nodes = try await FileTreeWatcher().scan(
+            rootPath: root.path,
+            options: FileTreeScanOptions(showsHiddenFiles: true)
+        )
+
+        XCTAssertEqual(nodes.map(\.name), [".env", "visible.txt"])
+    }
+
+    func testScanCanIncludeHiddenFoldersWithoutNoiseDirectories() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeFile(root.appendingPathComponent(".env"))
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".config"), withIntermediateDirectories: true)
+        try writeFile(root.appendingPathComponent(".config").appendingPathComponent("settings.json"))
+        for name in [".git", "node_modules", ".build", "DerivedData"] {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
+            try writeFile(root.appendingPathComponent(name).appendingPathComponent("ignored.txt"))
+        }
+
+        let nodes = try await FileTreeWatcher().scan(
+            rootPath: root.path,
+            options: FileTreeScanOptions(showsHiddenFolders: true)
+        )
+
+        XCTAssertEqual(nodes.map(\.name), [".config"])
     }
 
     func testExpandLoadsChildren() async throws {

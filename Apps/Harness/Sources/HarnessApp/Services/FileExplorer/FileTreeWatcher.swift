@@ -2,6 +2,16 @@ import Foundation
 import HarnessCore
 import CoreServices
 
+public struct FileTreeScanOptions: Equatable, Sendable {
+    public var showsHiddenFiles: Bool
+    public var showsHiddenFolders: Bool
+
+    public init(showsHiddenFiles: Bool = false, showsHiddenFolders: Bool = false) {
+        self.showsHiddenFiles = showsHiddenFiles
+        self.showsHiddenFolders = showsHiddenFolders
+    }
+}
+
 public actor FileTreeWatcher {
     private static let excludedDirectoryNames: Set<String> = [
         ".git",
@@ -24,15 +34,23 @@ public actor FileTreeWatcher {
     ///   - gitStatus: Optional map of relative path → `GitStatusType` from
     ///     `GitStatusProvider.status(rootPath:)`. Pass `nil` (default) to skip
     ///     git colouring (e.g. when expanding a child directory).
-    public func scan(rootPath: String, gitStatus: [String: GitStatusType]? = nil) async throws -> [FileNode] {
-        let nodes = try scanDirectory(atPath: rootPath)
+    public func scan(
+        rootPath: String,
+        gitStatus: [String: GitStatusType]? = nil,
+        options: FileTreeScanOptions = FileTreeScanOptions()
+    ) async throws -> [FileNode] {
+        let nodes = try scanDirectory(atPath: rootPath, options: options)
         guard let gitStatus, !gitStatus.isEmpty else { return nodes }
         return applyGitStatus(gitStatus, rootPath: rootPath, to: nodes)
     }
 
-    public func expand(node: FileNode, gitStatus: [String: GitStatusType]? = nil) async throws -> [FileNode] {
+    public func expand(
+        node: FileNode,
+        gitStatus: [String: GitStatusType]? = nil,
+        options: FileTreeScanOptions = FileTreeScanOptions()
+    ) async throws -> [FileNode] {
         guard node.isDirectory else { return [] }
-        let nodes = try scanDirectory(atPath: node.path)
+        let nodes = try scanDirectory(atPath: node.path, options: options)
         guard let gitStatus, !gitStatus.isEmpty else { return nodes }
         return applyGitStatus(gitStatus, rootPath: node.path, to: nodes)
     }
@@ -145,7 +163,7 @@ public actor FileTreeWatcher {
         }
     }
 
-    private func scanDirectory(atPath path: String) throws -> [FileNode] {
+    private func scanDirectory(atPath path: String, options: FileTreeScanOptions) throws -> [FileNode] {
         let rootURL = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
         let urls = try fileManager.contentsOfDirectory(
             at: rootURL,
@@ -157,11 +175,12 @@ public actor FileTreeWatcher {
         nodes.reserveCapacity(min(urls.count, Self.maxNodeCount))
         for url in urls where nodes.count < Self.maxNodeCount {
             let name = url.lastPathComponent
-            guard shouldInclude(name: name) else { continue }
+            guard !name.isEmpty else { continue }
 
             let values = try url.resourceValues(forKeys: [.isDirectoryKey])
             let isDirectory = values.isDirectory ?? false
             guard !isDirectory || !Self.excludedDirectoryNames.contains(name) else { continue }
+            guard shouldInclude(name: name, isDirectory: isDirectory, options: options) else { continue }
 
             let path = url.standardizedFileURL.path
             nodes.append(FileNode(
@@ -180,7 +199,9 @@ public actor FileTreeWatcher {
         }
     }
 
-    private func shouldInclude(name: String) -> Bool {
-        !name.isEmpty && !name.hasPrefix(".") && !Self.excludedDirectoryNames.contains(name)
+    private func shouldInclude(name: String, isDirectory: Bool, options: FileTreeScanOptions) -> Bool {
+        guard !Self.excludedDirectoryNames.contains(name) else { return false }
+        guard name.hasPrefix(".") else { return true }
+        return isDirectory ? options.showsHiddenFolders : options.showsHiddenFiles
     }
 }
