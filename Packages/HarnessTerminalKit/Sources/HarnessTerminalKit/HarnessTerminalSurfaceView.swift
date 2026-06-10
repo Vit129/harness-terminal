@@ -9,7 +9,7 @@ import QuartzCore
 
 // AppKit re-exports QuickDraw's legacy C `struct RGBColor`, which shadows
 // `HarnessTheme.RGBColor` in this file. Pin the name to ours.
-private typealias RGBColor = HarnessTheme.RGBColor
+typealias RGBColor = HarnessTheme.RGBColor
 
 private struct SurfaceFrameBuildConfiguration: Sendable {
     var resolver: CellColorResolver
@@ -39,7 +39,7 @@ private struct SurfaceFrameBuildConfiguration: Sendable {
     }
 }
 
-private struct SurfaceFrameBuildResult: Sendable {
+struct SurfaceFrameBuildResult: Sendable {
     var generation: UInt64
     var frame: TerminalFrame
     var damage: TerminalDamage?
@@ -88,7 +88,7 @@ private final class SurfaceColorProviderState: @unchecked Sendable {
     }
 }
 
-private final class SurfaceEmulatorState: @unchecked Sendable {
+final class SurfaceEmulatorState: @unchecked Sendable {
     private let specific = DispatchSpecificKey<Void>()
 
     let emulator: TerminalEmulator
@@ -309,24 +309,24 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// `set-clipboard`). The host sets this from the option; default on.
     public var allowProgramClipboardAccess = true
 
-    private let emulatorState: SurfaceEmulatorState
+    let emulatorState: SurfaceEmulatorState
     private let colorProviderState = SurfaceColorProviderState()
-    private let inputEncoder = InputEncoder()
-    private let metalLayer = CAMetalLayer()
-    private var renderer: TerminalMetalRenderer?
+    let inputEncoder = InputEncoder()
+    let metalLayer = CAMetalLayer()
+    var renderer: TerminalMetalRenderer?
 
-    private var frameBuilder: FrameBuilder
+    var frameBuilder: FrameBuilder
     private var frameBuildConfiguration: SurfaceFrameBuildConfiguration
     private var colorRendering: TerminalColorRenderingMode
     private var colorGamut: TerminalColorGamut
-    private var offMainParserFramePipelineEnabled = true // production default; always set from init
+    var offMainParserFramePipelineEnabled = true // production default; always set from init
     private var renderGeneration: UInt64 = 0
     /// The last frame presented on the main thread, kept so a live resize can re-present it at the
     /// new drawable size WITHOUT touching the emulator serial queue (which, during heavy output, is
     /// busy parsing). During a drag the grid content is unchanged — reflow + SIGWINCH is debounced
     /// to drag-end (`scheduleResizeCommit`) — so stretching the last frame is exactly correct and
     /// never blocks main behind the parser. Main-thread only (written in `presentBuiltFrame`).
-    private var lastPresentedResult: SurfaceFrameBuildResult?
+    var lastPresentedResult: SurfaceFrameBuildResult?
     /// True when the renderer's row-instance cache verifiably holds exactly
     /// `lastPresentedResult.frame`'s rows — i.e. the last renderer encode was of that frame through
     /// the cache-updating path (non-nil damage, no images). Then `repaintLastFrame` can present with
@@ -358,10 +358,10 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// The canvas (default) background — used as the Metal clear color and (at
     /// `canvasOpacity`) for default-bg cells. Resolved by the host through the same
     /// `ThemeManager.resolvedCanvas` the chrome uses, so terminal and chrome never seam.
-    private var canvasBackground: RGBColor
+    var canvasBackground: RGBColor
     /// 0...1. < 1 makes the canvas translucent (the window blur shows through); program
     /// output backgrounds and glyphs stay opaque.
-    private var canvasOpacity: Float
+    var canvasOpacity: Float
     /// Window padding in points (`window-padding-x/y`); converted to device
     /// pixels and used both as the grid inset and the renderer's draw origin.
     private var paddingPointsX: CGFloat = 0
@@ -370,21 +370,21 @@ public final class HarnessTerminalSurfaceView: NSView {
     private var paddingBalanced = true
     /// Device-pixel grid origin (padding × scale, plus the centering half-offset when balanced).
     /// Reused by `renderNow` as the draw origin and by mouse→cell mapping via `gridOriginPoints*`.
-    private var originOffsetX = 0
-    private var originOffsetY = 0
+    var originOffsetX = 0
+    var originOffsetY = 0
     /// The grid's left/top origin in points (device-px `originOffset` ÷ backing scale). Equals the
     /// window padding when unbalanced; when balanced it includes the centering half-offset, so
     /// mouse hit-testing, link-hover, and IME anchoring stay aligned with the centered grid.
-    private var gridOriginPointsX: CGFloat { CGFloat(originOffsetX) / (window?.backingScaleFactor ?? 2.0) }
-    private var gridOriginPointsY: CGFloat { CGFloat(originOffsetY) / (window?.backingScaleFactor ?? 2.0) }
+    var gridOriginPointsX: CGFloat { CGFloat(originOffsetX) / (window?.backingScaleFactor ?? 2.0) }
+    var gridOriginPointsY: CGFloat { CGFloat(originOffsetY) / (window?.backingScaleFactor ?? 2.0) }
     /// Cursor shape + blink (`cursor-style` / `cursor-style-blink`).
     private var cursorStyle: CursorStyle = .block
-    private var cursorBlinkEnabled = true
+    var cursorBlinkEnabled = true
     /// Blink phase: false hides the cursor on the off-beat. Reset to true on activity.
-    private var cursorBlinkVisible = true
-    private var blinkTimer: Timer?
+    var cursorBlinkVisible = true
+    var blinkTimer: Timer?
     /// First-responder state — the cursor only blinks while focused.
-    private var focused = false
+    var focused = false
     /// Whether the host window is key. Combined with `focused` for the user-visible focus
     /// state (hollow cursor, blink) and DECSET 1004 focus reporting — a first responder in a
     /// deactivated window is not focused.
@@ -392,26 +392,26 @@ public final class HarnessTerminalSurfaceView: NSView {
     private var windowKeyObservers: [NSObjectProtocol] = []
     /// Last focus value reported via DECSET 1004, so window-key and first-responder
     /// transitions never double-report the same state.
-    private var lastReportedFocus: Bool?
-    private var effectivelyFocused: Bool { focused && windowIsKey }
+    var lastReportedFocus: Bool?
+    var effectivelyFocused: Bool { focused && windowIsKey }
     /// Mouse selection endpoints (anchor = where the drag started, head = current). A
     /// `SelectionRegion` is derived from these (expanded by granularity) for highlight + extraction.
-    private var selectionAnchor: (row: Int, column: Int)?
-    private var selectionHead: (row: Int, column: Int)?
+    var selectionAnchor: (row: Int, column: Int)?
+    var selectionHead: (row: Int, column: Int)?
     /// Selection unit set by click count: 1 = character, 2 = word, 3 = line. A drag extends by
     /// the unit; word/line ranges reuse copy-mode's word definition.
-    private enum SelectionGranularity { case character, word, line }
-    private var selectionGranularity: SelectionGranularity = .character
+    enum SelectionGranularity { case character, word, line }
+    var selectionGranularity: SelectionGranularity = .character
     /// Option-drag makes a rectangular (block) selection instead of a linear one.
-    private var selectionRectangular = false
-    private var selectionBackground: RGBColor?
+    var selectionRectangular = false
+    var selectionBackground: RGBColor?
     private var selectionForeground: RGBColor?
     /// Copy the selection to the pasteboard automatically when a drag ends.
-    private var copyOnSelect = false
+    var copyOnSelect = false
     /// Confirm before pasting risky (multi-line / control-char) text when bracketed paste is off.
-    private var pasteProtection = true
+    var pasteProtection = true
     /// Scrollback offset in lines (0 = live bottom; >0 = scrolled up into history).
-    private var scrollOffset = 0
+    var scrollOffset = 0
     /// Smooth-scroll sub-line position. The continuous scrollback position is
     /// `P = scrollOffset - scrollFraction` (lines): the frame is built at the integer
     /// `scrollOffset = ceil(P)` — one line further back — and translated UP by
@@ -420,35 +420,35 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Always 0 at the live bottom and whenever resting exactly on a line; every line-based
     /// consumer (hit-testing, copy mode, find, pinning, mouse reporting) keeps reading the
     /// integer `scrollOffset`.
-    private var scrollFraction: CGFloat = 0
+    var scrollFraction: CGFloat = 0
     /// Sub-line wheel remainder carried between scroll events so small trackpad movements
     /// accumulate into whole lines instead of each snapping a full line (see `consumeWheelLines`).
-    private var wheelLineRemainder: CGFloat = 0
+    var wheelLineRemainder: CGFloat = 0
     /// Horizontal counterpart for mouse-reported wheel-left/right (see `consumeWheelColumns`).
-    private var wheelColumnRemainder: CGFloat = 0
+    var wheelColumnRemainder: CGFloat = 0
     /// Lines per notch for a discrete (non-precise) mouse wheel — the classic 3-line step.
-    private static let mouseWheelLinesPerTick: CGFloat = 3
+    static let mouseWheelLinesPerTick: CGFloat = 3
     /// Test-only: counts main-thread consume hops (one per `receiveOffMain` main bounce). The
     /// latency-under-load benchmark reads this to measure how aggressively the consume path
     /// coalesces a flood of small chunks. Never read in production; a single `Int` add on main.
     var testingMainHopCount = 0
     /// Canvas foreground — used to draw IME preedit (marked) text over the grid.
-    private var canvasForeground: RGBColor = RGBColor(red: 255, green: 255, blue: 255)
+    var canvasForeground: RGBColor = RGBColor(red: 255, green: 255, blue: 255)
     /// Resolved cursor + 16-color palette, surfaced to programs via OSC 10/11/12/4 *queries*
     /// (`emulator.colorProvider`) for light/dark theme detection.
     private var canvasCursor: RGBColor = RGBColor(red: 255, green: 255, blue: 255)
     private var ansiPalette16: [RGBColor] = []
     /// In-progress IME composition (preedit). Empty when not composing.
-    private var markedText = ""
+    var markedText = ""
     /// Glyph coverage gamma: 1 = native blending; < 1 = gamma-correct (thicker) text.
-    private var glyphGamma: Float = 1
+    var glyphGamma: Float = 1
     /// Programming-font ligatures via CoreText run shaping.
-    private var ligaturesEnabled = true
+    var ligaturesEnabled = true
     /// Draw the OSC 133 prompt gutter stripe. Off by default (a user opt-in).
     private var promptGutterEnabled = false
 
-    private var columns: Int = 80
-    private var rows: Int = 24
+    var columns: Int = 80
+    var rows: Int = 24
     /// The last frame built on the plain live path (no scrollback/selection/copy-mode/IME), kept
     /// so the next plain render can reuse unchanged rows via the engine's dirty-row damage. Set to
     /// nil whenever a non-plain frame is drawn or the appearance changes, forcing a full rebuild.
@@ -488,33 +488,36 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Active copy-mode model (nil = not in copy mode). Driven by the shared
     /// `CopyModeReducer` over this view's own emulator (which holds the full scrollback), so
     /// the GUI overlay and the ssh compositor share one implementation.
-    private var copyMode: CopyModeState?
+    var copyMode: CopyModeState?
     /// Merged copy-mode key tables (defaults + user `keybindings.json`), loaded on entry.
-    private var copyModeTables: KeyTableSet?
+    var copyModeTables: KeyTableSet?
     /// In-progress search query (nil = not entering a search). Shown in the status row.
-    private var copyModeSearchEntry: String?
+    var copyModeSearchEntry: String?
     /// `mode-keys` option value (`vi` / `emacs`); the host sets it from the daemon option.
     public var copyModeKeys: String = "vi"
     public var isInCopyMode: Bool { copyMode != nil }
 
     // MARK: Find (in-scrollback search bar)
     /// True while the Cmd+F find bar is open; gates highlight rendering + scroll-to-match.
-    private var findActive = false
+    var findActive = false
     /// All matches for the current query, in buffer-line order (history + viewport space).
-    private var findMatches: [TerminalBufferMatch] = []
+    var findMatches: [TerminalBufferMatch] = []
     /// Index of the "current" match within `findMatches` (the one we scrolled to).
-    private var findCurrentIndex = 0
+    var findCurrentIndex = 0
     /// Reports `(current, total)` to the host so the find bar can show "n of m" (0,0 = none).
     public var onFindResultsChanged: ((_ current: Int, _ total: Int) -> Void)?
 
     // MARK: Link hover (⌘-hover affordance for ⌘-click open)
     /// The link span under the pointer while ⌘ is held: a grid row + half-open column range.
     /// Drives the underline layer and the pointing-hand cursor. nil when not hovering a link.
-    private var hoveredLink: (row: Int, columns: Range<Int>)?
+    var hoveredLink: (row: Int, columns: Range<Int>)?
     /// Underline drawn beneath the hovered link. A sublayer of the Metal layer so it composites
     /// above the terminal content without intercepting clicks (a subview would eat the ⌘-click).
-    private let linkUnderlineLayer = CALayer()
-    private var trackingArea: NSTrackingArea?
+    let linkUnderlineLayer = CALayer()
+    var trackingArea: NSTrackingArea?
+    /// Physical modifier keycodes currently held — used to tell press from release in
+    /// `flagsChanged` (which fires for both, with no inherent direction).
+    var pressedModifierKeyCodes: Set<UInt16> = []
 
     public init(
         themeName: String = ThemeManager.defaultThemeName,
@@ -939,7 +942,7 @@ public final class HarnessTerminalSurfaceView: NSView {
 
     // MARK: - Setup
 
-    private func emulatorSync<T>(_ body: (TerminalEmulator) -> T) -> T {
+    func emulatorSync<T>(_ body: (TerminalEmulator) -> T) -> T {
         if offMainParserFramePipelineEnabled {
             return emulatorState.sync(body)
         }
@@ -959,16 +962,16 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// a busy parse — that per-event stall is the scroll-jank class. At most one chunk stale;
     /// history only moves via parsed output, and the output-pinning hop re-aligns the offset with
     /// the real count anyway, so a momentarily-short clamp self-corrects on the next event.
-    private var historyCountMirror = 0
+    var historyCountMirror = 0
 
     /// The terminal modes input encoding should honor right now (mirror on the off-main pipeline;
     /// direct read when the emulator lives on main).
-    private func inputModes() -> TerminalModes {
+    func inputModes() -> TerminalModes {
         offMainParserFramePipelineEnabled ? inputModesMirror : emulatorState.emulator.modes
     }
 
     /// Whether the alternate screen is active, for input-side decisions (alternate scroll).
-    private func inputAltScreenActive() -> Bool {
+    func inputAltScreenActive() -> Bool {
         offMainParserFramePipelineEnabled ? altScreenMirror : emulatorState.emulator.isAlternateScreenActive
     }
 
@@ -1647,7 +1650,7 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// here, so a burst coalesces to one present at the next display tick instead of one async render
     /// per call. Before the view is in a window (no link yet) this is just the dirty mark; the first
     /// `viewDidMoveToWindow`/`commitGridSize` paints via the synchronous force path.
-    private func scheduleRender() {
+    func scheduleRender() {
         scheduler.markDirty()
         wakeDisplayLink()
     }
@@ -2210,7 +2213,7 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// tick a full re-encode (the pre-#57 resize-lag source). Image frames take the same two
     /// paths — image quads draw outside the cell instance buffers, so they never gate reuse.
     @discardableResult
-    private func repaintLastFrame() -> Bool {
+    func repaintLastFrame() -> Bool {
         guard let result = lastPresentedResult,
               result.generation == renderGeneration,
               window != nil, let renderer else { return false }
@@ -2314,1705 +2317,4 @@ public final class HarnessTerminalSurfaceView: NSView {
         if !repaintLastFrame() { needsLayout = true }
         return true
     }
-
-    // MARK: - Cursor blink
-
-    // Blink is overlay-cheap: the cursor quad lives in the renderer's per-frame extras and a
-    // block cursor's glyph inversion re-encodes exactly its own row (`previousCursor` key diff),
-    // so each toggle costs ≤1 encoded row + one present — never a grid rebuild. Pinned by
-    // `testCursorBlinkReencodesAtMostTheCursorRow`.
-    private func restartBlinkTimer() {
-        blinkTimer?.invalidate()
-        blinkTimer = nil
-        cursorBlinkVisible = true
-        guard cursorBlinkEnabled else { return }
-        let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            MainActor.assumeIsolated {
-                guard self.effectivelyFocused else { return }
-                self.cursorBlinkVisible.toggle()
-                self.scheduleRender()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        blinkTimer = timer
-    }
-
-    /// Reset the cursor to solid after activity (typing/output), matching common terminals.
-    private func wakeCursor() {
-        guard cursorBlinkEnabled else { return }
-        if !cursorBlinkVisible {
-            cursorBlinkVisible = true
-            scheduleRender()
-        }
-    }
-
-    // MARK: - Scrollback
-
-    /// Scroll the viewport by whole `lines` (positive = back into history) — keyboard paging and
-    /// programmatic scrolls. Routed through the continuous path so a fractional rest position is
-    /// preserved (a page-up while half a line into a scroll stays half a line offset).
-    private func scrollBy(lines: Int) {
-        scrollByContinuous(lines: CGFloat(lines))
-    }
-
-    /// Smooth scroll: advance the continuous position `P = scrollOffset - scrollFraction` by
-    /// `delta` lines (positive = back into history), clamped to `[0, historyCount]`. The integer
-    /// offset is `ceil(P)` — the frame one line further back — and the fraction is the upward
-    /// translate that slides it to the exact position. An offset change rebuilds via the existing
-    /// shift path; a fraction-only change re-presents the cached frame with a new uniform (the
-    /// near-free tick that makes trackpad scrolling pixel-smooth). Clamping to 0 lands exactly on
-    /// the live view (fraction 0 — byte-identical frame).
-    private func scrollByContinuous(lines delta: CGFloat) {
-        guard delta != 0 else { return }
-        // Mirror read on the off-main pipeline (see `historyCountMirror`): a precise trackpad
-        // fires this at event rate, and a `queue.sync` here would stall every wheel event behind
-        // an in-flight parse. Direct read when the emulator is main-confined (legacy pipeline).
-        let historyCount = offMainParserFramePipelineEnabled
-            ? historyCountMirror
-            : emulatorState.emulator.historyCount
-        var position = CGFloat(scrollOffset) - scrollFraction + delta
-        position = max(0, min(CGFloat(historyCount), position))
-        // Snap float dust onto whole lines: P fractionally ABOVE an integer would ceil to the
-        // next offset with fraction ≈ 1 — render-identical, but every line-based consumer
-        // (hit-test, prompt jump, scrollbar) would report one line further back for that tick.
-        let nearest = position.rounded()
-        if abs(position - nearest) < 0.0005 { position = nearest }
-        // Inline images don't ride the smooth-scroll translate (image quads draw window-relative,
-        // outside the scrollPx uniform); quantize to whole lines while any are visible so they
-        // never sit misaligned mid-cell. The legacy on-main pipeline quantizes too: it presents
-        // without the fraction uniform (and never builds the peek row), so a fractional position
-        // there would render one whole line off instead of in between.
-        if !offMainParserFramePipelineEnabled
-            || lastPresentedResult.map({ !$0.frame.images.isEmpty }) == true {
-            position = position.rounded()
-        }
-        let newOffset = Int(position.rounded(.up))
-        let newFraction = CGFloat(newOffset) - position
-        guard newOffset != scrollOffset || newFraction != scrollFraction else { return }
-        let offsetChanged = newOffset != scrollOffset
-        scrollOffset = newOffset
-        scrollFraction = newFraction
-        clearSelection()
-        notifyScrollChanged(historyCount: historyCount)
-        if offsetChanged {
-            scheduleRender()
-        } else if !repaintLastFrame() {
-            // Fraction-only tick: the frame is unchanged, only the translate moved. The repaint
-            // applies the new uniform over the cached instances; fall back to a build only when
-            // there is no presentable cached frame (e.g. generation just changed).
-            scheduleRender()
-        }
-    }
-
-    /// Jump back to the live bottom (e.g. on typing).
-    private func snapToBottom() {
-        guard scrollOffset != 0 || scrollFraction != 0 else { return }
-        scrollOffset = 0
-        scrollFraction = 0
-        notifyScrollChanged(historyCount: emulatorSync { $0.historyCount })
-        scheduleRender()
-    }
-
-    /// Tell the host the scroll position changed so it can flash the transient scrollbar.
-    private func notifyScrollChanged(historyCount: Int) {
-        onScrollChanged?(historyCount - scrollOffset, historyCount + rows, rows)
-    }
-
-    // MARK: - Jump to prompt (OSC 133)
-
-    /// Scroll so the nearest shell-prompt row *above* the current top-of-viewport line sits at the
-    /// top. No-op without shell-integration marks or when already above the first prompt.
-    public func jumpToPreviousPrompt() {
-        let (prompts, historyCount) = emulatorSync { ($0.promptRows, $0.historyCount) }
-        guard !prompts.isEmpty else { return }
-        let topVisible = historyCount - scrollOffset   // buffer index of the top row
-        guard let target = prompts.last(where: { $0 < topVisible }) else { return }
-        scrollToBufferLine(target)
-    }
-
-    /// Scroll so the nearest shell-prompt row *below* the current top-of-viewport line sits at the
-    /// top. No-op without marks or when already at/after the last prompt.
-    public func jumpToNextPrompt() {
-        let (prompts, historyCount) = emulatorSync { ($0.promptRows, $0.historyCount) }
-        guard !prompts.isEmpty else { return }
-        let topVisible = historyCount - scrollOffset
-        guard let target = prompts.first(where: { $0 > topVisible }) else { return }
-        scrollToBufferLine(target)
-    }
-
-    /// Set the scrollback offset so virtual buffer line `index` is the top viewport row.
-    private func scrollToBufferLine(_ index: Int) {
-        let historyCount = emulatorSync { $0.historyCount }
-        let target = max(0, min(historyCount, historyCount - index))
-        guard target != scrollOffset || scrollFraction != 0 else { return }
-        scrollOffset = target
-        scrollFraction = 0 // prompt jumps anchor on a whole line
-        clearSelection()
-        notifyScrollChanged(historyCount: historyCount)
-        scheduleRender()
-    }
-
-    // MARK: - Selection & copy
-
-    /// Raw selection inputs, captured on the main thread WITHOUT resolving the per-granularity
-    /// column expansion. The off-main render path resolves the region on the emulator queue (see
-    /// `resolveSelectionRegion`) so a `.word` selection never drives `currentSelectionRegion`'s
-    /// `emulatorSync` — which, off the queue, `queue.sync`s the MAIN thread behind an in-flight
-    /// output feed on every build while the word selection is held (the stall the off-main pipeline
-    /// exists to avoid). `Sendable` so the `@Sendable` build closure can capture it.
-    private struct RawSelection: Sendable {
-        let anchorRow: Int, anchorColumn: Int
-        let headRow: Int, headColumn: Int
-        let granularity: SelectionGranularity
-        let rectangular: Bool
-    }
-
-    private var currentRawSelection: RawSelection? {
-        guard let a = selectionAnchor, let h = selectionHead else { return nil }
-        return RawSelection(anchorRow: a.row, anchorColumn: a.column,
-                            headRow: h.row, headColumn: h.column,
-                            granularity: selectionGranularity, rectangular: selectionRectangular)
-    }
-
-    /// Resolve a raw selection into a render region. PURE — call it ON the emulator queue (inside
-    /// the build) so the `.word` expansion reads `wordColumnRange` directly instead of through a
-    /// main-stalling `emulatorSync`. Mirrors `currentSelectionRegion`'s expansion exactly.
-    private nonisolated static func resolveSelectionRegion(_ sel: RawSelection?, emulator: TerminalEmulator,
-                                                           scrollOffset: Int, columns: Int) -> SelectionRegion? {
-        guard let sel else { return nil }
-        if sel.rectangular {
-            return .block(BlockSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
-        }
-        if sel.granularity == .character {
-            return .linear(TerminalSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
-        }
-        func unitRange(row: Int, column: Int) -> ClosedRange<Int> {
-            switch sel.granularity {
-            case .character: return column ... column
-            case .line: return 0 ... max(0, columns - 1)
-            case .word:
-                let virtualLine = emulator.historyCount - scrollOffset + row
-                return emulator.wordColumnRange(line: virtualLine, column: column)
-            }
-        }
-        let lo: (row: Int, column: Int), hi: (row: Int, column: Int)
-        if (sel.anchorRow, sel.anchorColumn) <= (sel.headRow, sel.headColumn) {
-            lo = (sel.anchorRow, sel.anchorColumn); hi = (sel.headRow, sel.headColumn)
-        } else {
-            lo = (sel.headRow, sel.headColumn); hi = (sel.anchorRow, sel.anchorColumn)
-        }
-        let loRange = unitRange(row: lo.row, column: lo.column)
-        let hiRange = unitRange(row: hi.row, column: hi.column)
-        if lo.row == hi.row {
-            return .linear(TerminalSelection((lo.row, min(loRange.lowerBound, hiRange.lowerBound)),
-                                             (lo.row, max(loRange.upperBound, hiRange.upperBound))))
-        }
-        return .linear(TerminalSelection((lo.row, loRange.lowerBound), (hi.row, hiRange.upperBound)))
-    }
-
-    /// The active selection region (nil when nothing is selected): rectangular for an Option-drag,
-    /// else linear with the endpoints expanded by the current granularity (word / line).
-    private var currentSelectionRegion: SelectionRegion? {
-        guard let a = selectionAnchor, let h = selectionHead else { return nil }
-        if selectionRectangular { return .block(BlockSelection((a.row, a.column), (h.row, h.column))) }
-        guard selectionGranularity != .character else {
-            return .linear(TerminalSelection((a.row, a.column), (h.row, h.column)))
-        }
-        // Order the endpoints, then expand the lower one to the start of its unit and the higher
-        // one to the end of its unit (unioning when both are on the same row).
-        let (lo, hi) = (a.row, a.column) <= (h.row, h.column) ? (a, h) : (h, a)
-        let loRange = unitColumnRange(viewportRow: lo.row, column: lo.column)
-        let hiRange = unitColumnRange(viewportRow: hi.row, column: hi.column)
-        if lo.row == hi.row {
-            return .linear(TerminalSelection((lo.row, min(loRange.lowerBound, hiRange.lowerBound)),
-                                             (lo.row, max(loRange.upperBound, hiRange.upperBound))))
-        }
-        return .linear(TerminalSelection((lo.row, loRange.lowerBound), (hi.row, hiRange.upperBound)))
-    }
-
-    /// Columns spanned by the current granularity at a viewport cell: the whole row for `.line`,
-    /// the whitespace-delimited word for `.word` (shared with copy mode), else the single column.
-    private func unitColumnRange(viewportRow row: Int, column: Int) -> ClosedRange<Int> {
-        switch selectionGranularity {
-        case .character: return column ... column
-        // Line selection covers the DISPLAY row, consistent with copy mode's line ops.
-        // Most terminals (Ghostty/iTerm2/kitty) triple-click the LOGICAL line across
-        // soft wraps — that needs wrap-flag plumbing through the selection region;
-        // tracked in the release-audit backlog.
-        case .line: return 0 ... max(0, columns - 1)
-        case .word:
-            return emulatorSync { emu in
-                let virtualLine = emu.historyCount - scrollOffset + row
-                return emu.wordColumnRange(line: virtualLine, column: column)
-            }
-        }
-    }
-
-    private func clearSelection() {
-        selectionGranularity = .character
-        selectionRectangular = false
-        guard selectionAnchor != nil || selectionHead != nil else { return }
-        selectionAnchor = nil
-        selectionHead = nil
-        scheduleRender()
-    }
-
-    /// Map a window-space point to a grid cell, accounting for padding + backing scale.
-    /// AppKit view coordinates are bottom-left origin, so the row is measured from the top.
-    private func cell(at locationInWindow: NSPoint) -> (row: Int, column: Int)? {
-        guard let renderer, columns > 0, rows > 0 else { return nil }
-        let scale = window?.backingScaleFactor ?? 2.0
-        let cellW = CGFloat(renderer.cellPixelWidth) / scale
-        let cellH = CGFloat(renderer.cellPixelHeight) / scale
-        guard cellW > 0, cellH > 0 else { return nil }
-        let p = convert(locationInWindow, from: nil)
-        let x = p.x - gridOriginPointsX
-        // The smooth-scroll translate slides content UP by `scrollFraction` of a cell, so what's
-        // visually under the pointer is the content that fraction further down — add it back so
-        // clicks/selections land on the row the user sees, not the untranslated grid slot.
-        let yFromTop = bounds.height - p.y - gridOriginPointsY + scrollFraction * cellH
-        let col = Int((x / cellW).rounded(.down))
-        let row = Int((yFromTop / cellH).rounded(.down))
-        return (max(0, min(rows - 1, row)), max(0, min(columns - 1, col)))
-    }
-
-    /// Mouse goes to the program when it enabled tracking — unless Shift is held, which
-    /// always forces local selection (the standard terminal override).
-    private func isMouseReporting(_ event: NSEvent) -> Bool {
-        inputModes().mouseTrackingEnabled && !event.modifierFlags.contains(.shift)
-    }
-
-    private func mouseModifiers(_ event: NSEvent) -> KeyModifiers {
-        var mods: KeyModifiers = []
-        let flags = event.modifierFlags
-        if flags.contains(.shift) { mods.insert(.shift) }
-        if flags.contains(.option) { mods.insert(.option) }
-        if flags.contains(.control) { mods.insert(.control) }
-        return mods
-    }
-
-    private func reportMouse(_ event: NSEvent, button: MouseButton, kind: MouseEventKind) {
-        guard let pos = cell(at: event.locationInWindow) else { return }
-        let modes = inputModes()
-        emit(inputEncoder.encodeMouse(
-            button: button, kind: kind,
-            column: pos.column, row: pos.row,
-            modifiers: mouseModifiers(event), modes: modes
-        ))
-    }
-
-    public override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
-        if copyMode != nil { return } // copy mode is keyboard-driven; ignore clicks
-        // ⌘-click opens an OSC 8 hyperlink or an auto-detected URL.
-        // ⌘ overrides mouse reporting, the same way Shift overrides it for selection.
-        if event.modifierFlags.contains(.command), let pos = cell(at: event.locationInWindow),
-           let url = linkURL(atRow: pos.row, column: pos.column) {
-            openLink(url)
-            return
-        }
-        if isMouseReporting(event) {
-            reportMouse(event, button: .left, kind: .press)
-            return
-        }
-        guard let pos = cell(at: event.locationInWindow) else { return }
-        // Click count picks the selection unit (1 = char, 2 = word, 3 = line); Option = rectangle.
-        switch event.clickCount {
-        case 2: selectionGranularity = .word
-        case let n where n >= 3: selectionGranularity = .line
-        default: selectionGranularity = .character
-        }
-        selectionRectangular = event.modifierFlags.contains(.option)
-        selectionAnchor = pos
-        selectionHead = pos
-        scheduleRender()
-    }
-
-    /// The clickable URL at a grid cell (OSC 8 hyperlink first, else an auto-detected URL).
-    private func linkURL(atRow row: Int, column col: Int) -> String? {
-        linkRange(atRow: row, column: col)?.url
-    }
-
-    /// The clickable link at a grid cell *and* its column span — an OSC 8 hyperlink (the run of
-    /// adjacent cells sharing its id) first, else an auto-detected URL in the row text. The row is
-    /// built one character per cell so `column`/the returned range map directly to grid columns.
-    private func linkRange(atRow row: Int, column col: Int) -> (url: String, columns: Range<Int>)? {
-        emulatorSync { emulator in
-            let grid = scrollOffset > 0 ? emulator.readGrid(scrollbackOffset: scrollOffset) : emulator.readGrid()
-            guard row >= 0, row < grid.rows, col >= 0, col < grid.cols else { return nil }
-            if let cell = grid.cell(row: row, col: col), cell.hyperlinkID != 0,
-               let url = emulator.hyperlinkURL(id: cell.hyperlinkID) {
-                var lo = col, hi = col
-                while lo > 0, grid.cell(row: row, col: lo - 1)?.hyperlinkID == cell.hyperlinkID { lo -= 1 }
-                while hi + 1 < grid.cols, grid.cell(row: row, col: hi + 1)?.hyperlinkID == cell.hyperlinkID { hi += 1 }
-                return (url, lo ..< (hi + 1))
-            }
-            var line = ""
-            line.reserveCapacity(grid.cols)
-            for c in 0 ..< grid.cols {
-                guard let cell = grid.cell(row: row, col: c), cell.width != .spacerTail else { line.append(" "); continue }
-                line.unicodeScalars.append(cell.codepoint == 0 ? " " : (Unicode.Scalar(cell.codepoint) ?? " "))
-            }
-            return URLDetection.match(in: line, at: col) ?? URLDetection.detectFilePath(in: line, at: col)
-        }
-    }
-
-    /// Open a clicked link, restricted to safe schemes so terminal output can't trigger a
-    /// surprising handler (e.g. a custom app scheme) on ⌘-click. No `file:` — an OSC 8
-    /// hyperlink comes from terminal output (possibly a remote host), and opening an
-    /// arbitrary local path via NSWorkspace executes .app bundles and .command scripts.
-    /// File paths (absolute or relative to cwd) open in Harness's file preview instead.
-    private func openLink(_ string: String) {
-        // Check if it's a local file path first
-        let path = resolveFilePath(string)
-        if let path, FileManager.default.fileExists(atPath: path) {
-            let isDirectory = (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeDirectory
-            guard !isDirectory else { return }
-            // Don't open executables (.app, .command, etc.) — security
-            guard !path.hasSuffix(".app"), !path.hasSuffix(".command"), !path.hasSuffix(".tool") else { return }
-            NotificationCenter.default.post(
-                name: Notification.Name("HarnessOpenFilePreview"),
-                object: nil,
-                userInfo: ["path": path]
-            )
-            return
-        }
-        guard let url = URL(string: string), let scheme = url.scheme?.lowercased(),
-              ["http", "https", "mailto", "ftp", "ftps"].contains(scheme) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func resolveFilePath(_ string: String) -> String? {
-        var cleanString = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Handle file:// scheme
-        if cleanString.lowercased().hasPrefix("file://") {
-            let rawPath = String(cleanString.dropFirst(7))
-            if let decoded = rawPath.removingPercentEncoding {
-                cleanString = decoded
-            } else {
-                cleanString = rawPath
-            }
-        }
-        
-        // Strip leading/trailing single or double quotes
-        if (cleanString.hasPrefix("'") && cleanString.hasSuffix("'")) ||
-           (cleanString.hasPrefix("\"") && cleanString.hasSuffix("\"")) {
-            cleanString = String(cleanString.dropFirst().dropLast())
-        }
-
-        // Strip line:col suffix (e.g. "file.swift:42:5" or "file.swift:42")
-        let stripped = cleanString.replacingOccurrences(of: #":\d+(?::\d+)?$"#, with: "", options: .regularExpression)
-        if stripped.hasPrefix("/") {
-            return stripped
-        }
-        // Relative path — resolve against terminal's cwd
-        guard let cwd = currentCwd, !cwd.isEmpty else { return nil }
-        let resolved = (cwd as NSString).appendingPathComponent(stripped)
-        return resolved
-    }
-
-    public override func mouseDragged(with event: NSEvent) {
-        if copyMode != nil { return }
-        if isMouseReporting(event) {
-            // Only report motion when the app asked for drag / any-motion tracking.
-            let modes = inputModes()
-            if modes.mouseDrag || modes.mouseAny {
-                reportMouse(event, button: .left, kind: .drag)
-            }
-            return
-        }
-        guard selectionAnchor != nil, let pos = cell(at: event.locationInWindow) else { return }
-        selectionHead = pos
-        scheduleRender()
-    }
-
-    public override func mouseUp(with event: NSEvent) {
-        if copyMode != nil { return }
-        if isMouseReporting(event) {
-            reportMouse(event, button: .left, kind: .release)
-            return
-        }
-        // A single-cell *character* click with no drag clears; a word/line click (or any drag)
-        // makes a real selection that copy-on-select copies.
-        if let a = selectionAnchor, let h = selectionHead, a == h, selectionGranularity == .character {
-            clearSelection()
-            return
-        }
-        if copyOnSelect { copySelection() }
-    }
-
-    public override func rightMouseDown(with event: NSEvent) {
-        if isMouseReporting(event) { reportMouse(event, button: .right, kind: .press) }
-        else { super.rightMouseDown(with: event) }
-    }
-
-    public override func rightMouseUp(with event: NSEvent) {
-        if isMouseReporting(event) { reportMouse(event, button: .right, kind: .release) }
-        else { super.rightMouseUp(with: event) }
-    }
-
-    public override func otherMouseDown(with event: NSEvent) {
-        if isMouseReporting(event) {
-            reportMouse(event, button: .middle, kind: .press)
-        } else if event.buttonNumber == 2 {
-            // Middle-click pastes the current selection (the X11/Ghostty primary-paste
-            // convention), falling back to the clipboard. Routed through pasteText so
-            // bracketed paste and paste protection apply exactly like ⌘V.
-            if let text = selectionTextIfAny() ?? NSPasteboard.general.string(forType: .string),
-               !text.isEmpty {
-                pasteText(text)
-            }
-        } else {
-            super.otherMouseDown(with: event)
-        }
-    }
-
-    public override func otherMouseUp(with event: NSEvent) {
-        if isMouseReporting(event) { reportMouse(event, button: .middle, kind: .release) }
-        else { super.otherMouseUp(with: event) }
-    }
-
-    // MARK: - Link hover (⌘-hover affordance)
-
-    private func cellSizePoints() -> (w: CGFloat, h: CGFloat)? {
-        guard let renderer else { return nil }
-        let scale = window?.backingScaleFactor ?? 2.0
-        let w = CGFloat(renderer.cellPixelWidth) / scale
-        let h = CGFloat(renderer.cellPixelHeight) / scale
-        guard w > 0, h > 0 else { return nil }
-        return (w, h)
-    }
-
-    /// The view-space rect (bottom-left origin, matching `cell(at:)`'s inverse) covering a grid
-    /// `row` and half-open `columns` span.
-    private func cellRect(row: Int, columns: Range<Int>) -> CGRect? {
-        guard let (w, h) = cellSizePoints(), !columns.isEmpty else { return nil }
-        let x = gridOriginPointsX + CGFloat(columns.lowerBound) * w
-        let y = bounds.height - gridOriginPointsY - CGFloat(row + 1) * h
-        return CGRect(x: x, y: y, width: CGFloat(columns.count) * w, height: h)
-    }
-
-    private func hoveredLinkRect() -> CGRect? {
-        guard let link = hoveredLink else { return nil }
-        return cellRect(row: link.row, columns: link.columns)
-    }
-
-    override public func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self, userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    public override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        updateLinkHover(at: event.locationInWindow, modifiers: event.modifierFlags)
-    }
-
-    public override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        clearLinkHover()
-    }
-
-    public override func flagsChanged(with event: NSEvent) {
-        super.flagsChanged(with: event)
-        // Pressing/releasing ⌘ over a stationary pointer toggles whether the link is "hot".
-        if let window {
-            updateLinkHover(at: window.mouseLocationOutsideOfEventStream, modifiers: event.modifierFlags)
-        }
-        reportModifierKeyIfNeeded(event)
-    }
-
-    /// Physical modifier keycodes currently held — used to tell press from release in
-    /// `flagsChanged` (which fires for both, with no inherent direction).
-    private var pressedModifierKeyCodes: Set<UInt16> = []
-
-    /// Report a modifier key (Shift/Ctrl/Alt/Cmd/CapsLock) as its own key event when a program
-    /// enabled the Kitty protocol's "report all keys as escape codes" flag (0b1000). Release events
-    /// additionally require "report event types" (0b10). No-op otherwise — modifiers normally emit
-    /// nothing on their own.
-    private func reportModifierKeyIfNeeded(_ event: NSEvent) {
-        let modes = inputModes()
-        guard modes.kittyKeyboardFlags & 0b1000 != 0 else { pressedModifierKeyCodes.removeAll(); return }
-        guard copyMode == nil, let key = Self.modifierSpecialKey(forKeyCode: event.keyCode) else { return }
-        // flagsChanged toggles: if we already recorded this key down, this event is its release.
-        let isPress: Bool
-        if pressedModifierKeyCodes.contains(event.keyCode) {
-            pressedModifierKeyCodes.remove(event.keyCode)
-            isPress = false
-        } else {
-            pressedModifierKeyCodes.insert(event.keyCode)
-            isPress = true
-        }
-        if !isPress, modes.kittyKeyboardFlags & 0b10 == 0 { return } // release needs event-types
-        emit(inputEncoder.encode(key, modifiers: [], event: isPress ? .press : .release, modes: modes))
-    }
-
-    /// Map a macOS virtual keycode for a modifier key to its Kitty `SpecialKey`. Left/right are
-    /// distinguished by keycode (the device-independent modifier flags can't tell them apart).
-    private static func modifierSpecialKey(forKeyCode code: UInt16) -> SpecialKey? {
-        switch code {
-        case 56: return .leftShift       // kVK_Shift
-        case 60: return .rightShift      // kVK_RightShift
-        case 59: return .leftControl     // kVK_Control
-        case 62: return .rightControl    // kVK_RightControl
-        case 58: return .leftAlt         // kVK_Option
-        case 61: return .rightAlt        // kVK_RightOption
-        case 55: return .leftSuper       // kVK_Command
-        case 54: return .rightSuper      // kVK_RightCommand
-        case 57: return .capsLock        // kVK_CapsLock
-        default: return nil
-        }
-    }
-
-    /// A link is only highlighted while ⌘ is held (matching ⌘-click open) and the program
-    /// isn't grabbing the mouse.
-    private func updateLinkHover(at locationInWindow: NSPoint, modifiers: NSEvent.ModifierFlags) {
-        // `cell(at:)` clamps to the grid, so first require the pointer to actually be inside us
-        // (⌘ can be pressed while the pointer rests over another pane).
-        guard copyMode == nil, modifiers.contains(.command),
-              bounds.contains(convert(locationInWindow, from: nil)),
-              let pos = cell(at: locationInWindow),
-              let link = linkRange(atRow: pos.row, column: pos.column)
-        else { clearLinkHover(); return }
-        if let current = hoveredLink, current.row == pos.row, current.columns == link.columns { return }
-        hoveredLink = (row: pos.row, columns: link.columns)
-        refreshLinkUnderline()
-        window?.invalidateCursorRects(for: self)
-    }
-
-    private func clearLinkHover() {
-        guard hoveredLink != nil else { return }
-        hoveredLink = nil
-        refreshLinkUnderline()
-        window?.invalidateCursorRects(for: self)
-    }
-
-    private func refreshLinkUnderline() {
-        // Disable implicit animations so the underline snaps to the pointer instead of sliding.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        if let rect = hoveredLinkRect() {
-            let thickness = max(1, (cellSizePoints()?.h ?? 16) * 0.07)
-            linkUnderlineLayer.frame = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: thickness)
-            linkUnderlineLayer.isHidden = false
-        } else {
-            linkUnderlineLayer.isHidden = true
-        }
-        CATransaction.commit()
-    }
-
-    // MARK: - Find (Cmd+F)
-
-    public func beginFind() { findActive = true }
-
-    /// Close the find bar: drop matches + highlights (the bar stays a host concern).
-    public func endFind() {
-        guard findActive else { return }
-        findActive = false
-        findMatches = []
-        findCurrentIndex = 0
-        onFindResultsChanged?(0, 0)
-        scheduleRender()
-    }
-
-    /// Run/refresh the search for `query` (incremental as the user types). Empty clears matches.
-    public func updateFind(query: String) {
-        findActive = true
-        if query.isEmpty {
-            findMatches = []
-            findCurrentIndex = 0
-        } else {
-            findMatches = emulatorSync { emulator in
-                TerminalBufferSearch.matches(query: query, lineCount: emulator.bufferLineCount) { emulator.bufferLine($0) }
-            }
-            findCurrentIndex = 0
-            if !findMatches.isEmpty { scrollToCurrentMatch() }
-        }
-        onFindResultsChanged?(findMatches.isEmpty ? 0 : findCurrentIndex + 1, findMatches.count)
-        scheduleRender()
-    }
-
-    public func findNext() { advanceFind(by: 1) }
-    public func findPrevious() { advanceFind(by: -1) }
-
-    private func advanceFind(by delta: Int) {
-        guard !findMatches.isEmpty else { return }
-        let n = findMatches.count
-        findCurrentIndex = ((findCurrentIndex + delta) % n + n) % n
-        scrollToCurrentMatch()
-        onFindResultsChanged?(findCurrentIndex + 1, n)
-        scheduleRender()
-    }
-
-    /// Scroll so the current match sits a little below the top of the viewport (context above it).
-    private func scrollToCurrentMatch() {
-        guard findMatches.indices.contains(findCurrentIndex) else { return }
-        let line = findMatches[findCurrentIndex].bufferLine
-        scrollToBufferLine(max(0, line - max(0, rows / 3)))
-    }
-
-    /// Viewport-relative highlight spans for the matches currently on screen. `nonisolated` +
-    /// pure so the off-main render path can call it on its worker queue.
-    private nonisolated static func viewportFindHighlights(
-        _ matches: [TerminalBufferMatch], scrollOffset: Int, historyCount: Int, rows: Int
-    ) -> [TerminalSelection] {
-        guard !matches.isEmpty, rows > 0 else { return [] }
-        let topVisible = historyCount - scrollOffset // buffer index of the top viewport row
-        var hits: [TerminalSelection] = []
-        for m in matches where !m.columns.isEmpty {
-            let row = m.bufferLine - topVisible
-            if row >= 0, row < rows {
-                hits.append(TerminalSelection((row, m.columns.lowerBound), (row, m.columns.upperBound - 1)))
-            }
-        }
-        return hits
-    }
-
-    public override func scrollWheel(with event: NSEvent) {
-        if event.scrollingDeltaY != 0 { clearLinkHover() }
-        // In copy mode, the wheel moves the copy-mode cursor through scrollback.
-        if copyMode != nil, let renderer, event.scrollingDeltaY != 0 {
-            let scale = window?.backingScaleFactor ?? 2.0
-            let cellH = max(1, CGFloat(renderer.cellPixelHeight) / scale)
-            let lines = consumeWheelLines(event, cellHeight: cellH)
-            guard lines != 0 else { return }
-            let action: CopyModeAction = lines > 0 ? .cursorUp : .cursorDown
-            for _ in 0 ..< abs(lines) { handleCopyModeAction(action) }
-            return
-        }
-        if isMouseReporting(event) {
-            guard let renderer else { return }
-            let scale = window?.backingScaleFactor ?? 2.0
-            // One wheel report per *line* of travel (cell-height accumulated, remainder carried),
-            // not per NSEvent — a trackpad fires a ~120Hz stream of tiny deltas plus momentum
-            // events, and reporting each one flooded TUIs (Claude Code) with wheel events, making
-            // scroll feel hair-trigger. Matches Ghostty's pending-scroll accumulation.
-            let cellH = max(1, CGFloat(renderer.cellPixelHeight) / scale)
-            let lines = consumeWheelLines(event, cellHeight: cellH)
-            if lines != 0 {
-                let button: MouseButton = lines > 0 ? .wheelUp : .wheelDown
-                for _ in 0 ..< min(abs(lines), 32) { reportMouse(event, button: button, kind: .press) }
-            }
-            // Horizontal wheel: buttons 66/67, one report per cell-width column (Ghostty parity).
-            let cellW = max(1, CGFloat(renderer.cellPixelWidth) / scale)
-            let cols = consumeWheelColumns(event, cellWidth: cellW)
-            if cols != 0 {
-                let button: MouseButton = cols > 0 ? .wheelLeft : .wheelRight
-                for _ in 0 ..< min(abs(cols), 32) { reportMouse(event, button: button, kind: .press) }
-            }
-            return
-        }
-        // Local scrollback: positive deltaY (content moves down) scrolls back into history.
-        guard event.scrollingDeltaY != 0, let renderer else { return }
-        let scale = window?.backingScaleFactor ?? 2.0
-        let cellH = max(1, CGFloat(renderer.cellPixelHeight) / scale)
-        // The alternate screen has no scrollback — synthesize arrow keys instead (DECSET
-        // 1007 "alternate scroll", on by default) so the wheel scrolls less/man/vim when
-        // the program didn't enable mouse reporting (that case already returned above).
-        // Arrow synthesis is inherently line-based, so it keeps the whole-line accumulator;
-        // local scrollback below scrolls by the continuous (pixel-smooth) delta instead.
-        let onAltScreen = inputAltScreenActive()
-        let modes = inputModes()
-        if onAltScreen, modes.alternateScroll {
-            let lines = consumeWheelLines(event, cellHeight: cellH)
-            guard lines != 0 else { return }
-            let key: SpecialKey = lines > 0 ? .up : .down
-            let perLine = inputEncoder.encode(key, modifiers: [], modes: modes)
-            guard !perLine.isEmpty else { return }
-            // Cap one event's burst (don't flood the PTY on a violent fling) but carry
-            // the excess back into the remainder so momentum isn't silently truncated.
-            let send = min(abs(lines), 32)
-            let excess = abs(lines) - send
-            if excess > 0 { wheelLineRemainder += CGFloat(lines > 0 ? excess : -excess) }
-            var bytes: [UInt8] = []
-            bytes.reserveCapacity(perLine.count * send)
-            for _ in 0 ..< send { bytes.append(contentsOf: perLine) }
-            emit(bytes)
-            return
-        }
-        scrollByContinuous(lines: continuousWheelLines(event, cellHeight: cellH))
-    }
-
-    /// Continuous (sub-line) wheel delta in lines for local-scrollback smooth scrolling. Precise
-    /// (trackpad) deltas are pixel-based; the fraction itself is the carry, so no remainder
-    /// accumulator is needed. Non-precise mouse wheels keep the classic whole-notch step
-    /// (clamped to a full tick like `consumeWheelLines`) — a clicky wheel jumping 3 lines per
-    /// notch is the expected feel; only the trackpad scrolls by pixels.
-    private func continuousWheelLines(_ event: NSEvent, cellHeight: CGFloat) -> CGFloat {
-        let delta = event.scrollingDeltaY
-        if event.hasPreciseScrollingDeltas { return delta / cellHeight }
-        let ticks = delta > 0 ? max(delta, 1) : min(delta, -1)
-        return ticks * Self.mouseWheelLinesPerTick
-    }
-
-    /// Convert a wheel/trackpad event into a signed whole-line scroll count, carrying the
-    /// sub-line remainder across events. Precise (trackpad) deltas are pixel-based, so dividing
-    /// by the cell height maps a line's worth of finger travel to one line *and* lets small
-    /// movements accumulate — the old `max(1, …rounded())` forced a full line per event, which
-    /// made trackpad scrolling feel hair-trigger. Non-precise mouse wheels report in line units,
-    /// scaled to the classic 3-line notch.
-    private func consumeWheelLines(_ event: NSEvent, cellHeight: CGFloat) -> Int {
-        let delta = event.scrollingDeltaY
-        if event.hasPreciseScrollingDeltas {
-            wheelLineRemainder += delta / cellHeight
-        } else {
-            // macOS simulates acceleration on non-precise wheels by ramping the delta from 0.1
-            // upward — a slow single notch would otherwise accumulate 0.3 lines and do nothing
-            // until the fourth click. Clamp a notch to at least one full tick (Ghostty parity).
-            let ticks = delta > 0 ? max(delta, 1) : min(delta, -1)
-            wheelLineRemainder += ticks * Self.mouseWheelLinesPerTick
-        }
-        let whole = wheelLineRemainder < 0 ? wheelLineRemainder.rounded(.up) : wheelLineRemainder.rounded(.down)
-        wheelLineRemainder -= whole
-        return Int(whole)
-    }
-
-    /// Horizontal counterpart of `consumeWheelLines` for mouse-reported wheel-left/right: precise
-    /// deltas accumulate by cell width (remainder carried); non-precise ticks map 1:1 to columns.
-    private func consumeWheelColumns(_ event: NSEvent, cellWidth: CGFloat) -> Int {
-        let delta = event.scrollingDeltaX
-        guard delta != 0 else { return 0 }
-        if event.hasPreciseScrollingDeltas {
-            wheelColumnRemainder += delta / cellWidth
-            let whole = wheelColumnRemainder < 0 ? wheelColumnRemainder.rounded(.up) : wheelColumnRemainder.rounded(.down)
-            wheelColumnRemainder -= whole
-            return Int(whole)
-        }
-        return Int(delta.rounded())
-    }
-
-    /// Standard responder copy (Edit ▸ Copy / ⌘C via the menu).
-    @objc public func copy(_ sender: Any?) {
-        copySelection()
-    }
-
-    /// Standard responder cut (Edit ▸ Cut / ⌘X). A terminal's scrollback is read-only, so cut
-    /// behaves as copy — without this, the Edit-menu Cut item (which targets `cut:`) no-ops.
-    @objc public func cut(_ sender: Any?) {
-        copySelection()
-    }
-
-    /// Standard responder paste (Edit ▸ Paste / ⌘V). Sends the clipboard text to the PTY,
-    /// wrapped in bracketed-paste markers when the program enabled DECSET 2004 (so shells and
-    /// editors treat it as a literal paste, not typed input). Newlines normalize to CR (the
-    /// Enter byte) so multi-line pastes run line by line.
-    ///
-    /// When the clipboard holds no text but an image (a screenshot) or a copied file, the image is
-    /// written to a temp PNG and its shell-quoted path is pasted instead — so programs that accept
-    /// image-file paths (Claude Code, etc.) attach it. Mirrors the file-drop path.
-    @objc public func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
-        // Text fast path.
-        if let raw = pasteboard.string(forType: .string), !raw.isEmpty {
-            pasteText(raw)
-            return
-        }
-        // Image on the clipboard → write a temp PNG, paste its quoted path.
-        if let path = Self.writePastedImage(from: pasteboard) {
-            pasteText(Self.shellQuotedPath(path))
-            return
-        }
-        // A file copied in Finder (⌘C → ⌘V) → paste the quoted path(s), like a drag-drop.
-        let text = Self.droppedPathText(for: Self.droppedFileURLs(from: pasteboard))
-        if !text.isEmpty { pasteText(text) }
-    }
-
-    /// If the pasteboard holds a valid image, write it to the pasted-images directory as a PNG and
-    /// return the file path. Prefers raw PNG bytes; converts TIFF / other image reps via a bitmap
-    /// rep. Returns nil when there's no usable image. Validation is via `NSBitmapImageRep` (not the
-    /// engine's `ImageDecoder`, whose inline-display pixel cap would wrongly reject a high-res
-    /// Retina/Pro-Display screenshot — pasting a *path* has no such limit).
-    static func writePastedImage(from pasteboard: NSPasteboard) -> String? {
-        guard let png = pngImageData(from: pasteboard) else { return nil }
-        let dir = HarnessPaths.pastedImagesDirectory
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        prunePastedImages(in: dir)
-        let stamp = Int(Date().timeIntervalSince1970)
-        let url = dir.appendingPathComponent("pasted-\(stamp)-\(UUID().uuidString.prefix(8)).png")
-        do { try png.write(to: url); return url.path } catch { return nil }
-    }
-
-    /// Best-effort PNG bytes for whatever image the pasteboard carries (screenshot = PNG/TIFF).
-    private static func pngImageData(from pasteboard: NSPasteboard) -> Data? {
-        // A screenshot is already PNG — trust the raw bytes once they parse as an image.
-        if let png = pasteboard.data(forType: .png), NSBitmapImageRep(data: png) != nil {
-            return png
-        }
-        // Otherwise re-encode a TIFF / NSImage payload to PNG.
-        let tiff = pasteboard.data(forType: .tiff) ?? NSImage(pasteboard: pasteboard)?.tiffRepresentation
-        if let tiff, let rep = NSBitmapImageRep(data: tiff) {
-            return rep.representation(using: .png, properties: [:])
-        }
-        return nil
-    }
-
-    /// Drop pasted-image files older than a day so the directory can't grow unbounded.
-    private static func prunePastedImages(in dir: URL, olderThan maxAge: TimeInterval = 24 * 60 * 60) {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]
-        ) else { return }
-        let cutoff = Date().addingTimeInterval(-maxAge)
-        for url in entries {
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, modified < cutoff { try? fm.removeItem(at: url) }
-        }
-    }
-
-    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        pathDropOperation(for: sender)
-    }
-
-    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        pathDropOperation(for: sender)
-    }
-
-    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let pasteboard = sender.draggingPasteboard
-        // File URLs (files, folders) → paste shell-quoted paths.
-        let urls = Self.droppedFileURLs(from: pasteboard)
-        if !urls.isEmpty {
-            window?.makeFirstResponder(self)
-            pasteText(Self.droppedPathText(for: urls))
-            return true
-        }
-        // Image drag (browser screenshot, Photos, etc.) → write temp PNG, paste path.
-        if let path = Self.writePastedImage(from: pasteboard) {
-            window?.makeFirstResponder(self)
-            pasteText(Self.shellQuotedPath(path))
-            return true
-        }
-        return false
-    }
-
-    private func pathDropOperation(for sender: NSDraggingInfo) -> NSDragOperation {
-        // Accept any drag the source allows (we always copy).
-        guard !sender.draggingSourceOperationMask.isEmpty else { return [] }
-        let pasteboard = sender.draggingPasteboard
-        if !Self.droppedFileURLs(from: pasteboard).isEmpty { return .copy }
-        if Self.pngImageData(from: pasteboard) != nil { return .copy }
-        return []
-    }
-
-    private func pasteText(_ raw: String) {
-        let normalized = raw
-            .replacingOccurrences(of: "\r\n", with: "\r")
-            .replacingOccurrences(of: "\n", with: "\r")
-        // Paste protection: confirm risky text when the program hasn't enabled bracketed paste
-        // (which would otherwise run embedded newlines as commands the moment they're pasted).
-        let bracketed = inputModes().bracketedPaste
-        if pasteProtection, !bracketed, Self.isUnsafePaste(normalized), let window {
-            confirmPaste(normalized, in: window)
-            return
-        }
-        deliverPaste(normalized)
-    }
-
-    private func deliverPaste(_ normalized: String) {
-        snapToBottom()
-        clearSelection()
-        emit(inputEncoder.encodePaste(normalized, modes: inputModes()))
-    }
-
-    /// Unsafe = contains a line break (would run as a command without bracketed paste) or another
-    /// control character. Newlines are already normalized to `\r` before this check.
-    private static func isUnsafePaste(_ text: String) -> Bool {
-        text.unicodeScalars.contains { $0.value < 0x20 && $0 != "\t" }
-    }
-
-    private func confirmPaste(_ normalized: String, in window: NSWindow) {
-        let lineCount = normalized.split(separator: "\r", omittingEmptySubsequences: false).count
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = lineCount > 1 ? "Paste \(lineCount) lines into the terminal?" : "Paste into the terminal?"
-        alert.informativeText = "The clipboard contains line breaks or control characters that can run commands immediately. Review before pasting."
-        alert.addButton(withTitle: "Paste")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.deliverPaste(normalized)
-        }
-    }
-
-    /// Select the entire visible viewport (Edit ▸ Select All / ⌘A).
-    @objc public override func selectAll(_ sender: Any?) {
-        guard rows > 0, columns > 0 else { return }
-        selectionGranularity = .character
-        selectionRectangular = false
-        selectionAnchor = (row: 0, column: 0)
-        selectionHead = (row: rows - 1, column: columns - 1)
-        scheduleRender()
-    }
-
-    /// Right-click context menu (Copy / Paste / Select All). Suppressed while the program is
-    /// capturing the mouse (unless Shift forces local handling), matching the selection rules.
-    public override func menu(for event: NSEvent) -> NSMenu? {
-        guard !isMouseReporting(event) else { return nil }
-        let menu = NSMenu()
-        let copyItem = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
-        copyItem.target = self
-        menu.addItem(copyItem)
-        let pasteItem = NSMenuItem(title: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
-        pasteItem.target = self
-        menu.addItem(pasteItem)
-        menu.addItem(.separator())
-        let selectAllItem = NSMenuItem(title: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "")
-        selectAllItem.target = self
-        menu.addItem(selectAllItem)
-        return menu
-    }
-
-    private func copySelection() {
-        guard let text = selectionTextIfAny() else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        onCopy?(text)
-    }
-
-    /// The current selection's text, or nil when there is no selection (or it's empty).
-    private func selectionTextIfAny() -> String? {
-        guard let region = currentSelectionRegion else { return nil }
-        let text = emulatorSync { emu -> String in
-            let snapshot = scrollOffset > 0 ? emu.readGrid(scrollbackOffset: scrollOffset) : emu.readGrid()
-            switch region {
-            case let .linear(sel): return selectedText(sel, snapshot)
-            case let .block(blk): return blockSelectedText(blk, snapshot)
-            }
-        }
-        return text.isEmpty ? nil : text
-    }
-
-    /// Extract the selected text from the grid: per row, the in-range columns, skipping the
-    /// trailing spacer of wide chars, with trailing whitespace trimmed and rows joined by \n.
-    private func selectedText(_ sel: TerminalSelection, _ snapshot: TerminalGridSnapshot) -> String {
-        var lines: [String] = []
-        for row in sel.startRow ... sel.endRow {
-            let startCol = (row == sel.startRow) ? sel.startColumn : 0
-            let endCol = (row == sel.endRow) ? sel.endColumn : snapshot.cols - 1
-            lines.append(rowText(row: row, startCol: startCol, endCol: endCol, snapshot: snapshot))
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// Extract a rectangular (block) selection: the same column span on every row, rows joined by \n.
-    private func blockSelectedText(_ blk: BlockSelection, _ snapshot: TerminalGridSnapshot) -> String {
-        (blk.startRow ... blk.endRow)
-            .map { rowText(row: $0, startCol: blk.startColumn, endCol: blk.endColumn, snapshot: snapshot) }
-            .joined(separator: "\n")
-    }
-
-    /// One row's text over `[startCol, endCol]`: drop wide-char spacer tails, blanks → space,
-    /// trailing whitespace trimmed.
-    private func rowText(row: Int, startCol: Int, endCol: Int, snapshot: TerminalGridSnapshot) -> String {
-        var line = ""
-        var col = startCol
-        while col <= endCol {
-            let cell = snapshot.cell(row: row, col: col)
-            if cell?.width == .spacerTail { col += 1; continue }
-            if let cell, cell.codepoint != 0 {
-                line += cell.cluster // base + combining marks
-            } else {
-                line += " "
-            }
-            col += 1
-        }
-        while line.hasSuffix(" ") { line.removeLast() }
-        return line
-    }
-
-    // MARK: - IME preedit
-
-    /// Draw the marked (composing) text over the grid starting at the cursor, and park the
-    /// cursor at its end. Combining marks (Thai vowels/tones, accents) are folded onto the base
-    /// cell — never given their own column — so composing Thai through the IME renders the same as
-    /// committed text, instead of dropping vowels / exploding tone marks.
-    private func overlayPreedit(into frame: inout TerminalFrame) {
-        Self.applyPreedit(into: &frame, text: markedText, builder: frameBuilder,
-                          canvasForeground: canvasForeground, canvasBackground: canvasBackground)
-    }
-
-    /// Per-row fingerprint of the cell-overlay pass (selection + find shading + IME preedit):
-    /// what the pass paints on each row, hashed from the overlay GEOMETRY (no cell walks). Two
-    /// builds whose fingerprints agree for a row shaded it identically, so the rows whose
-    /// fingerprint changed — plus rows that left the overlay — are exactly the extra render
-    /// damage the pass needs. A selection drag therefore re-encodes the rows it crossed, not
-    /// the grid. Keys exist only for rows the overlay touches now.
-    nonisolated static func overlayRowKeys(
-        selection: SelectionRegion?,
-        findHits: [TerminalSelection],
-        preedit: String,
-        preeditCursor: (row: Int, column: Int),
-        rows: Int, cols: Int
-    ) -> [Int: UInt64] {
-        var keys: [Int: UInt64] = [:]
-        func fold(_ row: Int, _ value: UInt64) {
-            guard row >= 0, row < rows else { return }
-            let h = keys[row] ?? 0xCBF2_9CE4_8422_2325 // FNV-64 offset basis
-            keys[row] = (h ^ value) &* 0x0000_0100_0000_01B3
-        }
-        // Column extents pack into one word; the tag keeps a selection span from ever colliding
-        // with an identical find span (they shade with different colors).
-        func pack(_ a: Int, _ b: Int, _ tag: UInt64) -> UInt64 {
-            (UInt64(UInt32(bitPattern: Int32(a))) << 34)
-                ^ (UInt64(UInt32(bitPattern: Int32(b))) << 3) ^ tag
-        }
-        switch selection {
-        case let .linear(s):
-            if s.endRow >= 0, s.startRow < rows {
-                for row in max(0, s.startRow) ... min(rows - 1, s.endRow) {
-                    let a = row == s.startRow ? s.startColumn : 0
-                    let b = row == s.endRow ? s.endColumn : cols - 1
-                    fold(row, pack(a, b, 1))
-                }
-            }
-        case let .block(b):
-            if b.endRow >= 0, b.startRow < rows {
-                for row in max(0, b.startRow) ... min(rows - 1, b.endRow) {
-                    fold(row, pack(b.startColumn, b.endColumn, 2))
-                }
-            }
-        case nil:
-            break
-        }
-        for hit in findHits where hit.endRow >= 0 && hit.startRow < rows {
-            for row in max(0, hit.startRow) ... min(rows - 1, hit.endRow) {
-                let a = row == hit.startRow ? hit.startColumn : 0
-                let b = row == hit.endRow ? hit.endColumn : cols - 1
-                fold(row, pack(a, b, 3))
-            }
-        }
-        if !preedit.isEmpty {
-            var h: UInt64 = 0xCBF2_9CE4_8422_2325
-            for byte in preedit.utf8 { h = (h ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
-            fold(preeditCursor.row, h ^ pack(preeditCursor.column, 0, 4))
-        }
-        return keys
-    }
-
-    nonisolated private static func applyPreedit(
-        into frame: inout TerminalFrame,
-        text: String,
-        builder: FrameBuilder,
-        canvasForeground: RGBColor,
-        canvasBackground: RGBColor
-    ) {
-        let row = frame.cursor.row
-        guard row >= 0, row < frame.rows else { return }
-        var col = frame.cursor.column
-        let fg = builder.renderColor(canvasForeground)
-        let bg = builder.renderColor(canvasBackground)
-        var lastBaseIdx: Int? = nil
-        for scalar in text.unicodeScalars {
-            // Zero-width scalar: fold a TRUE combining mark onto the preceding preedit base cell
-            // (mirrors the engine's attachCombining); drop a non-extending format scalar (ZWSP, BOM,
-            // bidi) so the cell's cluster stays one grapheme. Never advances the column.
-            if CharacterWidth.width(of: scalar) == 0 {
-                if scalar.properties.isGraphemeExtend, let bi = lastBaseIdx {
-                    if frame.cells[bi].combining0 == 0 { frame.cells[bi].combining0 = scalar.value }
-                    else if frame.cells[bi].combining1 == 0 { frame.cells[bi].combining1 = scalar.value }
-                }
-                continue
-            }
-            let width = max(1, CharacterWidth.width(of: scalar))
-            guard col >= 0, col + width <= frame.columns else { break }
-            let idx = row * frame.columns + col
-            guard idx >= 0, idx < frame.cells.count else { break }
-            frame.cells[idx].codepoint = scalar.value
-            frame.cells[idx].combining0 = 0
-            frame.cells[idx].combining1 = 0
-            frame.cells[idx].foreground = fg
-            frame.cells[idx].underline = .single
-            frame.cells[idx].width = (width == 2) ? .wide : .normal
-            // Preedit sits on the *canvas* background: reset the background to it and clear
-            // `drawBackground` (canvas cells draw no quad, so window translucency is preserved).
-            // Without this the cell kept whatever the overlay pass painted — composing over a
-            // selection or find hit rendered the preedit indistinguishable from highlighted text.
-            frame.cells[idx].background = bg
-            frame.cells[idx].drawBackground = false
-            // Mark the trailing cell of a wide composing glyph as its spacer.
-            if width == 2, idx + 1 < frame.cells.count {
-                frame.cells[idx + 1].codepoint = 0
-                frame.cells[idx + 1].width = .spacerTail
-                frame.cells[idx + 1].underline = .single
-                frame.cells[idx + 1].background = bg
-                frame.cells[idx + 1].drawBackground = false
-            }
-            lastBaseIdx = idx
-            col += width
-        }
-        frame.cursor.column = min(col, frame.columns - 1)
-    }
-
-    // MARK: - Input
-
-    public override var acceptsFirstResponder: Bool { true }
-
-    public override func becomeFirstResponder() -> Bool {
-        focused = true
-        cursorBlinkVisible = true
-        focusStateChanged()
-        return true
-    }
-
-    public override func resignFirstResponder() -> Bool {
-        focused = false
-        // A modifier released while we're unfocused never reaches `flagsChanged`, so drop the
-        // press-tracking state to keep Kitty modifier-key press/release reporting in sync on return.
-        pressedModifierKeyCodes.removeAll()
-        focusStateChanged()
-        return true
-    }
-
-    /// React to any change of the effective focus state (first responder × key window):
-    /// repaint (hollow cursor) and report DECSET 1004 focus in/out to the program exactly
-    /// once per transition. Programs that enabled it (vim, tmux, …) get `CSI I` on
-    /// focus-in and `CSI O` on focus-out.
-    private func focusStateChanged() {
-        let now = effectivelyFocused
-        if lastReportedFocus != now {
-            lastReportedFocus = now
-            if now { cursorBlinkVisible = true; onBecameFocused?() }
-            if inputModes().focusReporting {
-                emit([0x1B, 0x5B, now ? 0x49 : 0x4F]) // ESC [ I / ESC [ O
-            }
-        }
-        scheduleRender()
-    }
-
-    public override func keyDown(with event: NSEvent) {
-        // Copy mode is modal: it consumes every key (motions, search entry, copy/cancel)
-        // and nothing reaches the PTY. ⌘ shortcuts still fall through to the app.
-        if copyMode != nil, !event.modifierFlags.contains(.command) {
-            handleCopyModeKey(event)
-            return
-        }
-        // Let the app handle Command shortcuts (menus, palette, etc.).
-        if event.modifierFlags.contains(.command) {
-            // ⌘ + an editing key drives readline line-editing (⌘ is otherwise reserved for the
-            // app), matching macOS terminal convention: ⌘⌫ = delete to line start (^U), ⌘← / ⌘→ =
-            // line start / end (^A / ^E). Other ⌘ keys keep falling through to the app.
-            if let special = Self.specialKey(for: event) {
-                let lineEdit: [UInt8]?
-                switch special {
-                case .backspace: lineEdit = [0x15] // ^U
-                case .left: lineEdit = [0x01]      // ^A
-                case .right: lineEdit = [0x05]     // ^E
-                default: lineEdit = nil
-                }
-                if let bytes = lineEdit {
-                    wakeCursor()
-                    snapToBottom()
-                    clearSelection()
-                    emit(bytes)
-                    return
-                }
-            }
-            // ⌘C / ⌘X copy the active selection (a read-only terminal can't truly cut, so ⌘X
-            // behaves as copy), ⌘V pastes. These also work via the Edit menu's key equivalents
-            // (which fire copy:/cut:/paste: on the first responder before keyDown); handling them
-            // here keeps copy/paste working even without the menu.
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "c", "x":
-                // Copy/cut the selection; with no selection, let the app handle ⌘C/⌘X.
-                if currentSelectionRegion != nil { copySelection(); return }
-                super.keyDown(with: event)
-                return
-            case "v":
-                paste(nil)
-                return
-            default:
-                super.keyDown(with: event)
-                return
-            }
-        }
-        wakeCursor()
-        // While an IME composition (preedit) is active, the input method owns every key:
-        // Backspace edits the preedit, arrows/Space/Tab move or pick candidates, Return
-        // commits, Escape cancels. Route the whole event through the input context — updated
-        // or committed text comes back via setMarkedText / insertText — rather than letting
-        // the special-key path below send Backspace, Return, etc. straight to the PTY (which
-        // is why the composition couldn't be edited mid-typing).
-        if hasMarkedText() {
-            interpretKeyEvents([event])
-            return
-        }
-        // Shift+PageUp/PageDown page through scrollback instead of going to the app.
-        if event.modifierFlags.contains(.shift), let sk = Self.specialKey(for: event),
-           sk == .pageUp || sk == .pageDown {
-            scrollBy(lines: sk == .pageUp ? rows : -rows)
-            return
-        }
-        // Any other key returns to the live bottom.
-        snapToBottom()
-        clearSelection()
-
-        var mods: KeyModifiers = []
-        let flags = event.modifierFlags
-        if flags.contains(.shift) { mods.insert(.shift) }
-        if flags.contains(.option) { mods.insert(.option) }
-        if flags.contains(.control) { mods.insert(.control) }
-
-        let modes = inputModes()
-        // A held key auto-repeats; under Kitty "report event types" each repeat is tagged `:2`.
-        let eventType: KeyEventType = event.isARepeat ? .repeat : .press
-
-        if let special = Self.specialKey(for: event) {
-            emit(inputEncoder.encode(special, modifiers: mods, event: eventType, modes: modes))
-            return
-        }
-
-        // Control/Option — or Kitty "report all keys as escape codes" — take the encoder path:
-        // Meta prefix + Control collapsing in legacy mode, full CSI-u (with alternate-key and
-        // associated-text fields) under Kitty. Plain keys otherwise go through the input context so
-        // dead keys and IME composition work — committed text arrives via `insertText`.
-        let reportAllKeys = modes.kittyKeyboardFlags & 0b1000 != 0
-        if mods.contains(.control) || mods.contains(.option) || reportAllKeys {
-            let rawUnshifted = event.charactersIgnoringModifiers ?? ""
-            let unshifted = ControlKeyNormalizer.normalizedKey(
-                from: rawUnshifted,
-                controlPressed: mods.contains(.control)
-            )
-            emit(inputEncoder.encode(
-                text: unshifted,
-                shifted: event.characters,
-                modifiers: mods,
-                event: eventType,
-                associatedText: event.characters,
-                modes: modes
-            ))
-            return
-        }
-        interpretKeyEvents([event])
-    }
-
-    public override func keyUp(with event: NSEvent) {
-        // Terminals never report key release — except under the Kitty keyboard protocol's "report
-        // event types" flag (0b10), which a program must explicitly enable. No-op otherwise.
-        let modes = inputModes()
-        guard modes.kittyKeyboardFlags & 0b10 != 0,
-              copyMode == nil, !hasMarkedText(),
-              !event.modifierFlags.contains(.command) else { return }
-
-        var mods: KeyModifiers = []
-        let flags = event.modifierFlags
-        if flags.contains(.shift) { mods.insert(.shift) }
-        if flags.contains(.option) { mods.insert(.option) }
-        if flags.contains(.control) { mods.insert(.control) }
-
-        if let special = Self.specialKey(for: event) {
-            emit(inputEncoder.encode(special, modifiers: mods, event: .release, modes: modes))
-            return
-        }
-        // Plain (text-producing) keys only have a release event when they're reported as escape
-        // codes in the first place: Ctrl/Option-modified, or under "report all keys" (0b1000).
-        let modified = mods.contains(.control) || mods.contains(.option)
-        guard modified || modes.kittyKeyboardFlags & 0b1000 != 0 else { return }
-        let unshifted = event.charactersIgnoringModifiers ?? ""
-        guard !unshifted.isEmpty else { return }
-        emit(inputEncoder.encode(
-            text: unshifted, shifted: event.characters, modifiers: mods,
-            event: .release, associatedText: nil, modes: modes
-        ))
-    }
-
-    private func emit(_ bytes: [UInt8]) {
-        guard !bytes.isEmpty else { return }
-        onInput?(Data(bytes))
-    }
-
-    /// Map an NSEvent to a SpecialKey using the AppKit function-key unicode values.
-    /// `internal` (not `private`) so the NSEvent→SpecialKey seam can be unit-tested.
-    static func specialKey(for event: NSEvent) -> SpecialKey? {
-        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return nil }
-        switch Int(scalar.value) {
-        case NSUpArrowFunctionKey: return .up
-        case NSDownArrowFunctionKey: return .down
-        case NSLeftArrowFunctionKey: return .left
-        case NSRightArrowFunctionKey: return .right
-        case NSHomeFunctionKey: return .home
-        case NSEndFunctionKey: return .end
-        case NSPageUpFunctionKey: return .pageUp
-        case NSPageDownFunctionKey: return .pageDown
-        case NSInsertFunctionKey: return .insert
-        case NSDeleteFunctionKey: return .deleteForward
-        case NSF1FunctionKey: return .f1
-        case NSF2FunctionKey: return .f2
-        case NSF3FunctionKey: return .f3
-        case NSF4FunctionKey: return .f4
-        case NSF5FunctionKey: return .f5
-        case NSF6FunctionKey: return .f6
-        case NSF7FunctionKey: return .f7
-        case NSF8FunctionKey: return .f8
-        case NSF9FunctionKey: return .f9
-        case NSF10FunctionKey: return .f10
-        case NSF11FunctionKey: return .f11
-        case NSF12FunctionKey: return .f12
-        case NSF13FunctionKey: return .f13
-        case NSF14FunctionKey: return .f14
-        case NSF15FunctionKey: return .f15
-        case NSF16FunctionKey: return .f16
-        case NSF17FunctionKey: return .f17
-        case NSF18FunctionKey: return .f18
-        case NSF19FunctionKey: return .f19
-        case NSF20FunctionKey: return .f20
-        case NSMenuFunctionKey: return .menu
-        case NSPauseFunctionKey: return .pause
-        case NSPrintScreenFunctionKey: return .printScreen
-        case NSScrollLockFunctionKey: return .scrollLock
-        case 0x0D, 0x03: return .enter        // return, enter
-        case 0x7F: return .backspace          // delete (backspace) key
-        case 0x1B: return .escape
-        case 0x09, 0x19: return .tab  // 0x19 = NSBackTabCharacter (Shift-Tab); encoder emits ESC[Z
-        default: return nil
-        }
-    }
-
-    // MARK: - Copy mode
-
-    /// Enter copy mode, seeding the cursor at the live terminal cursor. The view's own
-    /// emulator holds the scrollback, so no daemon text capture is needed.
-    public func enterCopyMode() {
-        guard copyMode == nil else { return }
-        copyModeTables = KeybindingsStore.load()
-        copyModeSearchEntry = nil
-        copyMode = emulatorSync { emulator in
-            let live = emulator.readGrid()
-            let cursorLine = emulator.historyCount + live.cursor.row
-            return CopyModeReducer.initialState(grid: emulator, cursorLine: cursorLine, cursorColumn: live.cursor.col)
-        }
-        scrollOffset = 0
-        scrollFraction = 0 // copy mode is line-based; don't carry a smooth-scroll fraction in
-        wheelLineRemainder = 0 // don't carry a sub-line wheel remainder across the mode boundary
-        wheelColumnRemainder = 0
-        notifyScrollChanged(historyCount: emulatorSync { $0.historyCount })
-        scheduleRender()
-    }
-
-    /// Exit copy mode and return to the live bottom.
-    public func exitCopyMode() {
-        guard copyMode != nil else { return }
-        copyMode = nil
-        copyModeSearchEntry = nil
-        scrollOffset = 0
-        scrollFraction = 0
-        wheelLineRemainder = 0
-        wheelColumnRemainder = 0
-        notifyScrollChanged(historyCount: emulatorSync { $0.historyCount })
-        scheduleRender()
-    }
-
-    /// Run a copy-mode action from outside the view (the `:` prompt, `send-keys -X`,
-    /// `copy-mode -X`). No-op when not in copy mode.
-    public func performCopyModeAction(_ action: CopyModeAction) {
-        guard copyMode != nil else { return }
-        handleCopyModeAction(action)
-    }
-
-    private func handleCopyModeKey(_ event: NSEvent) {
-        // Interactive search-query entry captures raw keys until Enter / Escape.
-        if copyModeSearchEntry != nil {
-            handleSearchEntryKey(event)
-            return
-        }
-        guard let spec = Self.copyModeKeySpec(from: event),
-              let table = copyModeTables?.table(KeyTableID.copyMode(modeKeys: copyModeKeys)),
-              case let .copyModeCommand(action) = table.lookup(spec)?.command
-        else { return } // unbound keys are swallowed (copy mode is modal)
-        handleCopyModeAction(action)
-    }
-
-    private func handleCopyModeAction(_ action: CopyModeAction) {
-        guard let state = copyMode else { return }
-        let (next, effect) = emulatorSync { CopyModeReducer.reduce(state, action, grid: $0) }
-        copyMode = next
-        switch effect {
-        case .none:
-            scheduleRender()
-        case let .copy(text):
-            writeCopyModeSelection(text)
-            scheduleRender()
-        case let .copyAndCancel(text):
-            writeCopyModeSelection(text)
-            exitCopyMode()
-        case let .pipe(text, command):
-            copyModePipe(text: text, command: command)
-            exitCopyMode()
-        case .paste:
-            exitCopyMode()
-            paste(nil) // paste the most-recent buffer (mirrored to the system pasteboard on yank)
-        case .cancel:
-            exitCopyMode()
-        case .beginSearchEntry:
-            copyModeSearchEntry = ""
-            scheduleRender()
-        }
-    }
-
-    private func handleSearchEntryKey(_ event: NSEvent) {
-        let chars = event.charactersIgnoringModifiers ?? ""
-        let scalar = chars.unicodeScalars.first?.value ?? 0
-        switch scalar {
-        case 0x1B: // Escape — abandon the search
-            copyModeSearchEntry = nil
-            scheduleRender()
-        case 0x0D, 0x03: // Enter — commit
-            let query = copyModeSearchEntry ?? ""
-            copyModeSearchEntry = nil
-            if let state = copyMode, !query.isEmpty {
-                copyMode = emulatorSync {
-                    CopyModeReducer.applySearch(state, query: query, reverse: state.search.reverse, grid: $0)
-                }
-            }
-            scheduleRender()
-        case 0x7F, 0x08: // Backspace
-            if var q = copyModeSearchEntry, !q.isEmpty { q.removeLast(); copyModeSearchEntry = q }
-            scheduleRender()
-        default:
-            if scalar >= 0x20, !chars.isEmpty { copyModeSearchEntry = (copyModeSearchEntry ?? "") + chars }
-            scheduleRender()
-        }
-    }
-
-    private func writeCopyModeSelection(_ text: String) {
-        guard !text.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        onCopy?(text) // mirror into the daemon paste buffer
-    }
-
-    /// `copy-pipe`: feed the selected text to a shell command's stdin (detached), like tmux.
-    private func copyModePipe(text: String, command: String) {
-        guard !text.isEmpty, !command.isEmpty else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        let pipe = Pipe()
-        process.standardInput = pipe
-        // Don't let the child inherit the GUI app's stdout/stderr (it would leak app fds and
-        // could block on a full inherited pipe); discard its output like tmux's copy-pipe.
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        // Reap the child so it can't linger as a zombie across many copy-pipe invocations.
-        process.terminationHandler = { _ in }
-        guard (try? process.run()) != nil else { return }
-        // Write off the main thread so a large selection into a slow/non-draining command can't
-        // block the UI; a closed pipe (child already exited) throws and is ignored.
-        let data = Data(text.utf8)
-        let writer = pipe.fileHandleForWriting
-        DispatchQueue.global(qos: .utility).async {
-            try? writer.write(contentsOf: data)
-            try? writer.close()
-        }
-    }
-
-    /// Convert an `NSEvent` to a `KeySpec` for copy-mode table lookup (mirrors the prefix
-    /// keymap's mapping; kept local so the live-input path is untouched).
-    private static func copyModeKeySpec(from event: NSEvent) -> KeySpec? {
-        guard let chars = event.charactersIgnoringModifiers else { return nil }
-        let key: String
-        if chars.count == 1, let scalar = chars.unicodeScalars.first {
-            switch scalar.value {
-            case 0x1B: key = "Escape"
-            case 0x09, 0x19: key = "Tab"  // 0x19 = NSBackTabCharacter (Shift-Tab)
-            case 0x0D, 0x03: key = "Enter"
-            case 0x7F: key = "Backspace"
-            case 0x20: key = "Space"
-            case 0xF700: key = "Up"
-            case 0xF701: key = "Down"
-            case 0xF702: key = "Left"
-            case 0xF703: key = "Right"
-            case 0xF729: key = "Home"
-            case 0xF72B: key = "End"
-            case 0xF72C: key = "PageUp"
-            case 0xF72D: key = "PageDown"
-            default: key = chars
-            }
-        } else {
-            key = chars
-        }
-        var modifiers: KeySpec.Modifiers = []
-        let mask = event.modifierFlags
-        if mask.contains(.control) { modifiers.insert(.control) }
-        if mask.contains(.option) { modifiers.insert(.option) }
-        if mask.contains(.command) { modifiers.insert(.command) }
-        if mask.contains(.shift), key.count > 1 { modifiers.insert(.shift) }
-        return KeySpec(key: key, modifiers: modifiers)
-    }
-
-    /// Render copy mode: the grid at the model's scroll offset, with selection / search
-    /// highlights and the copy-mode cursor, plus a status row. Returns false when not in
-    /// copy mode so `renderNow` falls through to the normal path.
-    private func renderCopyMode(renderer: TerminalMetalRenderer, drawable: CAMetalDrawable) -> Bool {
-        guard let cm = copyMode else { return false }
-        let emulator = emulatorState.emulator
-        let offset = cm.scrollbackOffset(historyCount: emulator.historyCount)
-        let grid = emulator.readGrid(scrollbackOffset: offset)
-        let region: SelectionRegion? = cm.viewportSelection(rows: rows, columns: columns).map { vs in
-            switch vs.kind {
-            case .linear:
-                return .linear(TerminalSelection((vs.startRow, vs.startColumn), (vs.endRow, vs.endColumn)))
-            case .block:
-                return .block(BlockSelection((vs.startRow, vs.startColumn), (vs.endRow, vs.endColumn)))
-            }
-        }
-        let hits = cm.viewportSearchHits(rows: rows).map { m in
-            TerminalSelection((m.line, m.startColumn), (m.line, max(m.startColumn, m.endColumn - 1)))
-        }
-        let frameBuildStart = DispatchTime.now().uptimeNanoseconds
-        var frame = frameBuilder.build(grid, region: region, searchHighlights: hits,
-                                       copyModeCursor: cm.viewportCursor(rows: rows),
-                                       imageProvider: { emulator.image(for: $0) })
-        let frameBuildNanos = DispatchTime.now().uptimeNanoseconds &- frameBuildStart
-        let statusText = copyModeSearchEntry.map { (cm.search.reverse ? "?" : "/") + $0 } ?? cm.statusLine()
-        overlayCopyModeStatus(into: &frame, text: statusText)
-        let didPresent = renderer.present(
-            frame, to: drawable,
-            clearColor: frameBuilder.renderColor(canvasBackground, alpha: canvasOpacity),
-            origin: (originOffsetX, originOffsetY), gamma: glyphGamma, ligatures: ligaturesEnabled,
-            frameBuildNanos: frameBuildNanos,
-            synchronizedWithTransaction: metalLayer.presentsWithTransaction
-        )
-        if didPresent { onRenderStats?(renderer.stats) }
-        return true
-    }
-
-    /// Draw the copy-mode status into the bottom frame row (mode, position, match count, or
-    /// the live search query) on an inverted band.
-    private func overlayCopyModeStatus(into frame: inout TerminalFrame, text: String) {
-        Self.applyCopyModeStatus(
-            into: &frame,
-            text: text,
-            builder: frameBuilder,
-            selectionBackground: selectionBackground,
-            canvasForeground: canvasForeground,
-            canvasBackground: canvasBackground
-        )
-    }
-
-    nonisolated private static func applyCopyModeStatus(
-        into frame: inout TerminalFrame,
-        text: String,
-        builder: FrameBuilder,
-        selectionBackground: RGBColor?,
-        canvasForeground: RGBColor,
-        canvasBackground: RGBColor
-    ) {
-        let row = frame.rows - 1
-        guard row >= 0, frame.columns > 0 else { return }
-        let bandBg = builder.renderColor(selectionBackground ?? canvasForeground)
-        let bandFg = builder.renderColor(canvasBackground)
-        for col in 0 ..< frame.columns {
-            let idx = row * frame.columns + col
-            frame.cells[idx].codepoint = 0x20
-            frame.cells[idx].foreground = bandFg
-            frame.cells[idx].background = bandBg
-            // The band is an opaque highlight, not the canvas color, so force its fill even
-            // though the underlying cell may have been built as a skippable canvas cell.
-            frame.cells[idx].drawBackground = true
-            frame.cells[idx].underlineColor = bandFg
-            frame.cells[idx].bold = false
-            frame.cells[idx].italic = false
-            frame.cells[idx].underline = .none
-            frame.cells[idx].strikethrough = false
-            frame.cells[idx].overline = false
-            frame.cells[idx].width = .normal
-            frame.cells[idx].combining0 = 0
-            frame.cells[idx].combining1 = 0
-        }
-        // Write the status text one base scalar per column, folding combining marks onto their base
-        // so a Thai search query renders correctly instead of exploding across the band.
-        var col = 0
-        var lastBaseIdx: Int? = nil
-        for scalar in text.unicodeScalars {
-            if CharacterWidth.width(of: scalar) == 0 {
-                // Fold a true combining mark onto the base; drop non-extending format scalars.
-                if scalar.properties.isGraphemeExtend, let bi = lastBaseIdx {
-                    if frame.cells[bi].combining0 == 0 { frame.cells[bi].combining0 = scalar.value }
-                    else if frame.cells[bi].combining1 == 0 { frame.cells[bi].combining1 = scalar.value }
-                }
-                continue
-            }
-            guard col < frame.columns else { break }
-            let idx = row * frame.columns + col
-            frame.cells[idx].codepoint = scalar.value
-            lastBaseIdx = idx
-            col += 1
-        }
-    }
-}
-
-// MARK: - NSTextInputClient (dead keys + IME)
-
-extension HarnessTerminalSurfaceView: @preconcurrency NSTextInputClient {
-    private func plainString(_ obj: Any) -> String {
-        if let s = obj as? String { return s }
-        if let a = obj as? NSAttributedString { return a.string }
-        return ""
-    }
-
-    /// Committed text (plain typing, dead-key result, or finished IME composition).
-    public func insertText(_ string: Any, replacementRange: NSRange) {
-        markedText = ""
-        let text = plainString(string)
-        guard !text.isEmpty else { scheduleRender(); return }
-        emit(inputEncoder.encode(text: text))
-        scheduleRender()
-    }
-
-    /// In-progress composition shown as preedit over the grid.
-    public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        markedText = plainString(string)
-        scheduleRender()
-    }
-
-    public func unmarkText() {
-        markedText = ""
-        scheduleRender()
-    }
-
-    public func hasMarkedText() -> Bool { !markedText.isEmpty }
-
-    public func markedRange() -> NSRange {
-        markedText.isEmpty ? NSRange(location: NSNotFound, length: 0)
-            : NSRange(location: 0, length: markedText.utf16.count)
-    }
-
-    public func selectedRange() -> NSRange { NSRange(location: 0, length: 0) }
-
-    public func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
-        nil
-    }
-
-    public func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
-
-    /// Where the IME candidate window should anchor: the cursor cell, in screen space.
-    public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        guard let renderer, let window else { return .zero }
-        let scale = window.backingScaleFactor
-        let cellW = CGFloat(renderer.cellPixelWidth) / scale
-        let cellH = CGFloat(renderer.cellPixelHeight) / scale
-        let snapshot = emulatorSync { $0.readGrid() }
-        let x = gridOriginPointsX + CGFloat(snapshot.cursor.col) * cellW
-        // Convert grid-from-top to AppKit bottom-left origin.
-        let yTop = gridOriginPointsY + CGFloat(snapshot.cursor.row) * cellH
-        let viewRect = NSRect(x: x, y: bounds.height - yTop - cellH, width: cellW, height: cellH)
-        let windowRect = convert(viewRect, to: nil)
-        return window.convertToScreen(windowRect)
-    }
-
-    public func characterIndex(for point: NSPoint) -> Int { 0 }
-
-    /// Keys the input system classifies as commands (e.g. Return) are already handled in
-    /// `keyDown` before reaching the IME, so swallow these silently (no system beep).
-    public override func doCommand(by selector: Selector) {}
 }

@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 public struct FileNode: Identifiable, Sendable {
     public let id: String

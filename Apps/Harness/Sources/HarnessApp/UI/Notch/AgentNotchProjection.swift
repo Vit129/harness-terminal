@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 public struct AgentNotchRowSummary: Sendable, Equatable, Identifiable {
     public enum RowKind: String, Sendable, Equatable {

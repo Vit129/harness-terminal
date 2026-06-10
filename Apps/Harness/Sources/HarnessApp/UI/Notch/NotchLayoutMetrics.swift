@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 public struct NotchScreenMetrics: Sendable, Equatable {
     public var minX: Double

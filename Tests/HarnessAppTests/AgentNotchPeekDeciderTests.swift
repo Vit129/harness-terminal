@@ -1,5 +1,6 @@
 import XCTest
-@testable import HarnessCore
+import HarnessCore
+@testable import HarnessApp
 
 final class AgentNotchPeekDeciderTests: XCTestCase {
     func testInitialSeedProducesNoEvents() {

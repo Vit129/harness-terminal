@@ -149,7 +149,7 @@ let platformTestTargets: [Target] = []
 
 let package = Package(
     name: "Harness",
-    platforms: [.macOS(.v15), .iOS(.v17)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "HarnessCore", targets: ["HarnessCore"]),
         // Self-contained native terminal engine (VT parser + screen/grid model). Pure

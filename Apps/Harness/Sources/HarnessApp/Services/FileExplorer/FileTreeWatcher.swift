@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 import CoreServices
 
 public actor FileTreeWatcher {

@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 /// One transient notch peek: the row that changed and why it deserves a glance.
 public struct AgentNotchPeekEvent: Equatable, Sendable {

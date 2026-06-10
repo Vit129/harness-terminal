@@ -1,4 +1,5 @@
 import Foundation
+import HarnessCore
 
 /// Runs `git status --porcelain -z` for a given directory and returns a flat
 /// map of relative path → `GitStatusType`. Results are empty (not an error)
