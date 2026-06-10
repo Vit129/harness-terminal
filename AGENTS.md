@@ -25,6 +25,26 @@ make clean        # remove build artifacts, Harness.app, dist/
 
 **Always run `swift build` after edits and fix all errors before finishing.**
 
+## Project context lookup
+
+- `graphify-out/graph.json` — machine-readable project knowledge graph. Use Graphify queries before broad source browsing.
+- `graphify-out/GRAPH_REPORT.md` — human-readable navigation guide for broad architecture review or when a query is not enough.
+- `graphify-out/.graphify_labels.json` — readable community labels for the graph.
+- `agent-memory/memory.md` — hot state: active decisions, recent lessons, and current task context.
+- `agent-memory/playbook.md` — reusable fix patterns and prevention notes.
+- `agent-memory/user-profile.md` — stable user preferences for style, testing, and workflow.
+- `agent-memory/knowledge/` — durable domain notes for architecture areas such as IPC, AppKit/Metal, ACP, split panes, and git panel behavior.
+
+## Graphify + agent-memory
+
+For codebase questions, first run `graphify query "<question>"` when `graphify-out/graph.json` exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused context. These commands return scoped graph context and should usually come before broad grep or reading many files.
+
+After the Graphify query, read `agent-memory/memory.md` for hot project state. If the task matches a known failure pattern, read `agent-memory/playbook.md`. If Graphify points to `agent-memory/knowledge/*.md`, read the matching knowledge file before editing related code, rules, or architecture-relevant docs.
+
+Dirty `graphify-out/` files are expected after hooks or incremental updates; dirty graph files are not a reason to skip Graphify. Only skip Graphify if the task is specifically about stale or incorrect graph output, or the user explicitly says not to use it.
+
+Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when `query`/`path`/`explain` do not surface enough context. After modifying code, architecture-relevant docs, rules, or `agent-memory/knowledge/`, run `graphify update . --force` to keep the graph current.
+
 ## Architecture
 
 ### Package map
