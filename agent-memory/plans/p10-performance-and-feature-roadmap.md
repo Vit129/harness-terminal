@@ -5,6 +5,22 @@ Analysis of the current `harness-terminal` architecture shows a highly performan
 
 Priority: P3 (Strategic planning / future-proofing)
 
+## Implementation Status (2026-06-11)
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | Scrollback Reflow | 🔲 Planned | Deferred — high effort, low frequency impact |
+| 2 | Local Completion | ✅ Done | `WorkspaceSymbolIndex` (110 LOC) + `CompletionPopupView` (192 LOC) |
+| 3 | Keyboard Layout Presets | ✅ Done | ⌘+⇧+D toggles IDE mode (sidebar + editor + terminal) |
+| 4 | ACP Sidebar | 🔲 Deferred | Ecosystem not ready |
+
+### Additional features shipped alongside:
+- **Session State Dot** — colored indicator on sidebar cards (blue=running, gray=idle, green=exit 0, red=error)
+- **IDE Mode Persistence** — editor split state (visible, open tabs, active tab) persists across launches via UserDefaults
+- **Diff Syntax Highlighting** — `.diff`/`.patch` files get +/- coloring + gutter markers
+- **Git Changes Click-to-Preview** — clicking changed files opens diff in editor panel
+- **Git History Right-Click Menu** — Copy Commit ID, Copy Message, Show Diff
+
 ---
 
 ## 1. Performance Optimization: Scrollback Reflow ($O(\text{history})$ Complexity)

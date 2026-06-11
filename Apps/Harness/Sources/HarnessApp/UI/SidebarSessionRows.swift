@@ -171,6 +171,7 @@ final class SessionCardRowView: NSView {
     private let metaLabel = NSTextField(labelWithString: "")
     private let agentChip = AgentChipView()
     private let closeButton = NSButton()
+    private let stateIndicator = NSView()
     private var isSelected = false
     private var isHovered = false
     private var trackingArea: NSTrackingArea?
@@ -213,11 +214,17 @@ final class SessionCardRowView: NSView {
         closeButton.toolTip = "Close session"
         closeButton.alphaValue = 0
 
+        stateIndicator.wantsLayer = true
+        stateIndicator.layer?.cornerRadius = 3
+        stateIndicator.layer?.cornerCurve = .continuous
+        stateIndicator.translatesAutoresizingMaskIntoConstraints = false
+
         addSubview(fill)
         fill.addSubview(titleLabel)
         fill.addSubview(metaLabel)
         fill.addSubview(agentChip)
         fill.addSubview(closeButton)
+        fill.addSubview(stateIndicator)
 
         NSLayoutConstraint.activate([
             fill.topAnchor.constraint(equalTo: topAnchor, constant: 2),
@@ -229,6 +236,7 @@ final class SessionCardRowView: NSView {
             titleLabel.topAnchor.constraint(equalTo: fill.topAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: agentChip.leadingAnchor, constant: -6),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: stateIndicator.leadingAnchor, constant: -6),
 
             agentChip.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
             agentChip.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
@@ -240,9 +248,15 @@ final class SessionCardRowView: NSView {
             closeButton.widthAnchor.constraint(equalToConstant: 22),
             closeButton.heightAnchor.constraint(equalToConstant: 22),
 
+            stateIndicator.centerYAnchor.constraint(equalTo: fill.centerYAnchor),
+            stateIndicator.trailingAnchor.constraint(equalTo: fill.trailingAnchor, constant: -12),
+            stateIndicator.widthAnchor.constraint(equalToConstant: 6),
+            stateIndicator.heightAnchor.constraint(equalToConstant: 6),
+
             metaLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             metaLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            metaLabel.trailingAnchor.constraint(equalTo: fill.trailingAnchor, constant: -10),
+            metaLabel.trailingAnchor.constraint(lessThanOrEqualTo: fill.trailingAnchor, constant: -20),
+            metaLabel.trailingAnchor.constraint(lessThanOrEqualTo: stateIndicator.leadingAnchor, constant: -6),
             metaLabel.bottomAnchor.constraint(lessThanOrEqualTo: fill.bottomAnchor, constant: -6),
         ])
     }
@@ -302,6 +316,27 @@ final class SessionCardRowView: NSView {
             agentChip.isHidden = true
         }
 
+        let indicatorColor: NSColor
+        if let exitStatus = tab.exitStatus {
+            if exitStatus == 0 {
+                indicatorColor = NSColor.systemGreen
+            } else {
+                indicatorColor = NSColor.systemRed
+            }
+        } else if let cmd = tab.currentCommand, !cmd.isEmpty {
+            let shellNames = ["zsh", "bash", "sh", "fish", "csh", "tcsh", "login"]
+            let lowerCmd = cmd.lowercased()
+            let isShell = shellNames.contains(lowerCmd)
+            if !isShell {
+                indicatorColor = NSColor.systemBlue
+            } else {
+                indicatorColor = NSColor.systemGray.withAlphaComponent(0.4)
+            }
+        } else {
+            indicatorColor = NSColor.systemGray.withAlphaComponent(0.4)
+        }
+        stateIndicator.layer?.backgroundColor = indicatorColor.cgColor
+
         setSelected(isSelected)
     }
 
@@ -318,6 +353,7 @@ final class SessionCardRowView: NSView {
         let c = HarnessDesign.chrome
         metaLabel.textColor = c.textTertiary
         closeButton.alphaValue = isHovered ? 1 : 0
+        stateIndicator.alphaValue = isHovered ? 0 : 1
         let closeColor = c.textSecondary
         closeButton.attributedTitle = NSAttributedString(
             string: "×",

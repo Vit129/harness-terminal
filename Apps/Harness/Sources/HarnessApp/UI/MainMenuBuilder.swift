@@ -147,6 +147,10 @@ enum MainMenuBuilder {
         sidebarItem.keyEquivalentModifierMask = [.command]
         sidebarItem.target = MenuTarget.shared
         view.submenu?.addItem(sidebarItem)
+        let ideModeItem = NSMenuItem(title: "Toggle IDE Mode", action: #selector(MenuTarget.toggleIDEMode), keyEquivalent: "d")
+        ideModeItem.keyEquivalentModifierMask = [.command, .shift]
+        ideModeItem.target = MenuTarget.shared
+        view.submenu?.addItem(ideModeItem)
         let sidebarPosItem = NSMenuItem(title: "Move Sidebar to Right", action: #selector(MenuTarget.toggleSidebarPosition), keyEquivalent: "")
         sidebarPosItem.target = MenuTarget.shared
         view.submenu?.addItem(sidebarPosItem)
@@ -409,6 +413,12 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
     @objc func toggleSidebar() {
         if let split = NSApp.keyWindow?.contentViewController as? MainSplitViewController {
             split.toggleSidebar()
+        }
+    }
+
+    @objc func toggleIDEMode() {
+        if let split = NSApp.keyWindow?.contentViewController as? MainSplitViewController {
+            split.toggleIDEMode()
         }
     }
 

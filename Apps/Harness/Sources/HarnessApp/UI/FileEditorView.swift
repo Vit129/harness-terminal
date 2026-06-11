@@ -18,6 +18,7 @@ final class FileEditorView: NSView {
     private static let maxPreviewBytes = 5_000_000
     private(set) var filePath: String = ""
     private let fileWatcher = FileChangeWatcher()
+    private let symbolIndex = WorkspaceSymbolIndex()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -235,6 +236,11 @@ final class FileEditorView: NSView {
         } else {
             loadGitDiff()
         }
+        
+        let fileDir = (filePath as NSString).deletingLastPathComponent
+        let root = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd ?? fileDir
+        symbolIndex.scan(root: root)
+        syntaxView.symbolIndex = symbolIndex
         // lspSession.open(url: URL(fileURLWithPath: filePath), text: text, fileExtension: ext)
     }
 

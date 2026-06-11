@@ -126,6 +126,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         )
         installCopySelectionToast()
         reloadTabBar()
+        restoreEditorState()
     }
 
     private func installCopySelectionToast() {
@@ -392,6 +393,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         fileTabManager.open(path: path)
         showFileEditorSplit()
         loadActiveFileTab()
+        persistEditorState()
     }
 
     func closeFileTab(id: FileTabID) {
@@ -401,11 +403,13 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         } else {
             hideFileEditorSplit()
         }
+        persistEditorState()
     }
 
     func selectFileTab(id: FileTabID) {
         fileTabManager.activate(id: id)
         loadActiveFileTab()
+        persistEditorState()
     }
 
     private func loadActiveFileTab() {
@@ -415,12 +419,15 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     }
 
     private var fileEditorPanel: NSView?
+    var isFileEditorVisible: Bool {
+        fileEditorPanel != nil
+    }
     private var fileEditorTabBar: FileEditorTabBarView?
     private var terminalHostLeading: NSLayoutConstraint?
     private var editorWidthConstraint: NSLayoutConstraint?
     private var editorDivider: NSView?
 
-    private func showFileEditorSplit() {
+    func showFileEditorSplit() {
         if fileEditorPanel != nil {
             loadActiveFileTab()
             return
@@ -495,9 +502,10 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
 
         fileEditorPanel = panel
         refreshEditorPanelFill()
+        persistEditorState()
     }
 
-    private func hideFileEditorSplit() {
+    func hideFileEditorSplit() {
         guard let panel = fileEditorPanel else { return }
         panel.removeFromSuperview()
         editorDivider?.removeFromSuperview()
@@ -514,6 +522,39 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         let restored = terminalHost.leadingAnchor.constraint(equalTo: view.leadingAnchor)
         restored.isActive = true
         terminalHostLeading = restored
+        persistEditorState()
+    }
+
+    private func persistEditorState() {
+        let visible = isFileEditorVisible
+        let paths = fileTabManager.openTabs.map { $0.path }
+        let activePath = fileTabManager.activeTab()?.path
+        
+        UserDefaults.standard.set(visible, forKey: "harness.fileEditorVisible")
+        UserDefaults.standard.set(paths, forKey: "harness.fileEditorPaths")
+        if let activePath {
+            UserDefaults.standard.set(activePath, forKey: "harness.fileEditorActivePath")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "harness.fileEditorActivePath")
+        }
+    }
+
+    private func restoreEditorState() {
+        let visible = UserDefaults.standard.bool(forKey: "harness.fileEditorVisible")
+        let paths = UserDefaults.standard.stringArray(forKey: "harness.fileEditorPaths") ?? []
+        let activePath = UserDefaults.standard.string(forKey: "harness.fileEditorActivePath")
+        
+        for path in paths {
+            fileTabManager.open(path: path)
+        }
+        if let activePath {
+            fileTabManager.open(path: activePath)
+        }
+        
+        if visible && fileTabManager.hasOpenTabs {
+            showFileEditorSplit()
+            loadActiveFileTab()
+        }
     }
 
     func activateTerminalTab() {

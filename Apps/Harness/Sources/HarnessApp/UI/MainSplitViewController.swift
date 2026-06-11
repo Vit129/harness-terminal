@@ -328,6 +328,15 @@ final class MainSplitViewController: NSViewController {
         setSidebarVisible(!SessionCoordinator.shared.settings.sidebarVisible, animated: true)
     }
 
+    func toggleIDEMode() {
+        if content.isFileEditorVisible {
+            content.hideFileEditorSplit()
+        } else {
+            setSidebarVisible(true, animated: true)
+            content.showFileEditorSplit()
+        }
+    }
+
     private var edgeDividerConstraint: NSLayoutConstraint?
 
     private func updateEdgeDividerConstraints(sidebarContainer: NSView) {

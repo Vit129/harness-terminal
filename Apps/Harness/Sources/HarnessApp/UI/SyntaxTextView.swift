@@ -11,12 +11,18 @@ struct SyntaxDefinitionTarget {
 final class SyntaxTextView: NSView {
     enum DiffLineType { case added, modified, deleted }
 
+    override var isFlipped: Bool { true }
+
     private let scrollView = NSScrollView()
-    private let textView = NSTextView()
+    private let textView = SyntaxTextViewInner()
     private let gutterView = SyntaxLineNumberGutterView()
     private var fileExtension = ""
     private var diagnostics: [LSPDiagnostic] = []
     private var hoverPopover: NSPopover?
+    private var completionPopup: CompletionPopupView?
+    private var currentPrefix: String = ""
+
+    var symbolIndex: WorkspaceSymbolIndex?
 
     var onHover: ((LSPPosition) async -> String?)?
     var onDefinition: ((LSPPosition) async -> SyntaxDefinitionTarget?)?
@@ -101,6 +107,80 @@ final class SyntaxTextView: NSView {
         isEditMode = false
         textView.isEditable = false
         onEditModeChange?(false)
+        dismissCompletionPopup()
+    }
+
+    func handleTextViewKeyDown(_ event: NSEvent) -> Bool {
+        guard let popup = completionPopup else { return false }
+        switch event.keyCode {
+        case 53: // Esc
+            dismissCompletionPopup()
+            return true
+        case 48: // Tab
+            popup.confirmSelection()
+            return true
+        case 36, 76: // Return / Enter
+            popup.confirmSelection()
+            return true
+        case 126: // Up Arrow
+            return popup.moveSelection(down: false)
+        case 125: // Down Arrow
+            return popup.moveSelection(down: true)
+        default:
+            return false
+        }
+    }
+
+    private func showCompletionPopup(candidates: [String], prefix: String) {
+        currentPrefix = prefix
+        if completionPopup == nil {
+            let popup = CompletionPopupView(frame: .zero)
+            popup.onConfirm = { [weak self] completion in
+                self?.insertCompletion(completion, prefix: prefix)
+                self?.dismissCompletionPopup()
+            }
+            popup.onDismiss = { [weak self] in
+                self?.dismissCompletionPopup()
+            }
+            addSubview(popup)
+            completionPopup = popup
+        }
+        guard let popup = completionPopup else { return }
+        popup.update(candidates: candidates)
+
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.location != NSNotFound else { return }
+        let charRange = NSRange(location: selectedRange.location, length: 0)
+        let screenRect = textView.firstRect(forCharacterRange: charRange, actualRange: nil)
+        if screenRect.origin.x != CGFloat.infinity {
+            let windowRect = textView.window?.convertFromScreen(screenRect) ?? screenRect
+            let localPoint = convert(windowRect.origin, from: nil)
+            let width: CGFloat = 200
+            let height: CGFloat = min(200, CGFloat(candidates.count) * 24 + 10)
+            let x = localPoint.x
+            let y = localPoint.y + screenRect.height + 4
+            popup.frame = CGRect(x: x, y: y, width: width, height: height)
+        }
+    }
+
+    func dismissCompletionPopup() {
+        completionPopup?.removeFromSuperview()
+        completionPopup = nil
+        currentPrefix = ""
+    }
+
+    private func insertCompletion(_ completion: String, prefix: String) {
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.location != NSNotFound else { return }
+        let start = selectedRange.location - prefix.count
+        let rangeToReplace = NSRange(location: start, length: prefix.count)
+        if textView.shouldChangeText(in: rangeToReplace, replacementString: completion) {
+            let ext = fileExtension
+            let highlighted = SyntaxHighlighter.highlight(completion, fileExtension: ext)
+            textView.textStorage?.replaceCharacters(in: rangeToReplace, with: highlighted)
+            textView.didChangeText()
+            textView.setSelectedRange(NSRange(location: start + completion.count, length: 0))
+        }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -149,6 +229,8 @@ final class SyntaxTextView: NSView {
         scrollView.autohidesScrollers = true
         addSubview(scrollView)
 
+        textView.parentView = self
+        textView.delegate = self
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
@@ -361,7 +443,6 @@ private final class SyntaxLineNumberGutterView: NSView {
 enum SyntaxHighlighter {
     static func highlight(_ text: String, fileExtension ext: String) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let c = HarnessDesign.chrome
         let attributed = NSMutableAttributedString(string: text, attributes: [
             .font: font,
             .foregroundColor: NSColor(white: 0.9, alpha: 1),
@@ -495,6 +576,67 @@ enum SyntaxHighlighter {
             return #"/\*[\s\S]*?\*/"#
         default:
             return nil
+        }
+    }
+}
+
+@MainActor
+final class SyntaxTextViewInner: NSTextView {
+    weak var parentView: SyntaxTextView?
+    
+    override func keyDown(with event: NSEvent) {
+        if let parent = parentView, parent.handleTextViewKeyDown(event) {
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        parentView?.dismissCompletionPopup()
+        super.mouseDown(with: event)
+    }
+}
+
+extension SyntaxTextView: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        guard isEditMode, let index = symbolIndex else {
+            dismissCompletionPopup()
+            return
+        }
+        index.updateCurrentFileSymbols(text: textView.string)
+        
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.location != NSNotFound, selectedRange.length == 0 else {
+            dismissCompletionPopup()
+            return
+        }
+        
+        let text = textView.string
+        let nsText = text as NSString
+        let cursor = selectedRange.location
+        
+        var start = cursor
+        while start > 0 {
+            let char = nsText.substring(with: NSRange(location: start - 1, length: 1))
+            let isIdentifierChar = char.rangeOfCharacter(from: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")) != nil
+            if !isIdentifierChar {
+                break
+            }
+            start -= 1
+        }
+        
+        let prefixRange = NSRange(location: start, length: cursor - start)
+        let prefix = nsText.substring(with: prefixRange)
+        
+        if prefix.count >= 2 {
+            let candidates = index.completions(prefix: prefix)
+            if !candidates.isEmpty {
+                showCompletionPopup(candidates: candidates, prefix: prefix)
+            } else {
+                dismissCompletionPopup()
+            }
+        } else {
+            dismissCompletionPopup()
         }
     }
 }

@@ -6,6 +6,37 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [2.3.0] - 2026-06-11
+
+### Added
+- **Local workspace completion.** The file editor now offers autocomplete suggestions
+  from workspace symbols (functions, classes, variables) — powered by a lightweight
+  off-main tokenizer. Type 2+ characters to see matches; Tab/Enter to accept.
+- **IDE Mode shortcut (⌘+⇧+D).** Toggles between full terminal and IDE layout
+  (sidebar + editor panel + terminal) with a single keystroke.
+- **Session state indicator.** Sidebar session cards now show a colored dot:
+  blue = command running, gray = idle, green = exited OK, red = exited with error.
+- **IDE mode persistence.** Editor split visibility, open tabs, and active tab
+  are remembered across app launches via UserDefaults.
+- **Diff/patch syntax highlighting.** `.diff` and `.patch` files get colored
+  `+`/`-` lines (green/red), `@@` hunk headers (cyan), and bold file headers.
+  Gutter markers also show add/delete/modify bars per line.
+- **Git Changes click-to-preview.** Clicking a changed file in the Git Changes tab
+  opens its diff in the editor panel.
+- **Git History right-click menu.** Right-click a commit card for: Copy Commit ID,
+  Copy Commit Message, Copy Summary (hash + subject), or Show Diff.
+
+### Changed
+- **P9 complexity reduction.** Extracted `LiveResizeGeometry`, `PasteController`,
+  `SelectionResolver` from `HarnessTerminalSurfaceView`; extracted `FormatContextBuilder`
+  and `HookExecutor` from `SurfaceRegistry`; extracted 8 CLI handler groups from
+  `HarnessCLI.swift`; extracted `WindowInputRouter` with unit tests.
+
+### Fixed
+- **Terminal flicker on file preview open/close (CASE-025).** Set
+  `presentsWithTransaction = true` during programmatic layout changes to sync
+  Metal rendering with the main CATransaction.
+
 ## [2.2.4] - 2026-06-11
 
 ### Added

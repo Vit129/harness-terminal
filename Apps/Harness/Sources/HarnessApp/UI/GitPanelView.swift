@@ -375,7 +375,13 @@ final class GitPanelView: NSView {
     @objc private func doPush() { runAndRefresh(["push"]) }
     @objc private func doForcePush() { runAndRefresh(["push", "--force-with-lease"]) }
 
-    @objc private func stageAllAction() { runAndRefresh(["add", "-A"]) }
+    @objc private func stageAllAction() {
+        if stageAllButton.title == "Unstage All" {
+            runAndRefresh(["reset"])
+        } else {
+            runAndRefresh(["add", "-A"])
+        }
+    }
 
     @objc private func showBranchMenu() {
         guard let path = currentPath else { return }
@@ -684,6 +690,31 @@ final class GitPanelView: NSView {
         let changeCount = porcelain.components(separatedBy: "\n").filter { !$0.isEmpty }.count
         tabSelector.setLabel("Changes (\(changeCount))", forSegment: 0)
 
+        var hasUnstaged = false
+        var hasStaged = false
+        for line in porcelain.components(separatedBy: "\n") where !line.isEmpty {
+            let xy = line.prefix(2)
+            let indexStatus = String(xy.first ?? Character(" "))
+            let workTreeStatus = String(xy.last ?? Character(" "))
+            
+            let isStaged = indexStatus != " " && indexStatus != "?"
+            if isStaged {
+                hasStaged = true
+            }
+            let isUnstaged = workTreeStatus != " " || indexStatus == "?"
+            if isUnstaged {
+                hasUnstaged = true
+            }
+        }
+        
+        if hasUnstaged {
+            stageAllButton.title = "Stage All"
+        } else if hasStaged {
+            stageAllButton.title = "Unstage All"
+        } else {
+            stageAllButton.title = "Stage All"
+        }
+
         // Map file path -> (additions, deletions) from `git diff --numstat HEAD`
         var stats: [String: (Int, Int)] = [:]
         for line in numstat.components(separatedBy: "\n") where !line.isEmpty {
@@ -809,7 +840,9 @@ final class GitPanelView: NSView {
         row.distribution = .fill
         row.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
         row.identifier = NSUserInterfaceItemIdentifier(file)
-        row.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showChangedFileDiff(_:))))
+        let click = NSClickGestureRecognizer(target: self, action: #selector(showChangedFileDiff(_:)))
+        click.delegate = self
+        row.addGestureRecognizer(click)
         return row
     }
 
@@ -1055,4 +1088,21 @@ private final class StageToggleButton: NSButton {
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+extension GitPanelView: NSGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
+        guard let view = gestureRecognizer.view else { return true }
+        let point = view.convert(event.locationInWindow, from: nil)
+        if let hitView = view.hitTest(point) {
+            var current: NSView? = hitView
+            while let v = current {
+                if v is StageToggleButton {
+                    return false
+                }
+                current = v.superview
+            }
+        }
+        return true
+    }
 }
