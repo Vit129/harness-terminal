@@ -1,5 +1,12 @@
 import Foundation
 
+// NOTE: The authoritative compositor lives at:
+//   Packages/HarnessTerminalKit/Sources/HarnessTerminalKit/GridCompositor.swift
+// This INTENTIONAL simplified copy avoids pulling HarnessTerminalEngine, HarnessCopyMode,
+// and HarnessCore into the onboarding package — the first-run wizard only needs display
+// rendering (no PTY, no damage tracking, no real grid access). See the note in the
+// authoritative file for the full rationale.
+//
 // Ported (near-verbatim) from Packages/HarnessTerminalKit/.../GridCompositor.swift.
 // Three edits versus the monorepo original:
 //   1. drop the HarnessCopyMode/HarnessCore/HarnessTerminalEngine imports (types are inlined here),

@@ -1471,17 +1471,7 @@ public final class HarnessTerminalSurfaceView: NSView {
         }
     }
 
-    /// Pure grid geometry: cols/rows from the usable (padding-inset) area plus the draw origin.
-    /// Normal path: the origin is the padding inset, balanced-centered when enabled — the sub-cell
-    /// remainder splits onto both sides instead of `.topLeft` gravity parking it all bottom-right;
-    /// the odd pixel (integer / 2) stays bottom-right and is invisible. Recomputed even when the
-    /// cell count is unchanged so a sub-cell resize re-centers on the next paint.
-    /// Live drag (`frozenOrigin` non-nil): hold the drag-start origin — re-centering every
-    /// sub-cell layout shifts the text ±1px per pixel of drag (visible shimmer). Clamped so a
-    /// shrink can't push the grid past the drawable's right/bottom edge: the origin slides only
-    /// enough to keep the last column/row visible — once per cell boundary, not every pixel.
-    /// `viewDidEndLiveResize` re-centers once for the settled size. Static + pure so the headless
-    /// tests cover centering/freeze/clamp without a Metal renderer.
+    /// Pure grid geometry — delegates to `LiveResizeGeometry` (extracted for testability).
     nonisolated static func computeGridGeometry(
         pixelWidth: Int, pixelHeight: Int,
         basePadX: Int, basePadY: Int,
@@ -1489,24 +1479,13 @@ public final class HarnessTerminalSurfaceView: NSView {
         balanced: Bool,
         frozenOrigin: (x: Int, y: Int)?
     ) -> (cols: Int, rows: Int, originX: Int, originY: Int) {
-        let usableWidth = max(1, pixelWidth - 2 * basePadX)
-        let usableHeight = max(1, pixelHeight - 2 * basePadY)
-        let cols = max(1, usableWidth / cellWidth)
-        let rows = max(1, usableHeight / cellHeight)
-        if let frozen = frozenOrigin {
-            return (
-                cols, rows,
-                min(frozen.x, max(0, pixelWidth - cols * cellWidth)),
-                min(frozen.y, max(0, pixelHeight - rows * cellHeight))
-            )
-        }
-        var originX = basePadX
-        var originY = basePadY
-        if balanced {
-            originX += (usableWidth - cols * cellWidth) / 2
-            originY += (usableHeight - rows * cellHeight) / 2
-        }
-        return (cols, rows, originX, originY)
+        let r = LiveResizeGeometry.compute(
+            pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+            basePadX: basePadX, basePadY: basePadY,
+            cellWidth: cellWidth, cellHeight: cellHeight,
+            balanced: balanced, frozenOrigin: frozenOrigin
+        )
+        return (r.cols, r.rows, r.originX, r.originY)
     }
 
     private func scheduleResizeCommit(cols: Int, rows: Int) {

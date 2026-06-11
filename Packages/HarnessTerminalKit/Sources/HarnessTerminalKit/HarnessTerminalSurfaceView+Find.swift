@@ -225,45 +225,9 @@ extension HarnessTerminalSurfaceView {
     }
 
     /// If the pasteboard holds a valid image, write it to the pasted-images directory as a PNG and
-    /// return the file path. Prefers raw PNG bytes; converts TIFF / other image reps via a bitmap
-    /// rep. Returns nil when there's no usable image. Validation is via `NSBitmapImageRep` (not the
-    /// engine's `ImageDecoder`, whose inline-display pixel cap would wrongly reject a high-res
-    /// Retina/Pro-Display screenshot — pasting a *path* has no such limit).
+    /// return the file path. Delegates to `PasteController`.
     static func writePastedImage(from pasteboard: NSPasteboard) -> String? {
-        guard let png = pngImageData(from: pasteboard) else { return nil }
-        let dir = HarnessPaths.pastedImagesDirectory
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        prunePastedImages(in: dir)
-        let stamp = Int(Date().timeIntervalSince1970)
-        let url = dir.appendingPathComponent("pasted-\(stamp)-\(UUID().uuidString.prefix(8)).png")
-        do { try png.write(to: url); return url.path } catch { return nil }
-    }
-
-    /// Best-effort PNG bytes for whatever image the pasteboard carries (screenshot = PNG/TIFF).
-    private static func pngImageData(from pasteboard: NSPasteboard) -> Data? {
-        // A screenshot is already PNG — trust the raw bytes once they parse as an image.
-        if let png = pasteboard.data(forType: .png), NSBitmapImageRep(data: png) != nil {
-            return png
-        }
-        // Otherwise re-encode a TIFF / NSImage payload to PNG.
-        let tiff = pasteboard.data(forType: .tiff) ?? NSImage(pasteboard: pasteboard)?.tiffRepresentation
-        if let tiff, let rep = NSBitmapImageRep(data: tiff) {
-            return rep.representation(using: .png, properties: [:])
-        }
-        return nil
-    }
-
-    /// Drop pasted-image files older than a day so the directory can't grow unbounded.
-    private static func prunePastedImages(in dir: URL, olderThan maxAge: TimeInterval = 24 * 60 * 60) {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]
-        ) else { return }
-        let cutoff = Date().addingTimeInterval(-maxAge)
-        for url in entries {
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, modified < cutoff { try? fm.removeItem(at: url) }
-        }
+        PasteController.writePastedImage(from: pasteboard)
     }
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -297,18 +261,14 @@ extension HarnessTerminalSurfaceView {
         guard !sender.draggingSourceOperationMask.isEmpty else { return [] }
         let pasteboard = sender.draggingPasteboard
         if !Self.droppedFileURLs(from: pasteboard).isEmpty { return .copy }
-        if Self.pngImageData(from: pasteboard) != nil { return .copy }
+        if PasteController.pngImageData(from: pasteboard) != nil { return .copy }
         return []
     }
 
     func pasteText(_ raw: String) {
-        let normalized = raw
-            .replacingOccurrences(of: "\r\n", with: "\r")
-            .replacingOccurrences(of: "\n", with: "\r")
-        // Paste protection: confirm risky text when the program hasn't enabled bracketed paste
-        // (which would otherwise run embedded newlines as commands the moment they're pasted).
+        let normalized = PasteController.normalizedForPaste(raw)
         let bracketed = inputModes().bracketedPaste
-        if pasteProtection, !bracketed, Self.isUnsafePaste(normalized), let window {
+        if pasteProtection, !bracketed, PasteController.isUnsafePaste(normalized), let window {
             confirmPaste(normalized, in: window)
             return
         }
@@ -322,11 +282,6 @@ extension HarnessTerminalSurfaceView {
     }
 
     /// Unsafe = contains a line break (would run as a command without bracketed paste) or another
-    /// control character. Newlines are already normalized to `\r` before this check.
-    private static func isUnsafePaste(_ text: String) -> Bool {
-        text.unicodeScalars.contains { $0.value < 0x20 && $0 != "\t" }
-    }
-
     private func confirmPaste(_ normalized: String, in window: NSWindow) {
         let lineCount = normalized.split(separator: "\r", omittingEmptySubsequences: false).count
         let alert = NSAlert()

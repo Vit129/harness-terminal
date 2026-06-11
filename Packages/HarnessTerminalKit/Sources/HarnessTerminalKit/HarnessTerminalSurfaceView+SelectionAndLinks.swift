@@ -30,40 +30,16 @@ extension HarnessTerminalSurfaceView {
                             granularity: selectionGranularity, rectangular: selectionRectangular)
     }
 
-    /// Resolve a raw selection into a render region. PURE — call it ON the emulator queue (inside
-    /// the build) so the `.word` expansion reads `wordColumnRange` directly instead of through a
-    /// main-stalling `emulatorSync`. Mirrors `currentSelectionRegion`'s expansion exactly.
+    /// Resolve a raw selection into a render region. Delegates to `SelectionResolver`.
     nonisolated static func resolveSelectionRegion(_ sel: RawSelection?, emulator: TerminalEmulator,
                                                            scrollOffset: Int, columns: Int) -> SelectionRegion? {
         guard let sel else { return nil }
-        if sel.rectangular {
-            return .block(BlockSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
-        }
-        if sel.granularity == .character {
-            return .linear(TerminalSelection((sel.anchorRow, sel.anchorColumn), (sel.headRow, sel.headColumn)))
-        }
-        func unitRange(row: Int, column: Int) -> ClosedRange<Int> {
-            switch sel.granularity {
-            case .character: return column ... column
-            case .line: return 0 ... max(0, columns - 1)
-            case .word:
-                let virtualLine = emulator.historyCount - scrollOffset + row
-                return emulator.wordColumnRange(line: virtualLine, column: column)
-            }
-        }
-        let lo: (row: Int, column: Int), hi: (row: Int, column: Int)
-        if (sel.anchorRow, sel.anchorColumn) <= (sel.headRow, sel.headColumn) {
-            lo = (sel.anchorRow, sel.anchorColumn); hi = (sel.headRow, sel.headColumn)
-        } else {
-            lo = (sel.headRow, sel.headColumn); hi = (sel.anchorRow, sel.anchorColumn)
-        }
-        let loRange = unitRange(row: lo.row, column: lo.column)
-        let hiRange = unitRange(row: hi.row, column: hi.column)
-        if lo.row == hi.row {
-            return .linear(TerminalSelection((lo.row, min(loRange.lowerBound, hiRange.lowerBound)),
-                                             (lo.row, max(loRange.upperBound, hiRange.upperBound))))
-        }
-        return .linear(TerminalSelection((lo.row, loRange.lowerBound), (hi.row, hiRange.upperBound)))
+        let raw = SelectionResolver.RawSelection(
+            anchorRow: sel.anchorRow, anchorColumn: sel.anchorColumn,
+            headRow: sel.headRow, headColumn: sel.headColumn,
+            granularity: sel.granularity, rectangular: sel.rectangular
+        )
+        return SelectionResolver.resolve(raw, emulator: emulator, scrollOffset: scrollOffset, columns: columns)
     }
 
     /// The active selection region (nil when nothing is selected): rectangular for an Option-drag,

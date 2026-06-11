@@ -3,6 +3,16 @@ import HarnessCopyMode
 import HarnessCore
 import HarnessTerminalEngine
 
+// NOTE: A simplified copy of this file exists at:
+//   Packages/HarnessOnboarding/Sources/HarnessOnboarding/TerminalKit/GridCompositor.swift
+// The duplication is INTENTIONAL: the onboarding package uses its own inlined model types
+// (TerminalGridSnapshot stub, ComposedCell, ComposedFrame) to avoid pulling the full
+// HarnessTerminalEngine + HarnessCopyMode dependency graph into the first-run wizard.
+// The onboarding version is display-only (no damage tracking, no incremental rendering,
+// no real grid access). If shared SGR-emit logic diverges significantly, consider a
+// micro-package (HarnessTerminalFormat), but for now the ~400 LOC overlap is preferable
+// to the dependency cost.
+
 /// One pane to composite: where it sits (`rect`, in the pane area) and its
 /// current screen contents (`grid`). `isActive` selects the highlighted border
 /// and where the real cursor is placed. The copy-mode fields, when set, overlay a
