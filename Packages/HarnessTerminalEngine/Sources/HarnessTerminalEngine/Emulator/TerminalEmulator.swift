@@ -135,9 +135,11 @@ public final class TerminalEmulator: VTParserHandler {
     /// part of the normal input API — production code should always use `feed`.
     public func feedScalarwise(_ bytes: [UInt8]) { parser.feedScalarwise(bytes) }
 
+    public var isLiveResizing = false
+
     public func resize(cols: Int, rows: Int) {
-        primary.resize(cols: cols, rows: rows)
-        alternate.resize(cols: cols, rows: rows)
+        primary.resize(cols: cols, rows: rows, isLiveResizing: isLiveResizing)
+        alternate.resize(cols: cols, rows: rows, isLiveResizing: isLiveResizing)
     }
 
     /// Test-only seam: resize routing the primary screen through the general reflow path even when

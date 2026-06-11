@@ -18,6 +18,9 @@ final class MainSplitViewController: NSViewController {
     /// Owned (not a singleton) so collapse state is per-window. Carries the
     /// `allowFullCollapse` flag the divider min-coordinate reads.
     private let splitDelegate = SplitChromeDelegate()
+    private var isFocusModeActive = false
+    private var preFocusSidebarVisible = true
+    private var preFocusFileEditorVisible = false
 
     override func loadView() {
         // The root contentView must stay a plain, NON-layer-backed NSView. A plain NSView
@@ -334,6 +337,30 @@ final class MainSplitViewController: NSViewController {
         } else {
             setSidebarVisible(true, animated: true)
             content.showFileEditorSplit()
+        }
+    }
+
+    func toggleFocusMode() {
+        if isFocusModeActive {
+            setSidebarVisible(preFocusSidebarVisible, animated: true)
+            if preFocusFileEditorVisible {
+                content.showFileEditorSplit()
+            } else {
+                content.hideFileEditorSplit()
+            }
+            isFocusModeActive = false
+        } else {
+            preFocusSidebarVisible = SessionCoordinator.shared.settings.sidebarVisible
+            preFocusFileEditorVisible = content.isFileEditorVisible
+            
+            if preFocusSidebarVisible || preFocusFileEditorVisible {
+                setSidebarVisible(false, animated: true)
+                content.hideFileEditorSplit()
+                isFocusModeActive = true
+            } else {
+                setSidebarVisible(true, animated: true)
+                isFocusModeActive = false
+            }
         }
     }
 

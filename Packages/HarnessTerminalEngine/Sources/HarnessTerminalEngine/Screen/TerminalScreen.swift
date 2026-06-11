@@ -521,7 +521,7 @@ final class TerminalScreen {
     /// into logical lines (following soft-wrap flags), re-wrapped to the new width, and the
     /// cursor is mapped to its new position. The alternate screen just clamps (full-screen
     /// TUIs redraw on SIGWINCH, so reflowing them would corrupt their layout).
-    func resize(cols newCols: Int, rows newRows: Int, forceFullReflow: Bool = false) {
+    func resize(cols newCols: Int, rows newRows: Int, forceFullReflow: Bool = false, isLiveResizing: Bool = false) {
         let nc = max(1, newCols)
         let nr = max(1, newRows)
         guard nc != cols || nr != rows else { return }
@@ -537,7 +537,7 @@ final class TerminalScreen {
             } else {
                 // The primary screen reflows; image anchors are re-mapped onto their logical line so
                 // they survive the geometry change (see `reflow`).
-                reflow(toCols: nc, rows: nr)
+                reflow(toCols: nc, rows: nr, isLiveResizing: isLiveResizing)
             }
         } else {
             var next = Array(repeating: TerminalGridCell.blank, count: nc * nr)
@@ -965,28 +965,31 @@ final class TerminalScreen {
     /// (joining rows whose predecessor soft-wrapped), trim each line's trailing blanks, re-wrap
     /// to `nc` (keeping wide chars whole), then split the result into scrollback + viewport with
     /// the cursor mapped to its new physical position.
-    private func reflow(toCols nc: Int, rows nr: Int) {
+    private func reflow(toCols nc: Int, rows nr: Int, isLiveResizing: Bool = false) {
         // 1) Source rows are (history ++ viewport), streamed through the closure: history rows
         //    pass their stored arrays by reference (this is the O(history) bulk — no gather
         //    copy), and only the viewport rows (≤ the window height) are materialized.
         let historyCount = history.count
+        let skipCount = (isLiveResizing && historyCount > nr * 4) ? (historyCount - nr * 4) : 0
+        let reflowHistoryCount = historyCount - skipCount
+
         var vpRows: [[TerminalGridCell]] = []
         vpRows.reserveCapacity(rows)
         for r in 0 ..< rows { vpRows.append(viewportRowCells(r)) }
-        let cursorAbsRow = historyCount + min(cursorRow, rows - 1)
+        let cursorAbsRow = reflowHistoryCount + min(cursorRow, rows - 1)
 
         // 2-4) Join soft-wrapped rows into logical lines, trim, and re-wrap to `nc` (prompt
         //      marks ride the source tuples and re-anchor onto each logical line's first
         //      physical row). Shared with `previewViewportReflow` so the live drag preview
         //      wraps byte-identically.
         let rw = rewrapRows(
-            sourceCount: historyCount + rows,
+            sourceCount: reflowHistoryCount + rows,
             sourceRow: { i in
-                if i < historyCount {
-                    let h = self.history[i]
+                if i < reflowHistoryCount {
+                    let h = self.history[skipCount + i]
                     return (h.cells, h.wrapped, h.mark)
                 }
-                let r = i - historyCount
+                let r = i - reflowHistoryCount
                 return (vpRows[r], self.rowWrapped[r], self.rowMarks[r])
             },
             cursorAbsRow: cursorAbsRow, toCols: nc
@@ -1011,9 +1014,15 @@ final class TerminalScreen {
         let viewportTop = max(0, total - nr)
         // Scrollback = rows above the viewport.
         var newHistory: [HistoryLine] = []
+        newHistory.reserveCapacity(skipCount + viewportTop)
+        for i in 0 ..< skipCount {
+            newHistory.append(self.history[i])
+        }
         if viewportTop > 0 {
             for i in 0 ..< viewportTop { newHistory.append(HistoryLine(cells: out[i], wrapped: outWrapped[i], mark: outMarks[i])) }
-            if newHistory.count > maxHistoryLines { newHistory.removeFirst(newHistory.count - maxHistoryLines) }
+        }
+        if newHistory.count > maxHistoryLines {
+            newHistory.removeFirst(newHistory.count - maxHistoryLines)
         }
         // Viewport = the next `nr` rows, blank-padded at the bottom if content is shorter.
         var newCells = [TerminalGridCell]()
@@ -1046,12 +1055,24 @@ final class TerminalScreen {
         // whose row fell out of the buffer (or off the retained scrollback) are evicted with
         // their pixels. Columns are re-clamped; the cell footprint is preserved.
         if !placements.isEmpty {
-            let trimmedFront = viewportTop - history.count   // rows dropped by the maxHistory cap
+            let trimmedFront = (skipCount + viewportTop) - history.count   // rows dropped by the maxHistory cap
             for i in placements.indices {
                 let src = placements[i].absRow
-                guard src >= 0, src < logicalOf.count else { placements[i].absRow = -1; continue }
-                let outRow = logicalFirstOutRow[logicalOf[src]]
-                placements[i].absRow = (outRow < total) ? outRow - trimmedFront : -1
+                guard src >= 0 else { continue }
+                
+                let newAbsRow: Int
+                if src < skipCount {
+                    newAbsRow = src
+                } else {
+                    let subsetSrc = src - skipCount
+                    if subsetSrc >= 0 && subsetSrc < logicalOf.count {
+                        let outRow = logicalFirstOutRow[logicalOf[subsetSrc]]
+                        newAbsRow = (outRow < total) ? (skipCount + outRow) : -1
+                    } else {
+                        newAbsRow = -1
+                    }
+                }
+                placements[i].absRow = (newAbsRow >= 0) ? newAbsRow - trimmedFront : -1
                 placements[i].col = min(placements[i].col, nc - 1)
             }
             placements.removeAll { p in

@@ -111,4 +111,24 @@ final class ScrollbackTests: XCTestCase {
         term.feed("X\r\nY\r\nZ\r\n")
         XCTAssertEqual(term.historyCount, 0)
     }
+
+    func testLazyReflowDuringLiveResize() {
+        let term = TerminalEmulator(cols: 4, rows: 2)
+        term.maxScrollbackLines = 20
+        for i in 0 ..< 15 { term.feed("\(i)\r\n") }
+        XCTAssertEqual(term.historyCount, 14)
+
+        term.isLiveResizing = true
+        term.resize(cols: 6, rows: 3)
+
+        XCTAssertEqual(term.historyCount, 13)
+
+        let oldest = term.readGrid(scrollbackOffset: term.historyCount)
+        XCTAssertEqual(char(oldest, 0, 0), "0")
+        XCTAssertEqual(char(oldest, 1, 0), "1")
+
+        term.isLiveResizing = false
+        term.resize(cols: 8, rows: 3)
+    }
 }
+
