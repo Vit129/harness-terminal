@@ -464,6 +464,7 @@ public final class TerminalEmulator: VTParserHandler {
         case "D":
             let exitCode = parts.count >= 2 ? Int(parts[1]) : nil
             current.markCommandFinished(exit: exitCode)
+            modes.resetForShellPrompt()
             if let started = commandStartedAt {
                 // Monotonic elapsed seconds — never negative or clock-skewed.
                 let elapsedNanos = DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds
@@ -633,6 +634,7 @@ public final class TerminalEmulator: VTParserHandler {
             case 1000: modes.mouseClick = set              // X10/normal mouse
             case 1002: modes.mouseDrag = set               // button-event tracking
             case 1003: modes.mouseAny = set                // any-event tracking
+            case 1005: modes.mouseUTF8 = set               // UTF-8 extended coordinates (legacy)
             case 1006: modes.mouseSGR = set                // SGR extended coordinates
             case 1004: modes.focusReporting = set          // focus in/out reporting
             case 1007: modes.alternateScroll = set         // wheel → arrows on alt screen
@@ -661,6 +663,7 @@ public final class TerminalEmulator: VTParserHandler {
         case 1000: state = modes.mouseClick ? 1 : 2
         case 1002: state = modes.mouseDrag ? 1 : 2
         case 1003: state = modes.mouseAny ? 1 : 2
+        case 1005: state = modes.mouseUTF8 ? 1 : 2
         case 1006: state = modes.mouseSGR ? 1 : 2
         case 1004: state = modes.focusReporting ? 1 : 2
         case 1007: state = modes.alternateScroll ? 1 : 2
@@ -788,6 +791,7 @@ public struct TerminalModes: Sendable, Equatable {
     public var mouseClick = false
     public var mouseDrag = false
     public var mouseAny = false
+    public var mouseUTF8 = false
     public var mouseSGR = false
     /// DEC private mode 2026 (synchronized output): while set, the program is mid-frame and the
     /// renderer should hold the last presented frame rather than paint partial updates — no
@@ -805,6 +809,24 @@ public struct TerminalModes: Sendable, Equatable {
     public var modifyOtherKeys: Int = 0
 
     public init() {}
+
+    /// Return terminal-private input modes to their normal shell-prompt state. This mirrors the
+    /// practical part of a DECSTR-style soft reset without clearing visible screen contents.
+    public mutating func resetForShellPrompt() {
+        cursorKeysApplication = false
+        keypadApplication = false
+        bracketedPaste = false
+        focusReporting = false
+        alternateScroll = true
+        mouseClick = false
+        mouseDrag = false
+        mouseAny = false
+        mouseUTF8 = false
+        mouseSGR = false
+        synchronizedOutput = false
+        kittyKeyboardStack.removeAll()
+        modifyOtherKeys = 0
+    }
 
     /// Any mouse-tracking mode is active.
     public var mouseTrackingEnabled: Bool { mouseClick || mouseDrag || mouseAny }

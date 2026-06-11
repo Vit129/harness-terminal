@@ -221,6 +221,45 @@ final class ThaiCombiningMarkTests: XCTestCase {
         XCTAssertEqual(t.captureLines(joinWrapped: false).first, "ที่แล้ว")
     }
 
+    func testLongWrappedThaiOutputDoesNotDuplicateInGridOrCapture() {
+        let text = [
+            "ปัญหาที่เจอคือข้อความภาษาไทยควรแสดงต่อเนื่องโดยไม่ซ้ำเอง",
+            "รีวิวขั้นตอนแล้วต้องเห็นแต่เนื้อหาที่ป้อนเข้ามาจริง",
+            "น้ำต่ำซ้ำย้ำทำให้มีทั้งสระและวรรณยุกต์หลายแบบ"
+        ].joined(separator: " ")
+        let bytes = Array(text.utf8)
+
+        let bulk = term(28, 6)
+        bulk.maxScrollbackLines = 100
+        bulk.feed(bytes)
+
+        let scalar = term(28, 6)
+        scalar.maxScrollbackLines = 100
+        scalar.feedScalarwise(bytes)
+
+        let chunked = term(28, 6)
+        chunked.maxScrollbackLines = 100
+        var i = 0
+        while i < bytes.count {
+            let end = min(bytes.count, i + 5)
+            chunked.feed(Array(bytes[i ..< end]))
+            i = end
+        }
+
+        XCTAssertEqual(bulk.readGrid(), scalar.readGrid())
+        XCTAssertEqual(chunked.readGrid(), scalar.readGrid())
+        let bulkCapture = bulk.captureLines(joinWrapped: true).joined()
+        let scalarCapture = scalar.captureLines(joinWrapped: true).joined()
+        let chunkedCapture = chunked.captureLines(joinWrapped: true).joined()
+        XCTAssertEqual(bulkCapture, scalarCapture)
+        XCTAssertEqual(chunkedCapture, scalarCapture)
+        XCTAssertEqual(
+            bulkCapture.precomposedStringWithCompatibilityMapping,
+            text.precomposedStringWithCompatibilityMapping,
+            "wrapped Thai capture should contain the input once, modulo the intentional SARA AM split"
+        )
+    }
+
     /// Find-in-buffer matches a Thai cluster at its single grid column (the marks add no columns).
     func testSearchMatchesThaiClusterAtColumn() {
         let t = term(); t.feed("ที่ยาก")

@@ -60,4 +60,26 @@ final class CommandFinishedTests: XCTestCase {
         term.feed("\u{1b}]133;D;0\u{07}") // empty Enter — must not fire
         XCTAssertEqual(fireCount, 1)
     }
+
+    func testCommandFinishedResetsTransientInputModes() {
+        let term = TerminalEmulator(cols: 20, rows: 4)
+        term.feed("\u{1b}]133;C\u{07}")
+        term.feed("\u{1b}[?1000;1002;1003;1005;1006;1004;2004;2026;1h")
+        term.feed("\u{1b}[>4;2m")
+        term.feed("\u{1b}[>8u")
+        term.feed("\u{1b}=")
+
+        XCTAssertTrue(term.modes.mouseTrackingEnabled)
+        XCTAssertTrue(term.modes.mouseSGR)
+        XCTAssertTrue(term.modes.bracketedPaste)
+        XCTAssertTrue(term.modes.focusReporting)
+        XCTAssertTrue(term.modes.synchronizedOutput)
+        XCTAssertEqual(term.modes.modifyOtherKeys, 2)
+        XCTAssertEqual(term.modes.kittyKeyboardFlags, 8)
+        XCTAssertTrue(term.modes.keypadApplication)
+
+        term.feed("\u{1b}]133;D;0\u{07}")
+
+        XCTAssertEqual(term.modes, TerminalModes())
+    }
 }
