@@ -1,0 +1,53 @@
+# P10: Performance and Feature Roadmap (Terminal First, IDE Convenient)
+
+## Context
+Analysis of the current `harness-terminal` architecture shows a highly performant GPU-accelerated core, but identifies key optimization bottlenecks and potential feature upgrades to deliver on the "terminal first, ide convenient" philosophy.
+
+Priority: P3 (Strategic planning / future-proofing)
+
+---
+
+## 1. Performance Optimization: Scrollback Reflow ($O(\text{history})$ Complexity)
+
+**Problem:** 
+When the terminal is programmatically resized (e.g. splitting views, toggling the sidebar, or changing window size) and has a deep scrollback history (50,000+ lines), history reflow runs in $O(\text{history})$ time, which can temporarily lag the PTY parser queue.
+
+**Strategy:**
+- **Lazy Reflow:** Reflow only the active viewport (`columns * rows` cells) immediately during resize. Defer history-wide reflow using a lazy index-map/segment model.
+- **Block-allocated Ring Buffer:** Store scrollback history in a block-allocated ring buffer (pre-allocated structures) rather than native Swift string/array line instances, minimizing allocations and garbage collection overhead.
+
+---
+
+## 2. convenient Features: Local completion & completion Gutter
+
+**Problem:** 
+Integrating full Language Server Protocol (LSP) features was shelved due to client-side complexity, socket overhead, and reliability of external CLI adapters. However, developers still need basic auto-completion and symbol navigation in the preview editor.
+
+**Strategy:**
+- **Workspace-scoped Tokenizer:** Implement a lightweight, local regex/tokenizer (similar to ctags or treesitter parser) running off-main. It will parse active files in the workspace directory.
+- **Word/Symbol Completion:** Inject parsed local keywords and symbols into `SyntaxTextView`'s autocomplete, giving IDE-like auto-completion (tab-completion) without heavy LSP background processes.
+
+---
+
+## 3. IDE Convenient: Keyboard-driven Layout Presets
+
+**Problem:** 
+Managing multiple split panes programmatically requires manually performing vertical/horizontal splits, which is slow compared to IDEs.
+
+**Strategy:**
+- ** Tiling Layout Presets:** Implement keyboard-driven layouts (e.g., `⌘+⇧+D` for "IDE mode") that split the workspace into pre-configured ratios:
+  - Sidebar (File Tree/Git): 20%
+  - Editor Preview Panel: 40%
+  - Terminal Main Pane: 40%
+- **Adjacent Insert CWD Grouping:** Continue utilizing CMUX session tracking so newly spawned panes automatically inherit the layout and CWD group of the active pane.
+
+---
+
+## 4. AI integration: Secure Local ACP Sidebar
+
+**Problem:** 
+The Agent Control Protocol (ACP) for sidebar AI chat was shelved due to security concerns (arbitrary tool execution) and PATH resolution issues inside macOS app bundles.
+
+**Strategy:**
+- **Lightweight Local ACP Adapter:** Build a localhost-only chat panel that interfaces with local engines (like Ollama) or Gemini API.
+- **Consent-gated Tool Execution:** Implement a strict validation layer: any tool execution request by the agent must trigger a visual prompt in the terminal/chat view requiring explicit user approval before running.

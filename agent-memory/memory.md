@@ -41,6 +41,8 @@
 | 26 | Terminal rendering corruption fix: don't clear synchronizedOutput on shell-prompt reset (CASE-023) | ✅ Done |
 | 27 | v2.2.4 release prep: CHANGELOG Fixed entries, version bump (build 125), release notes regen, graphify refresh, tag | ✅ Done |
 | 28 | P9 complexity reduction: extract LiveResizeGeometry, PasteController, SelectionResolver from SurfaceView; document GridCompositor duplication; plan macOS 27 adoption (P8) | ✅ Done |
+| 29 | Terminal blink fix when file preview split opens/closes (CASE-025) | ✅ Done |
+
 
 ### Recent_Lessons
 
