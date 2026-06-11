@@ -74,9 +74,8 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
     private func refreshEditorPanelFill() {
         guard let panel = fileEditorPanel else { return }
         let opacity = CGFloat(HarnessSettings.clampedOpacity(SessionCoordinator.shared.settings.backgroundOpacity))
-        let editorOpacity = min(1, opacity + (1 - opacity) * 0.55)
         panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
-            .withAlphaComponent(editorOpacity).cgColor
+            .withAlphaComponent(opacity).cgColor
     }
 
     override func viewDidLoad() {
