@@ -9,9 +9,9 @@ Priority: P3 (Strategic planning / future-proofing)
 
 | # | Feature | Status | Notes |
 |---|---------|--------|-------|
-| 1 | Scrollback Reflow | 🔲 Planned | Deferred — high effort, low frequency impact |
+| 1 | Scrollback Reflow | ✅ Done | Lazy reflow — skip O(history) during live drag, full reflow on `viewDidEndLiveResize` |
 | 2 | Local Completion | ✅ Done | `WorkspaceSymbolIndex` (110 LOC) + `CompletionPopupView` (192 LOC) |
-| 3 | Keyboard Layout Presets | ✅ Done | ⌘+⇧+D toggles IDE mode (sidebar + editor + terminal) |
+| 3 | Keyboard Layout Presets | ✅ Done | ⌘+⇧+D IDE mode, ⌘P Focus mode |
 | 4 | ACP Sidebar | 🔲 Deferred | Ecosystem not ready |
 
 ### Additional features shipped alongside:
@@ -20,6 +20,9 @@ Priority: P3 (Strategic planning / future-proofing)
 - **Diff Syntax Highlighting** — `.diff`/`.patch` files get +/- coloring + gutter markers
 - **Git Changes Click-to-Preview** — clicking changed files opens diff in editor panel
 - **Git History Right-Click Menu** — Copy Commit ID, Copy Message, Show Diff
+- **Task Board Sidebar Tab** — parses Makefile targets + package.json scripts; click to run in active terminal
+- **Focus Mode (⌘P)** — hides sidebar + editor for full-screen terminal focus; toggle restores layout
+- **CASE-026 Fix** — black terminal on new session (display link race condition)
 
 ---
 

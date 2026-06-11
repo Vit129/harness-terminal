@@ -5,7 +5,7 @@
 - **Fork:** Vit129/harness-terminal (fork of robzilla1738/harness-terminal)
 - **Working branch:** `main`
 - **Preview:** `make preview` (uses `.harness-preview/` dir)
-- **Latest release:** v2.3.0
+- **Latest release:** v2.3.0 (build 126, with post-release fixes: CASE-026, lazy reflow, task board, focus mode)
 
 ## Current Sprint — Post-v2.1.0 Polish & Shelving
 
@@ -43,6 +43,8 @@
 | 28 | P9 complexity reduction: extract LiveResizeGeometry, PasteController, SelectionResolver from SurfaceView; document GridCompositor duplication; plan macOS 27 adoption (P8) | ✅ Done |
 | 29 | Terminal blink fix when file preview split opens/closes (CASE-025) | ✅ Done |
 | 30 | P10 features: Local Completion, IDE Mode (⌘+⇧+D), Session State Dot, diff coloring, git panel improvements, IDE mode persistence | ✅ Done |
+| 31 | CASE-026 black terminal on new session — display link race fix | ✅ Done |
+| 32 | Lazy scrollback reflow (skip O(history) during live resize), Task Board sidebar, Focus Mode (⌘P) | ✅ Done |
 | 30 | P10 implementation: Sidebar session state dots, Toggle IDE Mode shortcut (⌘⇧D), and Workspace Symbol Index autocomplete completions popup | ✅ Done |
 
 
