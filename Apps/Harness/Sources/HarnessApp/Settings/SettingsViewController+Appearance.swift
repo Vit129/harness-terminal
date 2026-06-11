@@ -83,6 +83,7 @@ extension SettingsViewController {
             settingsToggleRow("Status line", showStatusLineToggle),
             settingsToggleRow("Sidebar", sidebarVisibleToggle),
             settingsToggleRow("Sidebar on right", sidebarOnRightToggle),
+            settingsToggleRow("Always collapse sidebar on launch", sidebarCollapsedOnLaunchToggle),
             settingsToggleRow("Remember window size", restoreWindowSizeToggle,
                               hint: "Reopen at the last size and position."),
         ])

@@ -94,7 +94,13 @@ final class MainSplitViewController: NSViewController {
         edgeDivider.layer?.backgroundColor = resolvedDividerColor().cgColor
 
         DispatchQueue.main.async { [weak self] in
-            self?.setSidebarVisible(SessionCoordinator.shared.settings.sidebarVisible)
+            guard let self else { return }
+            let settings = SessionCoordinator.shared.settings
+            if settings.sidebarCollapsedOnLaunch {
+                self.applySidebarVisibility(false, animated: false)
+            } else {
+                self.applySidebarVisibility(settings.sidebarVisible, animated: false)
+            }
         }
 
         NotificationCenter.default.addObserver(
@@ -201,6 +207,12 @@ final class MainSplitViewController: NSViewController {
         setSidebarVisible(visible, animated: false)
     }
 
+    func setSidebarVisible(_ visible: Bool, animated: Bool) {
+        SessionCoordinator.shared.settings.sidebarVisible = visible
+        try? SessionCoordinator.shared.settings.save()
+        applySidebarVisibility(visible, animated: animated)
+    }
+
     /// Collapse/expand the sidebar. `NSSplitView.setPosition` is not animatable via the
     /// animator proxy, so for a genuinely fluid slide we drive the divider ourselves
     /// with an eased per-frame stepper. A token cancels any in-flight animation.
@@ -208,9 +220,7 @@ final class MainSplitViewController: NSViewController {
     /// `allowFullCollapse` is set on the delegate for the whole move so the divider's
     /// min-coordinate drops to 0 (it's 200 at rest, so a *user drag* can't shrink the
     /// sidebar to an unusable sliver — but a programmatic collapse must reach 0).
-    func setSidebarVisible(_ visible: Bool, animated: Bool) {
-        SessionCoordinator.shared.settings.sidebarVisible = visible
-        try? SessionCoordinator.shared.settings.save()
+    private func applySidebarVisibility(_ visible: Bool, animated: Bool) {
         sidebarAnimToken &+= 1
         let target = visible ? HarnessDesign.sidebarWidth : 0
         splitDelegate.allowFullCollapse = true
@@ -303,7 +313,7 @@ final class MainSplitViewController: NSViewController {
         if SessionCoordinator.shared.settings.sidebarOnRight {
             content.setTabBarLeadingInset(effectiveTrafficLightInset)
         } else {
-            let visible = SessionCoordinator.shared.settings.sidebarVisible
+            let visible = !(sidebarContainerView?.isHidden ?? true)
             content.setTabBarLeadingInset(visible ? 0 : effectiveTrafficLightInset)
         }
     }

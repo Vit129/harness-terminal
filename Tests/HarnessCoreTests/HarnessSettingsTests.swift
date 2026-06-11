@@ -45,6 +45,35 @@ final class HarnessSettingsTests: XCTestCase {
         }
     }
 
+    func testSidebarCollapsedOnLaunchDefaultsToFalse() {
+        XCTAssertFalse(HarnessSettings().sidebarCollapsedOnLaunch)
+        XCTAssertFalse(HarnessSettings.makeDefaults(imported: nil).sidebarCollapsedOnLaunch)
+    }
+
+    func testSidebarCollapsedOnLaunchLoadPreservesTrue() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "sidebarCollapsedOnLaunch": true }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            let settings = HarnessSettings.load()
+            XCTAssertTrue(settings.sidebarCollapsedOnLaunch)
+        }
+    }
+
+    func testSidebarCollapsedOnLaunchLoadPreservesFalse() throws {
+        try withTemporaryHarnessHome { root in
+            try HarnessPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "sidebarCollapsedOnLaunch": false }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            let settings = HarnessSettings.load()
+            XCTAssertFalse(settings.sidebarCollapsedOnLaunch)
+        }
+    }
+
 
     func testOldSettingsWithCustomHexDoNotSilentlyOverrideThemes() throws {
         let data = Data("""

@@ -328,6 +328,12 @@ extension SettingsViewController {
         }
     }
 
+    @objc func sidebarCollapsedOnLaunchChanged() {
+        let collapsed = sidebarCollapsedOnLaunchToggle.state == .on
+        SessionCoordinator.shared.settings.sidebarCollapsedOnLaunch = collapsed
+        try? SessionCoordinator.shared.settings.save()
+    }
+
     @objc func appearanceTextDidCommit() {
         flushAndApply()
         // A hex field that committed non-empty-but-invalid text wrote `nil` (drop to theme) into
@@ -495,6 +501,7 @@ extension SettingsViewController {
         showStatusLineToggle.state = settings.showStatusLine ? .on : .off
         sidebarVisibleToggle.state = settings.sidebarVisible ? .on : .off
         sidebarOnRightToggle.state = settings.sidebarOnRight ? .on : .off
+        sidebarCollapsedOnLaunchToggle.state = settings.sidebarCollapsedOnLaunch ? .on : .off
         restoreWindowSizeToggle.state = settings.restoreWindowSize ? .on : .off
         prefixControlSegment.selectItem(withTitle: harnessControlsTitle(settings.prefixKeyEnabled))
         statusLineControlSegment.selectItem(withTitle: harnessControlsTitle(settings.statusLineEnabled))
@@ -577,6 +584,7 @@ extension SettingsViewController {
         coordinator.settings.showStatusLine = showStatusLineToggle.state == .on
         coordinator.settings.sidebarVisible = sidebarVisibleToggle.state == .on
         coordinator.settings.sidebarOnRight = sidebarOnRightToggle.state == .on
+        coordinator.settings.sidebarCollapsedOnLaunch = sidebarCollapsedOnLaunchToggle.state == .on
         coordinator.settings.restoreWindowSize = restoreWindowSizeToggle.state == .on
         coordinator.settings.windowPaddingX = HarnessSettings.clampedPadding(Float(paddingXField.stringValue) ?? 12)
         coordinator.settings.windowPaddingY = HarnessSettings.clampedPadding(Float(paddingYField.stringValue) ?? 12)

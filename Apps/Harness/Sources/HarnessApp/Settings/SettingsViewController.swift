@@ -29,6 +29,7 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     let showStatusLineToggle = HarnessToggle(title: "Show status line (bottom bar)")
     let sidebarVisibleToggle = HarnessToggle(title: "Show sidebar")
     let sidebarOnRightToggle = HarnessToggle(title: "Sidebar on right")
+    let sidebarCollapsedOnLaunchToggle = HarnessToggle(title: "Always collapse sidebar on launch")
     let restoreWindowSizeToggle = HarnessToggle(title: "Remember window size")
     let experienceSegment = HarnessSegmented(frame: .zero)
     // Per-component overrides for the chrome the experience preset would otherwise bundle. Each is
@@ -407,6 +408,10 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         sidebarOnRightToggle.state = settings.sidebarOnRight ? .on : .off
         sidebarOnRightToggle.target = self
         sidebarOnRightToggle.action = #selector(sidebarOnRightChanged)
+
+        sidebarCollapsedOnLaunchToggle.state = settings.sidebarCollapsedOnLaunch ? .on : .off
+        sidebarCollapsedOnLaunchToggle.target = self
+        sidebarCollapsedOnLaunchToggle.action = #selector(sidebarCollapsedOnLaunchChanged)
 
         restoreWindowSizeToggle.state = settings.restoreWindowSize ? .on : .off
         restoreWindowSizeToggle.target = self
