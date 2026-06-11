@@ -26,3 +26,18 @@
 - Single macOS app (Harness.app) with embedded daemon and CLI
 - Target: developer terminal with IDE features (Zed-like sidebar, git, file editor)
 - Agent integration via process-tree detection (passive) and ACP (active, shelved)
+
+## Workflow Preferences
+- **Build/run commands — use directly, don't ask:**
+  1. "preview" / "show me the app" / "let me try it" → `make preview` (debug build, isolated
+     `HarnessPreview.app` under `.harness-preview/`, separate daemon/socket from prod, launches it)
+  2. "build" / "build it" / verify it compiles, no copy → `make build` (`swift build` only,
+     no `.app` bundle, nothing touches `/Applications`)
+  3. "build and copy to Applications" / "install" → `make install` (release build + package +
+     ad-hoc sign + stop old daemon + `ditto` into `/Applications/Harness.app` + clear
+     quarantine/LaunchServices cache); use `make install-no-build` if `Harness.app` is already
+     packaged at repo root and just needs copying
+  - "package" / "release" / "dmg" → `CLAUDE.md` release ordering (`make release` → `make sign`
+    → `make dmg` → `make finalize`) — confirm first, harder to reverse
+  - All of these are already documented in `CLAUDE.md`'s "Build/test/run commands" — check
+    there before asking the user to choose between scripts that do the same thing.
