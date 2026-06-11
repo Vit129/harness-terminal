@@ -37,6 +37,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// reactions run in the order their events occurred.
     private let hookQueue = DispatchQueue(label: "com.robert.harness.hooks")
     private var hookExecutor: DaemonCommandExecutor?
+    private let hookExecutionHelper: HookExecutor
     /// Invoked after every layout commit with the new revision. `DaemonServer` uses
     /// this to push `snapshotChanged` to snapshot subscribers (the compositor).
     public var onSnapshotCommitted: ((Int) -> Void)?
@@ -95,6 +96,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
     private var monitorTimer: DispatchSourceTimer?
 
     public init(enableVersionBanner: Bool = false) {
+        self.hookExecutionHelper = HookExecutor(hookRegistry: hookRegistry, hookQueue: hookQueue)
         let defaultShell = HarnessSettings.load().defaultShell
         let trimmedDefaultShell = defaultShell.trimmingCharacters(in: .whitespacesAndNewlines)
         persistedDefaultShell = trimmedDefaultShell.isEmpty ? nil : defaultShell
@@ -1211,68 +1213,14 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// Used by `display-message` and hook firing. Conservative: nil fields
     /// stay nil so format strings render an empty token instead of "(none)".
     public func buildFormatContext(surfaceKey: String? = nil, clientName: String? = nil) -> FormatContext {
-        // When the event names a specific surface (split/kill/exit), resolve THAT
-        // pane's tab AND its owning session, so tokens like #{pane_cwd} and
-        // #{session_name} reflect the affected pane — not the active selection.
-        let workspace = editor.snapshot.activeWorkspace
-        var session = workspace?.activeSession
-        var tab = workspace?.activeTab
-        if let surfaceKey, let match = editor.tab(forSurfaceKey: surfaceKey) {
-            let owningSession = editor.snapshot.workspaces
-                .first(where: { $0.id == match.workspaceID })?
-                .sessions.first(where: { $0.tabs.contains { $0.id == match.tabID } })
-            if let resolved = owningSession?.tabs.first(where: { $0.id == match.tabID }) {
-                tab = resolved
-                session = owningSession
-            }
-        }
-        // #{pane_active} is true only when the named surface IS its tab's active pane —
-        // hooks frequently name a BACKGROUND pane (alert/bell, agent-state, pane-exited),
-        // so `surfaceKey != nil` would wrongly report 1. Mirror SnapshotQueryFormatter and
-        // the compositor: compare against the active pane's surface.
-        let activeSurfaceKey = tab?.activePaneID.flatMap { editor.surfaceID(forPaneID: $0)?.uuidString }
-        var context = FormatContext(
-            paneID: surfaceKey,
-            paneTitle: tab?.title,
-            paneCwd: tab?.cwd,
-            paneActive: surfaceKey != nil && surfaceKey == activeSurfaceKey,
-            paneIndex: nil,
-            sessionName: session?.name.isEmpty == false ? session?.name : nil,
-            tabName: tab?.title,
-            tabIndex: session?.tabs.firstIndex(where: { $0.id == tab?.id }),
-            workspaceName: workspace?.name,
-            agentKind: tab?.agent?.kind.rawValue,
-            agentActivity: tab?.agent?.activity.rawValue,
-            gitBranch: tab?.gitBranch,
+        FormatContextBuilder.build(
+            snapshot: editor.snapshot,
+            editor: editor,
+            surfaceKey: surfaceKey,
             clientName: clientName,
-            windowFlags: tab.map { ($0.zoomedPaneID != nil ? "Z" : "") + $0.alertFlags }
+            sessions: sessions,
+            attachedClientCount: attachedClientCountProvider?()
         )
-        // Extended tmux-parity fields. PTY-backed values come from the live surface when the
-        // context names one (exact per-pane truth, unlike the per-tab scan metadata); the
-        // probes are single ioctls/syscalls — cheap enough at display-message/hook frequency.
-        context.paneCurrentCommand = tab?.currentCommand
-        if let surfaceKey, let live = sessions[surfaceKey] {
-            context.panePID = Int(live.currentChildPID)
-            if let command = live.probeForegroundCommand()?.command {
-                context.paneCurrentCommand = command
-            }
-            if let size = live.currentSize() {
-                context.paneWidth = size.cols
-                context.paneHeight = size.rows
-            }
-            context.historyBytes = live.historyBytes
-        }
-        context.paneDead = tab.map { $0.exitStatus != nil }
-        context.paneExitStatus = tab?.exitStatus
-        context.sessionID = session?.id.uuidString
-        context.windowID = tab?.id.uuidString
-        context.sessionWindows = session?.tabs.count
-        context.windowPanes = tab?.rootPane.allPaneIDs().count
-        if let tab, let session { context.windowActive = tab.id == session.activeTabID }
-        context.sessionGroup = session.flatMap { editor.snapshot.groupName(of: $0) }
-        context.sessionAttached = attachedClientCountProvider?()
-        context.serverPID = Int(getpid())
-        return context
     }
 
     // MARK: - Hook firing
@@ -1284,19 +1232,19 @@ public final class SurfaceRegistry: @unchecked Sendable {
     /// by fire time (session-closed captures its context before the mutation).
     private func fireHookLocked(_ event: HookEvent, surfaceKey: String? = nil, context: FormatContext? = nil) {
         let resolved = context ?? buildFormatContext(surfaceKey: surfaceKey)
-        hookQueue.async { [weak self] in self?.hookRegistry.fire(event, context: resolved) }
+        hookExecutionHelper.fire(event, context: resolved)
     }
 
     /// Client attach/detach originate in `DaemonServer` (which owns FDs), outside the
     /// registry lock — these acquire the lock to build a consistent context.
     public func fireClientAttached(label: String?) {
         lock.lock(); let context = buildFormatContext(clientName: label); lock.unlock()
-        hookQueue.async { [weak self] in self?.hookRegistry.fire(.clientAttached, context: context) }
+        hookExecutionHelper.fire(.clientAttached, context: context)
     }
 
     public func fireClientDetached(label: String?) {
         lock.lock(); let context = buildFormatContext(clientName: label); lock.unlock()
-        hookQueue.async { [weak self] in self?.hookRegistry.fire(.clientDetached, context: context) }
+        hookExecutionHelper.fire(.clientDetached, context: context)
     }
 
     // MARK: - Hook target resolution + shell execution

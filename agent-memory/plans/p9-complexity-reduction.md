@@ -114,9 +114,9 @@ HarnessTerminalEngine into the onboarding package. The onboarding version:
 
 ## Execution Status (2026-06-11)
 - ✅ **#1 (SurfaceView)** — Extracted `LiveResizeGeometry`, `PasteController`, `SelectionResolver`
-- 🔲 **#2 (CLI)** — Plan documented; full extraction (88+ handlers) deferred to dedicated session
-- 🔲 **#3 (WindowAttachClient)** — Plan documented; needs accompanying unit tests
-- 🔲 **#4 (SurfaceRegistry)** — Plan documented; needs lock-confinement audit
+- ✅ **#2 (CLI)** — Extracted 8 handler groups into extension files (`HarnessCLI+*.swift`)
+- ✅ **#3 (WindowAttachClient)** — Extracted `WindowInputRouter` and added unit tests
+- ✅ **#4 (SurfaceRegistry)** — Extracted `HookExecutor` and `FormatContextBuilder` helpers
 - ✅ **#5 (GridCompositor)** — Rationale documented in both files
 
 ## Success Criteria
