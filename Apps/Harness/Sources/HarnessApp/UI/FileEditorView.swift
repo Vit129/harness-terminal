@@ -17,6 +17,7 @@ final class FileEditorView: NSView {
 
     private static let maxPreviewBytes = 5_000_000
     private(set) var filePath: String = ""
+    private let fileWatcher = FileChangeWatcher()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -36,6 +37,11 @@ final class FileEditorView: NSView {
         quickLookContainer.isHidden = true
         let expanded = (cleanPath as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded).resolvingSymlinksInPath()
+
+        fileWatcher.start(path: expanded) { [weak self] in
+            guard let self, self.filePath == cleanPath else { return }
+            self.load(path: cleanPath)
+        }
 
         // Quick Look for images/PDFs
         let ext = (cleanPath as NSString).pathExtension.lowercased()

@@ -6,6 +6,14 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [2.2.4] - 2026-06-11
+
+### Added
+- **File preview live reload.** The file editor tab and sidebar file viewer now watch
+  the previewed file on disk and automatically reload (debounced) when it changes
+  externally — including QuickLook previews (images, PDFs, Office docs, Excel, CSV),
+  which now call `refreshPreviewItem()` so they don't show a stale cached render.
+
 ## [2.2.3] - 2026-06-09
 
 ### Fixed

@@ -36,6 +36,7 @@
 | 21 | Terminal selection highlight visible (CASE-019) | ✅ Done |
 | 22 | Branch chip real-time via git rev-parse in loadRoot() (CASE-020) | ✅ Done |
 | 23 | Git Changes FSEvents recursive watcher on rootPath (CASE-021) | ✅ Done |
+| 24 | File preview live reload via single-file DispatchSource watcher (CASE-022) | ✅ Done |
 
 ### Recent_Lessons
 
@@ -49,6 +50,7 @@
 - **RL-008:** Swift actor + FSEvents C callback: use WatcherContext class (@unchecked Sendable) + Unmanaged.passRetained to pass onChange closure via FSEventStreamContext.info. Release in stopWatching via Unmanaged.fromOpaque().release(). (CASE-016)
 - **RL-009:** SwiftUI @State in list rows resets on every view reconciliation. State that must survive tree refresh belongs in the @Observable model, not the View. (CASE-017)
 - **RL-010:** NSView wrapping NSTextView must forward mouseDown/mouseDragged/mouseUp to the inner textView explicitly — super.mouseDown doesn't cascade to child views. (CASE-018)
+- **RL-011:** For watching a single file (not a directory), plain `DispatchSource.makeFileSystemObjectSource(O_EVTONLY)` is sufficient — no need for FSEvents recursion (RL-007 only applies to directories). Re-arm by reopening the path on every reload to survive atomic-save-by-rename. For a reused `QLPreviewView`, call `refreshPreviewItem()` instead of re-setting an unchanged `previewItem` (QuickLook caches by URL). (CASE-022)
 
 ### Decisions_In_Force
 
@@ -76,6 +78,7 @@
 - Split panes: `PaneContainerView` builds from `PaneNode` binary tree; `HarnessSplitView` per branch node
 - Sessions: `SessionCoordinator.shared` — async IPC, snapshot notifications via `NotificationBus.shared.snapshotChanged`
 - File preview: `ContentAreaViewController.showFileEditorSplit()` — constraint-based sibling panel (40% editor / 60% terminal), never reparents terminal views; `refreshEditorPanelFill()` uses compensated opacity so editor preview visually matches terminal density
+- File preview live reload: `FileChangeWatcher` (Services/FileExplorer) — single-file DispatchSource, 0.3s debounce, used by `FileEditorView` and `FileViewerViewController` to reload on external edits
 - CWD tracking: `AgentScanner.cwdTimer` (500ms) → `SurfaceRegistry.refreshCwdOnly()` (proc_pidinfo) → `snapshotChanged` → sidebar reload
 - ACP Client: SHELVED — code intact (`ACPClient`, `ACPSession`, `AgentChatPanelView`, `AgentConfig`)
 - Preview uses `.harness-preview/` — socket path max 103 bytes (use `/tmp/hp` symlink for worktree)

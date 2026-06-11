@@ -9,6 +9,31 @@ Use FSEventStreamCreate instead of DispatchSource when:
 - Need recursive directory watching (nested file add/delete/modify)
 - DispatchSource only detects top-level changes in a directory
 
+## Single-file watch (DispatchSource is enough)
+
+For watching **one file** (not a directory), `FSEventStreamCreate`'s recursion isn't
+needed — `DispatchSource.makeFileSystemObjectSource` on an `O_EVTONLY` fd is simpler
+and sufficient. See `FileChangeWatcher` (Services/FileExplorer), used by
+`FileEditorView`/`FileViewerViewController` (CASE-022):
+
+```swift
+let fd = open(path, O_EVTONLY)
+let source = DispatchSource.makeFileSystemObjectSource(
+    fileDescriptor: fd,
+    eventMask: [.write, .delete, .rename, .extend, .attrib],
+    queue: .main
+)
+source.setEventHandler { /* debounce, then reload */ }
+source.setCancelHandler { close(fd) }
+source.resume()
+```
+
+Re-open the path (cancel + restart the source) on every reload — this re-arms the
+watch and survives editors that save atomically (write temp file, rename over
+original), since the stale fd's source would otherwise stop firing. If the reload
+target is a reused `QLPreviewView`, call `refreshPreviewItem()` rather than
+re-assigning the same `previewItem` URL (QuickLook caches renders by URL).
+
 ## Full Swift Actor Pattern
 
 ```swift

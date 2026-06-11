@@ -15,6 +15,7 @@ final class FileViewerViewController: NSViewController {
     private let syntaxView = SyntaxTextView()
     private let quickLookView = QLPreviewView(frame: .zero, style: .normal)
     private let messageLabel = NSTextField(labelWithString: "")
+    private let fileWatcher = FileChangeWatcher()
     // TODO: LSP integration (hover, go-to-definition, diagnostics) — disabled for now.
     // Enable by uncommenting and setting lspAutoStart = true in settings.
     // private let lspSession = LSPFileSession()
@@ -47,6 +48,11 @@ final class FileViewerViewController: NSViewController {
         let expanded = (cleanPath as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded).resolvingSymlinksInPath()
         let ext = url.pathExtension.lowercased()
+
+        fileWatcher.start(path: expanded) { [weak self] in
+            guard let self, self.pathLabel.toolTip == cleanPath else { return }
+            self.load(path: cleanPath)
+        }
 
         if Self.quickLookExtensions.contains(ext) {
             showQuickLook(url)
@@ -181,7 +187,11 @@ final class FileViewerViewController: NSViewController {
         messageLabel.isHidden = true
         syntaxView.isHidden = true
         quickLookView.isHidden = false
-        quickLookView.previewItem = url as NSURL
+        if quickLookView.previewItem?.previewItemURL == url {
+            quickLookView.refreshPreviewItem()
+        } else {
+            quickLookView.previewItem = url as NSURL
+        }
     }
 
     private func showMessage(_ message: String) {
