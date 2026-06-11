@@ -40,6 +40,7 @@
 | 25 | Sidebar collapse-then-expand fix: sync sidebarVisible on forced launch collapse (CASE-024) | ✅ Done |
 | 26 | Terminal rendering corruption fix: don't clear synchronizedOutput on shell-prompt reset (CASE-023) | ✅ Done |
 | 27 | v2.2.4 release prep: CHANGELOG Fixed entries, version bump (build 125), release notes regen, graphify refresh, tag | ✅ Done |
+| 28 | P9 complexity reduction: extract LiveResizeGeometry, PasteController, SelectionResolver from SurfaceView; document GridCompositor duplication; plan macOS 27 adoption (P8) | ✅ Done |
 
 ### Recent_Lessons
 
@@ -56,6 +57,7 @@
 - **RL-011:** For watching a single file (not a directory), plain `DispatchSource.makeFileSystemObjectSource(O_EVTONLY)` is sufficient — no need for FSEvents recursion (RL-007 only applies to directories). Re-arm by reopening the path on every reload to survive atomic-save-by-rename. For a reused `QLPreviewView`, call `refreshPreviewItem()` instead of re-setting an unchanged `previewItem` (QuickLook caches by URL). (CASE-022)
 - **RL-012:** When a forced visual state on launch (e.g. collapse) diverges from the persisted toggle-state field, sync the persisted field too — otherwise the first user toggle computes against stale state and is a no-op. (CASE-024)
 - **RL-013:** `TerminalModes.resetForShellPrompt()` (OSC 133;D) must only reset *input* modes (mouse tracking, bracketed paste, kitty keyboard, etc.), never `synchronizedOutput` — a sub-command's 133;D can fire mid-batch inside an outer TUI's `?2026h`/`?2026l` redraw, and clearing it there causes the renderer to present a half-applied frame (interleaved garbled rows). The 150ms sync-timeout in `HarnessTerminalSurfaceView` already handles a program that never sends `?2026l`. (CASE-023)
+- **RL-014:** When extracting logic from large AppKit views: prefer standalone `enum` types with static methods for pure logic (geometry, validation, resolution). Keep the original method signature as a thin delegate — preserves the public API and test seams. Don't over-extract tightly-coupled state machines that would need large delegate protocols; those are better served by extension files.
 
 ### Decisions_In_Force
 
