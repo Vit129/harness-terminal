@@ -27,8 +27,7 @@ final class HarnessSidebarPanelViewController: NSViewController {
     /// Wraps the search field so it gets the same radius-7 elevated-surface chrome as
     /// the workspace pill and session cards.
     private let searchContainer = NSView()
-    private let sidebarTabs = NSSegmentedControl(labels: ["Sessions", "Files", "Git", "Tasks"], trackingMode: .selectOne, target: nil, action: nil)
-    let taskBoardPanelView = TaskBoardPanelView()
+    private let sidebarTabs = NSSegmentedControl(labels: ["Sessions", "Files", "Git"], trackingMode: .selectOne, target: nil, action: nil)
     private let agentChatPanel = AgentChatPanelView()
     private let sectionHeader = NSView()
     private let sectionLabel = NSTextField(labelWithString: "Sessions")
@@ -173,7 +172,6 @@ final class HarnessSidebarPanelViewController: NSViewController {
         setupFileTree()
         setupFileViewer()
         setupGitPlaceholder()
-        setupTaskBoardPanel()
         setupSearchPanel()
         setupAgentPanel()
         selectSidebarTab(index: 0)
@@ -204,7 +202,6 @@ final class HarnessSidebarPanelViewController: NSViewController {
         HarnessDesign.makeClear(chromeHeader)
         HarnessDesign.makeClear(workspaceBar)
         HarnessDesign.makeClear(gitPanelView)
-        HarnessDesign.makeClear(taskBoardPanelView)
         HarnessDesign.makeClear(sectionHeader)
         HarnessDesign.makeClear(footer)
         sectionLabel.textColor = HarnessDesign.chrome.textTertiary
@@ -643,17 +640,6 @@ final class HarnessSidebarPanelViewController: NSViewController {
         ])
     }
 
-    private func setupTaskBoardPanel() {
-        taskBoardPanelView.isHidden = true
-        view.addSubview(taskBoardPanelView)
-        NSLayoutConstraint.activate([
-            taskBoardPanelView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor),
-            taskBoardPanelView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            taskBoardPanelView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            taskBoardPanelView.bottomAnchor.constraint(equalTo: footer.topAnchor),
-        ])
-    }
-
     private func setupSearchPanel() {
         searchPanelView.isHidden = true
         view.addSubview(searchPanelView)
@@ -716,9 +702,8 @@ final class HarnessSidebarPanelViewController: NSViewController {
             fileTreeView.isHidden = fileViewerVC.view.isHidden == false
         }
         gitPanelView.isHidden = index != 2
-        taskBoardPanelView.isHidden = index != 3
-        searchPanelView.isHidden = index != 4
-        agentChatPanel.isHidden = index != 5
+        searchPanelView.isHidden = index != 3
+        agentChatPanel.isHidden = index != 4
         switch index {
         case 1:
             sectionLabel.stringValue = "FILES"
@@ -734,16 +719,11 @@ final class HarnessSidebarPanelViewController: NSViewController {
                 gitPanelView.clearRoot()
             }
         case 3:
-            sectionLabel.stringValue = "TASKS"
-            if let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
-                taskBoardPanelView.updateRoot(path: cwd)
-            }
-        case 4:
             sectionLabel.stringValue = "SEARCH"
             if let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
                 searchPanelView.updateRoot(path: cwd)
             }
-        case 5:
+        case 4:
             sectionLabel.stringValue = "AGENT"
             // [ACP SHELVED] connectAgentIfNeeded()
         default:
@@ -847,7 +827,6 @@ final class HarnessSidebarPanelViewController: NSViewController {
                 fileTreeView.updateRoot(path: cwd, sessionID: activeSessionID)
             }
             gitPanelView.updateRoot(path: cwd)
-            taskBoardPanelView.updateRoot(path: cwd)
             lastFileTreeSessionID = activeSessionID
             lastFileTreeGitBranch = gitBranch
             let home = NSHomeDirectory()
@@ -889,7 +868,6 @@ final class HarnessSidebarPanelViewController: NSViewController {
                 fileTreeView.updateRoot(path: cwd, sessionID: activeSessionID)
             }
             gitPanelView.updateRoot(path: cwd)
-            taskBoardPanelView.updateRoot(path: cwd)
             lastFileTreeSessionID = activeSessionID
             lastFileTreeGitBranch = gitBranch
         } else {

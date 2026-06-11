@@ -1685,8 +1685,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/HarnessSidebarPanelViewController.swift": {
-    "mtime": 1781191044.7943997,
-    "ast_hash": "9244fe76c6474d5497050bc13ccc4023",
+    "mtime": 1781222006.1030264,
+    "ast_hash": "d279ab4ea589eb41c3a9e60627a06a2b",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/AboutPanelController.swift": {
@@ -5647,11 +5647,6 @@
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/Services/WorkspaceSymbolIndex.swift": {
     "mtime": 1781189567.3667183,
     "ast_hash": "7349f13378630ea7a8c13c5da6148486",
-    "semantic_hash": ""
-  },
-  "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/TaskBoardPanelView.swift": {
-    "mtime": 1781190466.6335156,
-    "ast_hash": "94bce6265c26f356d0581a1fcf9e42a5",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/agent-memory/plans/p10-scrollback-reflow-prompt.md": {
