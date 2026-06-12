@@ -15,6 +15,8 @@ final class SessionCoordinator: NSObject {
     private var lastRevision = -1
     private let terminalHosts = TerminalPaneRegistry()
     private var metadataTask: Task<Void, Never>?
+    private var snapshotRefreshTask: Task<Void, Never>?
+    private var pendingSnapshotRevision: Int?
     private var pushedNotificationKeys: Set<String> = []
     /// Last-seen agent activity per surface key, so we can fire a notification the
     /// moment an agent transitions out of `working` (i.e. stopped producing output —
@@ -106,8 +108,27 @@ final class SessionCoordinator: NSObject {
 
     @objc private func snapshotChangedNotification(_ note: Notification) {
         let revision = note.userInfo?["revision"] as? Int ?? -1
-        guard revision != lastRevision else { return }
-        syncFromDaemon()
+        guard revision != lastRevision, revision != pendingSnapshotRevision else { return }
+        pendingSnapshotRevision = revision
+        scheduleSnapshotRefresh()
+    }
+
+    /// Snapshot notifications can arrive in bursts while the app reconnects or when background
+    /// metadata changes land together. Hydrate asynchronously and collapse the burst so reconnect
+    /// never parks the main actor on repeated daemon round trips.
+    private func scheduleSnapshotRefresh() {
+        guard snapshotRefreshTask == nil else { return }
+        snapshotRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while true {
+                pendingSnapshotRevision = nil
+                _ = await syncFromDaemon()
+                guard let pendingSnapshotRevision, pendingSnapshotRevision != lastRevision else {
+                    snapshotRefreshTask = nil
+                    return
+                }
+            }
+        }
     }
 
     @objc private func notificationPosted(_ note: Notification) {
