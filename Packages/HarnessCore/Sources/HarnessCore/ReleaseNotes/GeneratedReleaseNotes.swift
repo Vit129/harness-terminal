@@ -1,27 +1,26 @@
-// Generated from the CHANGELOG.md [2.3.0] block by Scripts/generate-release-notes.swift.
+// Generated from the CHANGELOG.md [2.4.0] block by Scripts/generate-release-notes.swift.
 // DO NOT EDIT BY HAND — regenerate in release prep after updating CHANGELOG.md:
 //   swift Scripts/generate-release-notes.swift
 // Drift guards: ReleaseNotesGuardTests (version + changelog digest), package-app.sh.
 
 extension ReleaseNotes {
     public static let current = ReleaseNotes(
-        version: "2.3.0",
-        changelogDigest: "23bac9ebd6dfaa8c",
+        version: "2.4.0",
+        changelogDigest: "e616359de7639db0",
         sections: [
             Section(title: "Added", items: [
-                "Local workspace completion",
-                "IDE Mode shortcut (⌘+⇧+D)",
-                "Session state indicator",
-                "IDE mode persistence",
-                "Diff/patch syntax highlighting",
-                "Git Changes click-to-preview",
-                "Git History right-click menu",
-            ]),
-            Section(title: "Changed", items: [
-                "P9 complexity reduction",
+                "Ctrl+R command history search",
+                "Layout presets (⌘⌥1–5)",
+                "Fuzzy file quick-open in command palette",
+                "Switch Project section in command palette",
+                "Workspace symbol search in command palette",
+                "Git worktree → session tab integration",
+                "Terminal cheatsheets",
             ]),
             Section(title: "Fixed", items: [
-                "Terminal flicker on file preview open/close (CASE-025)",
+                "Split-pane close button closes the clicked pane, not the active one",
+                "Text wrap incorrect in newly split panes",
+                "Snapshot notification burst stacking",
             ]),
         ]
     )

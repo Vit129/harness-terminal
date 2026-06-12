@@ -6,6 +6,22 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [2.4.0] - 2026-06-12
+
+### Added
+- **Ctrl+R command history search.** Fuzzy search overlay for past commands — type to filter, sorted by recency; selecting a command seeds the command prompt with the cursor at the end.
+- **Layout presets (⌘⌥1–5).** One-key pane layouts: Even Horizontal, Even Vertical, Main Horizontal, Main Vertical, Tiled — available from the View menu.
+- **Fuzzy file quick-open in command palette.** The command palette now includes a "Files" section when searching — fuzzy-matches filenames and relative paths in the active workspace. File enumeration runs in a background task (no main-thread stutter).
+- **Switch Project section in command palette.** tmux-sessionizer-style project switcher — lists open tabs' CWDs as projects; selecting one focuses that session.
+- **Workspace symbol search in command palette.** "Symbols" section matches function/class/variable names from source files in the active workspace; selecting a symbol sends it as keystrokes to the active terminal.
+- **Git worktree → session tab integration.** Adding a worktree automatically opens a new session tab for it; removing a worktree closes its tabs.
+- **Terminal cheatsheets.** `Scripts/cheat.sh` + fzf-searchable Linux and Vi/Vim cheatsheets under `Scripts/cheatsheets/`.
+
+### Fixed
+- **Split-pane close button closes the clicked pane, not the active one.** The per-pane hover close button now uses `killPane(paneID:)` instead of `killActivePane()`.
+- **Text wrap incorrect in newly split panes.** `HarnessSplitView.layout()` now forces a synchronous child layout pass after setting divider positions, so the PTY sizes against the correct post-split width.
+- **Snapshot notification burst stacking.** `snapshotChangedNotification` now coalesces repeated notifications into a single async refresh task instead of stacking synchronous `syncFromDaemon()` calls on the main actor, eliminating the reconnect/back-to-app slowdown.
+
 ## [2.3.0] - 2026-06-11
 
 ### Added
