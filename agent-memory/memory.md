@@ -52,6 +52,9 @@
 | 36 | Keyboard file tree navigation (j/k/h/l/Enter, FileTreeKeyboardNav.swift) | ✅ Done |
 | 37 | Vi ex command mode (:w/:q/:wq/:set/:e/:bn/:bp/:ls), jump list (Ctrl+o/i), backtick marks, named registers, macros, inline * search, relative numbers | ✅ Done |
 | 38 | tmux deferred list closed: window-size option (smallest/largest/latest), list-* --json, find-window -C from hooks, destroy-unattached | ✅ Done |
+| 39 | ⌘1–9 session switch: fix selectSessionNumber calling selectWorkspace(byIndex:) instead of selectSession | ✅ Done |
+| 40 | Per-theme-mode background opacity (lightThemeOpacity/darkThemeOpacity in HarnessSettings + Settings UI sliders) | ✅ Done |
+| 41 | Translucent window legibility: use terminalBackground.withAlphaComponent(opacity) instead of .clear (CASE-027) | ✅ Done |
 
 
 ### Recent_Lessons
@@ -76,6 +79,8 @@
 - **RL-018:** Modal vi engine inside `NSTextView`: set `isEditable = false` in normal mode and restore it only in insert mode. This prevents AppKit from consuming keystrokes meant for the vi engine. Use a `@MainActor final class` engine that holds `weak var textView: NSTextView?` and dispatches all mutations via `tv.isEditable = true; tv.replaceCharacters(...); tv.isEditable = false`.
 - **RL-019:** `SyntaxLineNumberGutterView.draw()` receives a locally-unwrapped non-optional `textView` (from `guard let textView, ...`) — inside the draw closure `textView` is `NSTextView`, not `NSTextView?`. Conditional binding `if let tv2 = textView` inside that closure will fail to compile because it's already non-optional.
 - **RL-020:** `window-size` vote aggregation: DaemonServer tracks per-client surface sizes; `applyEffectiveSize` picks the winning vote. Reading `registry.optionStore.get("window-size")` inside DaemonServer is correct since `optionStore` is `public let` on SurfaceRegistry.
+- **RL-021:** "Pure transparent + always readable" is impossible without a tint layer. Apple proved this across iOS/macOS 26→27 (Liquid Glass): pure `.clear` window background fails when the content behind is bright. Fix: `window.backgroundColor = themeColor.withAlphaComponent(opacity)` instead of `.clear` — theme colour acts as tint at user-chosen strength, CGS blur still applies on top. iOS 27 added a user-facing transparency slider (ultra clear → fully tinted) as the definitive solution.
+- **RL-022:** `selectSessionNumber` (⌘1–9) must call `selectSession(workspaceID:sessionID:)` not `selectWorkspace(byIndex:)`. The latter is a no-op when only one workspace exists (index 0 already active), and out-of-bounds for index ≥ 1. Always navigate workspace → sessions array → select by ID.
 
 ### Decisions_In_Force
 

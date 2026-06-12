@@ -6,6 +6,15 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [Unreleased]
+
+### Fixed
+- **Translucent window legibility.** Window background now uses the theme color at the current opacity instead of pure `.clear` when translucent. At any opacity below 100 %, the terminal background colour acts as a tint layer behind the CGS blur, so text remains readable regardless of what is displayed behind the window — matching the semi-opaque tinted glass behaviour Apple introduced in iOS/macOS 27.
+
+### Added
+- **Per-theme-mode background opacity.** When "Auto light/dark" is enabled, separate opacity sliders for the light and dark themes appear in Settings → Appearance. Lets a white/light theme stay fully opaque (unreadable otherwise) while a dark theme keeps its translucent look. Opacity is saved and applied automatically on every system-appearance switch.
+- **⌘1–9 session switch fixed.** Keyboard shortcuts now correctly switch to the Nth session inside the active workspace instead of calling `selectWorkspace(byIndex:)` which was a no-op when only one workspace existed.
+
 ## [2.5.0] - 2026-06-12
 
 ### Added

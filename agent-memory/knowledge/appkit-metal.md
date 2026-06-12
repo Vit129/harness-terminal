@@ -50,6 +50,30 @@ panel.layer?.backgroundColor = HarnessChrome.current.terminalBackground
 
 **Files:** `ContentAreaViewController.swift` → `refreshEditorPanelFill()` / `applyChrome()`
 
+## Window Background Tint for Legibility (CASE-027)
+
+**Problem:** When `backgroundOpacity < 1`, `window.backgroundColor = .clear` + CGS blur gives
+a fully transparent backdrop. If the content behind the window is bright (Finder, browser,
+document), terminal text becomes unreadable — pure transparency has no tint to provide
+contrast.
+
+**Apple's approach (iOS/macOS 26–27):** The "Liquid Glass" material uses a semi-opaque tinted
+backing (`UIVisualEffectView.backgroundColor = theme_color.withAlpha(...)`) instead of pure
+clear. iOS 27 added a user-facing transparency slider (ultra clear → fully tinted) after
+community feedback that pure transparency hurt legibility. The lesson: "pure transparent +
+always readable" is impossible without a tint layer.
+
+**Fix applied:** In `MainWindowController.applyChrome()`, instead of `.clear`, set:
+```swift
+window.backgroundColor = HarnessChrome.current.terminalBackground
+    .withAlphaComponent(CGFloat(opacity))
+```
+The theme colour acts as a tint at whatever strength the opacity slider is set. At 100 % it
+is fully opaque (unchanged); at lower values the blur shows through but the tint ensures
+contrast. CGS blur still applies on top.
+
+**Files:** `MainWindowController.swift` → `applyChrome()`
+
 ## NSFont Italic (CASE-010)
 
 NSFont has no `.italicSystemFont` (unlike UIFont).
