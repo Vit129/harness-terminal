@@ -135,7 +135,9 @@ final class MainWindowController: NSWindowController {
 
         window.titlebarAppearsTransparent = settings.transparentTitlebar
         window.isOpaque = isOpaque
-        window.backgroundColor = isOpaque ? HarnessChrome.current.terminalBackground : .clear
+        window.backgroundColor = isOpaque
+            ? HarnessChrome.current.terminalBackground
+            : HarnessChrome.current.terminalBackground.withAlphaComponent(CGFloat(opacity))
 
         // Drop the window shadow while translucent. macOS computes the drop shadow from the
         // window's content alpha (a rectangle), so on a translucent window it renders as a
