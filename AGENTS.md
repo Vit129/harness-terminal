@@ -17,7 +17,8 @@ HARNESS_BENCHMARKS=1 swift test -c release --filter HarnessBenchmarks   # benchm
 ```
 
 ```bash
-make run          # build + package + sign + open Harness.app (debug)
+make debug        # build (debug) + package + sign + open Harness.app
+make run          # re-open existing Harness.app without rebuilding
 make preview      # isolated preview build under .harness-preview/
 make preview-stop # kill preview processes
 make clean        # remove build artifacts, Harness.app, dist/

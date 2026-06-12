@@ -33,10 +33,15 @@
      `HarnessPreview.app` under `.harness-preview/`, separate daemon/socket from prod, launches it)
   2. "build" / "build it" / verify it compiles, no copy → `make build` (`swift build` only,
      no `.app` bundle, nothing touches `/Applications`)
-  3. "build and copy to Applications" / "install" → `make install` (release build + package +
+  3. "run" / "open the app" with no source changes → `make run` (kills any stale instance,
+     re-opens the existing repo-root `Harness.app` — errors if it hasn't been built yet)
+  4. "run it" / default dev loop → `make debug` (build debug + package + sign + kill stale +
+     open repo-root `Harness.app`); release-config equivalent without copying to
+     `/Applications` is `make prod`
+  5. "build and copy to Applications" / "install" → `make install` (release build + package +
      ad-hoc sign + stop old daemon + `ditto` into `/Applications/Harness.app` + clear
-     quarantine/LaunchServices cache); use `make install-no-build` if `Harness.app` is already
-     packaged at repo root and just needs copying
+     quarantine/LaunchServices cache + open it); use `make install-no-build` if `Harness.app` is
+     already packaged at repo root and just needs copying
   - "package" / "release" / "dmg" → `CLAUDE.md` release ordering (`make release` → `make sign`
     → `make dmg` → `make finalize`) — confirm first, harder to reverse
   - All of these are already documented in `CLAUDE.md`'s "Build/test/run commands" — check
