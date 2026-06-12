@@ -1,5 +1,7 @@
 # Harness
 
+> Forked from [robzilla1738/harness-terminal](https://github.com/robzilla1738/harness-terminal)
+
 A native macOS terminal that keeps your sessions running, brings your editor tools with you, and tells you the moment a coding agent needs you.
 
 Everything is first-party Swift — GPU terminal engine, session daemon, CLI. One external dependency: Sparkle for auto-updates.
