@@ -28,7 +28,9 @@ done
 # --- Build ---
 if [[ $NO_BUILD -eq 0 ]]; then
   echo "==> Building release (optimized)..."
-  swift build -c release --product Harness --product HarnessDaemon --product harness-cli
+  # `swift build` only honors the last `--product` flag, not all of them — build
+  # everything in release config (mirrors `debug`'s `make build`).
+  swift build -c release
   echo "==> Packaging..."
   Scripts/package-app.sh release
   echo "==> Ad-hoc signing..."
