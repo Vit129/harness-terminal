@@ -74,7 +74,7 @@ enum MainMenuBuilder {
         for index in 1...9 {
             let item = NSMenuItem(
                 title: "Switch to Session \(index)",
-                action: #selector(MenuTarget.selectSessionNumber(_:)),
+                action: #selector(MenuTarget.selectWorkspaceNumber(_:)),
                 keyEquivalent: "\(index)"
             )
             item.tag = index
@@ -370,7 +370,7 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
 
 
     /// ⌘1–9 switch to the session (workspace) at that position in the sidebar.
-    @objc func selectSessionNumber(_ sender: NSMenuItem) {
+    @objc func selectWorkspaceNumber(_ sender: NSMenuItem) {
         let index = sender.tag - 1
         let coordinator = SessionCoordinator.shared
         guard let workspace = coordinator.snapshot.activeWorkspace,
@@ -446,7 +446,9 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
     }
 
     @objc func toggleFocusMode() {
-        if let split = NSApp.keyWindow?.contentViewController as? MainSplitViewController {
+        let win = NSApp.keyWindow ?? NSApp.mainWindow
+            ?? NSApp.windows.first(where: { $0.contentViewController is MainSplitViewController })
+        if let split = win?.contentViewController as? MainSplitViewController {
             split.toggleFocusMode()
         }
     }

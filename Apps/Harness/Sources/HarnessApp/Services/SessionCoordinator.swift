@@ -260,6 +260,12 @@ final class SessionCoordinator: NSObject {
         lastRevision = remote.revision
         if structureChanged {
             structureRevision += 1
+            let live = Set(remote.workspaces.flatMap { ws in
+                ws.sessions.flatMap { session in
+                    session.tabs.flatMap { $0.rootPane.allSurfaceIDs() }
+                }
+            })
+            terminalHosts.prune(keeping: live)
         }
         pushNewRemoteNotifications(from: remote)
         pushAgentActivityNotifications(from: remote)

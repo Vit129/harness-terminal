@@ -55,6 +55,8 @@
 | 39 | ⌘1–9 session switch: fix selectSessionNumber calling selectWorkspace(byIndex:) instead of selectSession | ✅ Done |
 | 40 | Per-theme-mode background opacity (lightThemeOpacity/darkThemeOpacity in HarnessSettings + Settings UI sliders) | ✅ Done |
 | 41 | Translucent window legibility: use terminalBackground.withAlphaComponent(opacity) instead of .clear (CASE-027) | ✅ Done |
+| 42 | Code review + bug fixes: async syncFromDaemon missing terminalHosts.prune(), ViNormalMode force-unwrap crash on surrogate unichars, selectSessionNumber rename to selectWorkspaceNumber | ✅ Done |
+| 43 | fzf install + shell integration (brew install fzf + source <(fzf --zsh) in ~/.zshrc) | ✅ Done |
 
 
 ### Recent_Lessons
@@ -81,6 +83,8 @@
 - **RL-020:** `window-size` vote aggregation: DaemonServer tracks per-client surface sizes; `applyEffectiveSize` picks the winning vote. Reading `registry.optionStore.get("window-size")` inside DaemonServer is correct since `optionStore` is `public let` on SurfaceRegistry.
 - **RL-021:** "Pure transparent + always readable" is impossible without a tint layer. Apple proved this across iOS/macOS 26→27 (Liquid Glass): pure `.clear` window background fails when the content behind is bright. Fix: `window.backgroundColor = themeColor.withAlphaComponent(opacity)` instead of `.clear` — theme colour acts as tint at user-chosen strength, CGS blur still applies on top. iOS 27 added a user-facing transparency slider (ultra clear → fully tinted) as the definitive solution.
 - **RL-022:** `selectSessionNumber` (⌘1–9) must call `selectSession(workspaceID:sessionID:)` not `selectWorkspace(byIndex:)`. The latter is a no-op when only one workspace exists (index 0 already active), and out-of-bounds for index ≥ 1. Always navigate workspace → sessions array → select by ID.
+- **RL-023:** The async `syncFromDaemon` variant must mirror every side-effect of the sync variant — including `terminalHosts.prune(keeping:)` on structure changes. Missing it causes dead TerminalHostViews (and their Metal surfaces) to accumulate for the app lifetime because the `scheduleSnapshotRefresh()` path always uses the async variant.
+- **RL-024:** `unichar` (UInt16) can hold surrogate code units (0xD800–0xDFFF). `UnicodeScalar(unichar)` returns nil for those — force-unwrapping it crashes on malformed clipboard content. Always `guard let scalar = UnicodeScalar(c) else { return <safe_default> }` when converting unichar → Character.
 
 ### Decisions_In_Force
 
@@ -118,5 +122,6 @@
 - ACP Client: SHELVED — code intact (`ACPClient`, `ACPSession`, `AgentChatPanelView`, `AgentConfig`)
 - Preview uses `.harness-preview/` — socket path max 103 bytes (use `/tmp/hp` symlink for worktree)
 - SoftIconButton: supports `rightMouseDown` → pops up assigned `.menu`
-- ⌘1–9: `MenuTarget.selectSessionNumber` → `SessionCoordinator.selectWorkspace(byIndex:)`
+- ⌘1–9: `MenuTarget.selectWorkspaceNumber` → `SessionCoordinator.selectWorkspace(byIndex:)` (renamed from selectSessionNumber in v2.5.1)
+- fzf: installed at `/opt/homebrew/bin/fzf` (v0.73.1); shell integration sourced via `source <(fzf --zsh)` in ~/.zshrc — Ctrl+R history, Ctrl+T files, Option+C cd. Terminal input pipeline sends ESC-prefix for Option keys natively.
 - tmux: `window-size` option read in `DaemonServer.applyEffectiveSize`; `list-*` commands in `MainExecutor` render `-F` format strings and `--json` arrays

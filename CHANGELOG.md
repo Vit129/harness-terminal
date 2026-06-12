@@ -8,6 +8,13 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-06-12
+
+### Fixed
+- **Metal surface memory leak on pane close.** The async `syncFromDaemon` path (used by all real-time snapshot refreshes) was missing `terminalHosts.prune(keeping:)` — dead `TerminalHostView` instances and their Metal surfaces accumulated for the app lifetime every time a pane was closed via a daemon-side event. The prune now runs in both the sync and async variants.
+- **Vi mode crash on malformed clipboard content.** `ViNormalMode.isWordChar` force-unwrapped `UnicodeScalar(unichar)`, which returns `nil` for surrogate code units (U+D800–U+DFFF). Pastes containing unpaired surrogates would crash. Now guarded with `guard let`.
+- **`⌘1–9` method rename.** `MenuTarget.selectSessionNumber` renamed to `selectWorkspaceNumber` to match its actual behaviour (switches workspaces, not sessions within a workspace).
+
 ## [2.5.1] - 2026-06-12
 
 ### Fixed

@@ -830,7 +830,8 @@ final class ViEngine {
 
     private func isWordChar(_ c: unichar, bigWord: Bool) -> Bool {
         if bigWord { return c != 32 && c != 9 && c != 10 }
-        let ch = Character(UnicodeScalar(c)!)
+        guard let scalar = UnicodeScalar(c) else { return false }
+        let ch = Character(scalar)
         return ch.isLetter || ch.isNumber || c == 95  // _ = 95
     }
 

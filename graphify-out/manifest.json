@@ -1735,8 +1735,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/MainMenuBuilder.swift": {
-    "mtime": 1781250086.1845648,
-    "ast_hash": "771fe25c2000a6eabde25bc6d4c590a3",
+    "mtime": 1781271327.5513399,
+    "ast_hash": "11113a4deb3f3ebeb5bd575aee3e918b",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/Notch/NotchShape.swift": {
@@ -1800,8 +1800,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/Services/SessionCoordinator.swift": {
-    "mtime": 1781250652.9523628,
-    "ast_hash": "ad220643f9567b292ad10eb5f0507d17",
+    "mtime": 1781270663.1508908,
+    "ast_hash": "8e30d88a6a074f040d6e51b5a3fa72f3",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/Services/KeybindingsService.swift": {
@@ -2085,13 +2085,13 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/agent-memory/memory.md": {
-    "mtime": 1781253751.5225883,
-    "ast_hash": "a0a1b4731291ba33aa98f63024a86961",
+    "mtime": 1781271964.658217,
+    "ast_hash": "67b6aa9b2dc55a956b2e90b9e8c4a97a",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/agent-memory/playbook.md": {
-    "mtime": 1781191460.8565853,
-    "ast_hash": "2a4838f38a18c085ce98a3a7f7bd1dd2",
+    "mtime": 1781271977.225328,
+    "ast_hash": "903d90b4f75cb61f02bea69885d9c31f",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/agent-memory/skill-log.md": {
@@ -8625,8 +8625,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/ViNormalMode.swift": {
-    "mtime": 1781240772.3455288,
-    "ast_hash": "d9f43f047558eea748aff1b99fb9cdd0",
+    "mtime": 1781271156.9396474,
+    "ast_hash": "83ff68a659225d714ed1cf340182f73f",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/FileTreeKeyboardNav.swift": {
