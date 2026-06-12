@@ -803,7 +803,7 @@ private final class PaneSplitButtonsView: NSView {
     }
 
     @objc private func closePane() {
-        SessionCoordinator.shared.killActivePane()
+        SessionCoordinator.shared.killPane(paneID: paneID)
     }
 }
 
@@ -847,6 +847,10 @@ final class HarnessSplitView: NSSplitView, NSSplitViewDelegate {
             if position > 0, position < totalSize {
                 setPosition(position, ofDividerAt: 0)
             }
+        }
+        subviews.forEach {
+            $0.needsLayout = true
+            $0.layoutSubtreeIfNeeded()
         }
     }
 

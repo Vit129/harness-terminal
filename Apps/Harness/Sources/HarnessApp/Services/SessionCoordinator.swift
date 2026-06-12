@@ -1040,6 +1040,14 @@ final class SessionCoordinator: NSObject {
         syncFromDaemon()
     }
 
+    /// Close a specific pane regardless of which pane is currently active — used by
+    /// per-pane UI (e.g. the hover close button) where the clicked pane may not be
+    /// the focused/active one.
+    func killPane(paneID: PaneID) {
+        requestDaemon(.killPane(paneID: paneID))
+        syncFromDaemon()
+    }
+
     func zoomActivePane() {
         guard let workspace = snapshot.activeWorkspace,
               let tab = workspace.activeTab,
