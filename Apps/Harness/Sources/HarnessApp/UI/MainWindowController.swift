@@ -132,12 +132,17 @@ final class MainWindowController: NSWindowController {
         let settings = SessionCoordinator.shared.settings
         let opacity = max(0, min(1, settings.backgroundOpacity))
         let isOpaque = opacity >= 0.999
+        // Minimum tint: even at ultra-clear the theme colour provides a floor so text
+        // stays legible regardless of what's behind — mirrors Apple's Liquid Glass
+        // lensing/diffusion approach in macOS/iOS 27. 0.15 = 15% theme tint minimum.
+        let minTint: CGFloat = 0.15
+        let tintAlpha = isOpaque ? 1.0 : max(CGFloat(opacity), minTint)
 
         window.titlebarAppearsTransparent = settings.transparentTitlebar
         window.isOpaque = isOpaque
         window.backgroundColor = isOpaque
             ? HarnessChrome.current.terminalBackground
-            : HarnessChrome.current.terminalBackground.withAlphaComponent(CGFloat(opacity))
+            : HarnessChrome.current.terminalBackground.withAlphaComponent(tintAlpha)
 
         // Drop the window shadow while translucent. macOS computes the drop shadow from the
         // window's content alpha (a rectangle), so on a translucent window it renders as a
