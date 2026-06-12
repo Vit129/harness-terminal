@@ -6,6 +6,38 @@ All notable changes to Harness are documented here. The format is based on
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/robzilla1738/harness-terminal/releases).
 
+## [2.5.0] - 2026-06-12
+
+### Added
+
+**Terminal power-user (vi, tmux, keyboard navigation)**
+
+- **Full vi normal mode in file editor.** `ViNormalMode.swift` implements the complete vi modal editing model: normal / insert / visual (v, V) / replace (R) / operator-pending modes; hjkl/wWbBeE/0^$/gg/G/{}/% motions; H/M/L screen-position jumps; Ctrl+d/u/f/b scroll; f/F/t/T/;/, character-find; `d/c/y` operators + text objects (`iw/aw`, `i"/a"`, `i'/a'`, `` i`/a` ``, `i(/a(`, `i[/a[`, `i{/a{`, `ip/ap`, `is/as`); `dd/cc/yy`; visual operators `d/y/c/>/</u/U/~/=`; `gv` reselect; marks `ma/'a/\`a`; named registers `"ayy/"ap`; macros `qa/@a/@@`; count prefix `3w`; `.` repeat; `ZZ/ZQ`; H/M/L; jump list Ctrl+o/Ctrl+i; inline `*/#` search highlight.
+- **Vi `:` ex command mode.** Overlay panel at window bottom: `:w` save, `:q`/`:wq`/`:x`/`:q!` close, `:N` go-to-line, `:s/old/new/g`, `:%s`, `:noh`, `:set number/relativenumber/hlsearch/ignorecase/wrap`, `:e <file>`, `:bn`/`:bp`, `:ls`/`:buffers`.
+- **`:set relativenumber`** renders true relative line numbers in the editor gutter.
+- **Inline `*` search highlight** — all occurrences highlighted in yellow; cleared by `:noh`.
+- **Jump list** — Ctrl+o (back) / Ctrl+i (forward); pushes on mark jump and go-to-definition.
+- **Keyboard navigation in file tree.** j/k move cursor, h/l collapse/expand folder, Enter/o open/preview file, g/G first/last entry, Ctrl+d/u half-page scroll, `/` focuses the filter field. Focused row is highlighted.
+- **LSP activated in file editor.** Hover tooltip (mouse-over), go-to-definition (⌘+click), and diagnostics underline now live. Supports Swift (sourcekit-lsp), TypeScript, Python (pyright), Rust (rust-analyzer), Go (gopls) — auto-detected by project root markers.
+- **⌘1–9 switches sidebar sessions** (workspaces) instead of tabs within a workspace.
+- **zoxide integration in Switch Project** (⌘K) — frecency list from `zoxide query -l` appended to open-tabs projects; selecting opens a new session in that directory.
+- **`clear-history` tmux command** — clears pane scrollback without respawning the shell.
+- **`word-separators` option** — configure double-click word boundary characters (`set-option -g word-separators " \t/.:"`).
+- **`wrap-search` option** — copy-mode `/` search stops at buffer edge when `off`; wraps when `on` (default).
+- **`show-prompt-history`** — displays `:` command history via display-message.
+- **`resize-window -x <cols> -y <rows>`** — overrides tab surface dimensions.
+- **`list-sessions/windows/panes/clients -F <format>`** — format-string output for all four list commands.
+- **`list-sessions/windows/panes/clients --json`** — JSON array output.
+- **`window-size` option** — vote aggregation strategy: `smallest` (default), `largest`, `latest`.
+- **`destroy-unattached` option** — kills all sessions when the last client detaches.
+- **`find-window -C` from hooks** — daemon-side content search via `capturePane`; no longer silently dropped.
+- **`resize-window` IPC** — `IPCMessage.resizeWindow(tabID:rows:cols:)` + SurfaceRegistry handler.
+- **`:bn`/`:bp` navigate file tabs** from vi ex command; `:ls`/`:buffers` lists open tabs.
+
+### Changed
+- `word-separators` default: space + tab (tmux default extended with tab).
+- `applyEffectiveSize` in DaemonServer reads `window-size` option to pick smallest/largest/latest client vote.
+
 ## [2.4.0] - 2026-06-12
 
 ### Added

@@ -5,7 +5,7 @@
 - **Fork:** Vit129/harness-terminal (fork of robzilla1738/harness-terminal)
 - **Working branch:** `main`
 - **Preview:** `make preview` (uses `.harness-preview/` dir)
-- **Latest release:** v2.3.0 (build 126, with post-release fixes: CASE-026, lazy reflow, task board, focus mode)
+- **Latest release:** v2.5.0 (commits 55c7bff + 6cd143d — terminal power-user sprint: vi mode, tmux parity, LSP, keyboard file tree)
 
 ## Current Sprint — Post-v2.1.0 Polish & Shelving
 
@@ -48,6 +48,10 @@
 | 30 | P10 implementation: Sidebar session state dots, Toggle IDE Mode shortcut (⌘⇧D), and Workspace Symbol Index autocomplete completions popup | ✅ Done |
 | 33 | Implement Ctrl+R-style fuzzy command-history search overlay | ✅ Done |
 | 34 | Fix Focus Mode (⌘P) out-of-sync sidebar state when manual visibility toggles occur | ✅ Done |
+| 35 | Terminal power-user sprint: vi mode (ViNormalMode.swift), tmux parity (clear-history, word-separators, wrap-search, resize-window, list-* -F/--json, window-size, destroy-unattached, show-prompt-history, find-window -C from hooks), LSP activation, ⌘1-9 session switch, zoxide in Switch Project | ✅ Done |
+| 36 | Keyboard file tree navigation (j/k/h/l/Enter, FileTreeKeyboardNav.swift) | ✅ Done |
+| 37 | Vi ex command mode (:w/:q/:wq/:set/:e/:bn/:bp/:ls), jump list (Ctrl+o/i), backtick marks, named registers, macros, inline * search, relative numbers | ✅ Done |
+| 38 | tmux deferred list closed: window-size option (smallest/largest/latest), list-* --json, find-window -C from hooks, destroy-unattached | ✅ Done |
 
 
 ### Recent_Lessons
@@ -68,6 +72,10 @@
 - **RL-014:** When extracting logic from large AppKit views: prefer standalone `enum` types with static methods for pure logic (geometry, validation, resolution). Keep the original method signature as a thin delegate — preserves the public API and test seams. Don't over-extract tightly-coupled state machines that would need large delegate protocols; those are better served by extension files.
 - **RL-015:** Pure GUI-side states (like file editor tab lists and IDE mode visibility) should be persisted via `UserDefaults.standard` rather than modifying the shared daemon settings struct `HarnessSettings`, preventing binary compatibility issues.
 - **RL-016:** On macOS/AppKit, to prevent click-gesture recognizers on parent stack views from intercepting clicks on child buttons, use `gestureRecognizer(_:shouldAttemptToRecognizeWith:)` of `NSGestureRecognizerDelegate` to selectively disable gesture recognition.
+- **RL-017:** SwiftUI `List` in `NSHostingView` doesn't forward `keyDown` to the parent NSView. Add `acceptsFirstResponder = true` + `keyDown` override on the hosting NSView wrapper, then post notifications to SwiftUI rows via `NotificationCenter` for state changes (expand/collapse).
+- **RL-018:** Modal vi engine inside `NSTextView`: set `isEditable = false` in normal mode and restore it only in insert mode. This prevents AppKit from consuming keystrokes meant for the vi engine. Use a `@MainActor final class` engine that holds `weak var textView: NSTextView?` and dispatches all mutations via `tv.isEditable = true; tv.replaceCharacters(...); tv.isEditable = false`.
+- **RL-019:** `SyntaxLineNumberGutterView.draw()` receives a locally-unwrapped non-optional `textView` (from `guard let textView, ...`) — inside the draw closure `textView` is `NSTextView`, not `NSTextView?`. Conditional binding `if let tv2 = textView` inside that closure will fail to compile because it's already non-optional.
+- **RL-020:** `window-size` vote aggregation: DaemonServer tracks per-client surface sizes; `applyEffectiveSize` picks the winning vote. Reading `registry.optionStore.get("window-size")` inside DaemonServer is correct since `optionStore` is `public let` on SurfaceRegistry.
 
 ### Decisions_In_Force
 
@@ -75,6 +83,9 @@
 - **Agent tab hidden** — 4th sidebar segment commented out, code preserved
 - **CWD tracking** — daemon polls proc_pidinfo every 500ms (lightweight); no shell integration needed
 - **File preview** — constraint-based sibling panel (never reparent terminal views)
+- **vi mode** — `ViNormalMode.swift` is a self-contained engine (`@MainActor final class ViEngine`); `SyntaxTextView` owns the instance and wires callbacks. Notifications used for cross-layer actions (:q → `viQuitCommand`, :e → `viOpenFileCommand`, :bn/:bp → `viNextBufferCommand`).
+- **⌘1–9** — switches workspaces (sidebar sessions), not tabs within a workspace
+- **Keyboard file tree** — `FileTreeKeyboardNav.swift` holds `FileTreeKeyboardState` (@Observable); AppKit (`WorkspaceFileTreeView.keyDown`) writes, SwiftUI (`NodeRow`) reads for highlight; `updateVisiblePaths()` keeps flat ordered list in sync
 
 ## Known Issues
 - **Split right 4+ panes slightly uneven** — NSSplitView default resize compresses middle panes. Tolerable.
@@ -90,13 +101,17 @@
 ## Architecture Notes
 - Sidebar: `HarnessSidebarPanelViewController` — tabs (Sessions/Files/Git) via NSSegmentedControl (Agent tab hidden)
 - Sidebar position: `MainSplitViewController.updateSidebarPlacement()` — reorders NSSplitView subviews
-- File tree: `WorkspaceFileTreeView` → `FileTreeSwiftUIView` (SwiftUI) with `FileTreeWatcher` (FSEvents)
+- File tree: `WorkspaceFileTreeView` → `FileTreeSwiftUIView` (SwiftUI) with `FileTreeWatcher` (FSEvents); keyboard nav via `FileTreeKeyboardNavigator` + `FileTreeKeyboardState` (@Observable)
 - Git panel: `GitPanelView` — changes/history/worktrees; FSEvents recursive watcher on rootPath (utility queue, 500ms debounce)
 - Split panes: `PaneContainerView` builds from `PaneNode` binary tree; `HarnessSplitView` per branch node
 - Sessions: `SessionCoordinator.shared` — async IPC, snapshot notifications via `NotificationBus.shared.snapshotChanged`
 - File preview: `ContentAreaViewController.showFileEditorSplit()` — constraint-based sibling panel (40% editor / 60% terminal), never reparents terminal views; `refreshEditorPanelFill()` uses compensated opacity so editor preview visually matches terminal density
 - File preview live reload: `FileChangeWatcher` (Services/FileExplorer) — single-file DispatchSource, 0.3s debounce, used by `FileEditorView` and `FileViewerViewController` to reload on external edits
+- File editor vi mode: `ViEngine` in `ViNormalMode.swift` — `@MainActor final class`, wired via `SyntaxTextView.vi`; callbacks: `onSave`, `onQuit`, `onOpenFile`, `onSetOption`, `onNextBuffer`, `onSearchHighlight`; ex commands post notifications (`viQuitCommand`, `viOpenFileCommand`, `viNextBufferCommand`)
+- LSP: `LSPFileSession` in `HarnessApp/UI/` wraps `HarnessLSP.LSPClient`; auto-detects Swift/TS/Python/Rust/Go by project markers; hover + go-to-def + diagnostics wired in `FileEditorView`
 - CWD tracking: `AgentScanner.cwdTimer` (500ms) → `SurfaceRegistry.refreshCwdOnly()` (proc_pidinfo) → `snapshotChanged` → sidebar reload
 - ACP Client: SHELVED — code intact (`ACPClient`, `ACPSession`, `AgentChatPanelView`, `AgentConfig`)
 - Preview uses `.harness-preview/` — socket path max 103 bytes (use `/tmp/hp` symlink for worktree)
 - SoftIconButton: supports `rightMouseDown` → pops up assigned `.menu`
+- ⌘1–9: `MenuTarget.selectSessionNumber` → `SessionCoordinator.selectWorkspace(byIndex:)`
+- tmux: `window-size` option read in `DaemonServer.applyEffectiveSize`; `list-*` commands in `MainExecutor` render `-F` format strings and `--json` arrays

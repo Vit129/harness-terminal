@@ -56,15 +56,22 @@ the single honest ledger. Updated last for the 2026-06 parity close-out series
 
 ## Deferred (tracked, unimplemented)
 
-- `window-size` (smallest/largest/latest vote aggregation) + `resize-window` manual override
-- `destroy-unattached` enforcement
-- `word-separators`, `wrap-search` (copy-mode engine plumbing)
 - `status-interval` (status refresh is currently event-driven)
-- `find-window` multi-match picker; `-C` content search from hooks (front-ends only today)
-- `list-*` `-F` format-string output (rows are fixed-shape + `--json`)
-- `clear-history` (clear a pane's scrollback without respawning — today only
-  `respawn-pane -k` clears, and it replaces the process)
-- `show-prompt-history` (command-prompt keeps no input history yet)
+- `find-window` multi-match picker (currently focuses first snapshot-order match)
+- `word-separators` for copy-mode word motions (double-click uses it; copy-mode w/b/e does not yet read the option)
+
+## Implemented (previously deferred, now shipped)
+
+- ✅ `window-size` option (smallest/largest/latest) — `DaemonServer.applyEffectiveSize` reads the option
+- ✅ `resize-window -x/-y` — `IPCMessage.resizeWindow` + SurfaceRegistry handler
+- ✅ `destroy-unattached` — enforced in `SurfaceRegistry.fireClientDetached`
+- ✅ `word-separators` — double-click word selection; `OptionStore` default `" \t"`
+- ✅ `wrap-search` — copy-mode `CopyModeState.wrapSearch`, `matchIndex(wrap:)`
+- ✅ `find-window -C` from hooks — `DaemonCommandExecutor` does inline capturePane
+- ✅ `list-*` `-F` format-string + `--json` — all four list commands in `MainExecutor`
+- ✅ `clear-history` — `IPCMessage.clearHistory` → `RealPty.clearHistory()`
+- ✅ `show-prompt-history` — `CommandPromptController.shared.historyEntries` via display-message
+- ✅ `list-sessions`, `list-windows`, `list-panes`, `list-clients` commands added
 
 ## Invariants this ledger protects
 

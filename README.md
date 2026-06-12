@@ -57,14 +57,16 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Remote & headless daemon: run `HarnessDaemon` on a headless or remote box (Linux included) and drive it with `harness-cli --host <name>` over an SSH tunnel — register hosts with `harness-cli remote add`
 - `harness-cli` for automation and agent hooks
 - Color/theme diagnostics from the CLI: `harness-cli color-check` and `harness-cli theme-preview --theme <name>` print deterministic SGR pages for eyeballing fidelity in Harness itself
-- Command set: `send-keys`, `capture-pane`, `kill-pane`, `resize-pane`, `zoom-pane`, `swap-pane`, `rename-tab`, `attach`, `find-window`, `kill-server`, `start-server`, `respawn-window`, `refresh-client`, and more
+- Command set: `send-keys`, `capture-pane`, `kill-pane`, `resize-pane`, `zoom-pane`, `swap-pane`, `rename-tab`, `attach`, `find-window`, `kill-server`, `start-server`, `respawn-window`, `refresh-client`, `clear-history`, `resize-window`, and more
 - Command prefix keymap (default `Ctrl-A`) with a live cheatsheet (prefix `?`)
+- **tmux parity options:** `word-separators`, `wrap-search`, `window-size` (smallest/largest/latest), `destroy-unattached`, `show-prompt-history`, `list-sessions/windows/panes/clients -F <format> [--json]`
 - Agent detection for Claude Code, Codex, Cursor, Grok, Pi, Hermes, OpenClaw, OpenCode, Aider, Gemini, and Goose — each with a brand color and a sidebar chip
 - Agent alerts as desktop banners and a sidebar bell; `Cmd+Shift+U` jumps to whoever is waiting
 - One-line hook install: `harness-cli install-hooks <agent>`
-- Command palette (`Cmd+K`) with fuzzy file quick-open, Switch Project (tmux-sessionizer-style), and workspace symbol search
+- Command palette (`Cmd+K`) with fuzzy file quick-open, Switch Project (tmux-sessionizer-style + zoxide frecency), and workspace symbol search
 - Search command history with `Ctrl+R` — fuzzy search overlay with recency sorting, seeds the command prompt on selection
 - Layout presets (`Cmd+Opt+1`–`5`): Even Horizontal, Even Vertical, Main Horizontal, Main Vertical, Tiled — instant one-key splits
+- **⌘1–9 switches between sidebar sessions** (workspaces)
 - Git worktrees auto-open/close session tabs on add/remove
 - A native macOS Settings window (`Cmd+,`)
 - 490 built-in color themes with a muted Harness default, plus `.harnesstheme` export / import for sharing — double-click (or Open With) a theme file to install it, optionally applying its colors immediately
@@ -73,6 +75,9 @@ New installs start in Plain. Moving over from another setup? See [docs/MIGRATION
 - Drag file-backed folders or images into a pane to insert shell-quoted paths
 - Set Harness as the default terminal for SSH/Telnet/man-page links and `.command` / `.tool` files from Settings > Terminal
 - Automatic, signed background updates (Sparkle + EdDSA)
+- **Full vi mode in file editor** — normal/insert/visual/replace/operator-pending; all motions, operators, text objects, marks, registers, macros, jump list; `:` ex commands (`:w`, `:q`, `:s/old/new/g`, `:%s`, `:set number/relativenumber`, `:e <file>`, `:bn/:bp`)
+- **Keyboard navigation in file tree** — j/k move, h/l fold/expand, Enter open, g/G first/last, `/` filter
+- **LSP in file editor** — hover tooltip, go-to-definition (⌘+click), diagnostics underline (Swift, TypeScript, Python, Rust, Go)
 
 ## harness-cli
 
@@ -93,8 +98,8 @@ harness-cli theme-preview --theme "Harness Default"
 | **GPU Terminal** | Metal renderer, 490 themes, inline images (Sixel/Kitty/iTerm2), ligatures, procedural box-drawing |
 | **Daemon** | Sessions survive quit/relaunch, scrollback persists to disk, attach from CLI or remote SSH |
 | **CMUX** | Binary-tree split panes, drag-to-split, auto-balanced ratios, pane-local surface tabs |
-| **File Tree** | FSEvents live-watch, git status colors, click-to-open in editor, context menu |
-| **File Editor** | 20+ language syntax highlighting, vi-mode, find/replace, git diff gutter |
+| **File Tree** | FSEvents live-watch, git status colors, keyboard navigation (j/k/h/l/Enter), context menu |
+| **File Editor** | 20+ language syntax highlighting, full vi mode (normal/visual/operator/ex), LSP (hover/go-to-def/diagnostics), find/replace, git diff gutter, relative line numbers |
 | **Git Panel** | Stage/unstage, commit (amend/signoff), fetch/pull/push, branch switch, history + diff, worktrees |
 | **Agent Chat** | ACP Client over stdio — shelved (code preserved, adapters not yet available) |
 | **Agent Detection** | Process-tree scan for 12+ agents, brand colors, desktop notifications, Cmd+Shift+U jump |
