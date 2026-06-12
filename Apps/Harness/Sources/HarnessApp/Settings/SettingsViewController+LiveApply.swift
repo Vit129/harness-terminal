@@ -100,6 +100,34 @@ extension SettingsViewController {
         applySettingsLive()
     }
 
+    /// Per-mode opacity override for the light theme (auto light/dark). If the light theme is
+    /// the one currently active, also drive the main opacity slider live so the change is
+    /// visible immediately.
+    @objc func lightOpacityDidChange() {
+        let value = HarnessSettings.clampedOpacity(Float(lightOpacitySlider.doubleValue))
+        lightOpacityLabel.stringValue = formatPercent(value)
+        SessionCoordinator.shared.settings.lightThemeOpacity = value
+        try? SessionCoordinator.shared.settings.save()
+        if !SessionCoordinator.isSystemAppearanceDark {
+            opacitySlider.doubleValue = Double(value)
+            opacityLabel.stringValue = formatPercent(value)
+            applySettingsLive()
+        }
+    }
+
+    /// Per-mode opacity override for the dark theme (auto light/dark). Mirrors `lightOpacityDidChange`.
+    @objc func darkOpacityDidChange() {
+        let value = HarnessSettings.clampedOpacity(Float(darkOpacitySlider.doubleValue))
+        darkOpacityLabel.stringValue = formatPercent(value)
+        SessionCoordinator.shared.settings.darkThemeOpacity = value
+        try? SessionCoordinator.shared.settings.save()
+        if SessionCoordinator.isSystemAppearanceDark {
+            opacitySlider.doubleValue = Double(value)
+            opacityLabel.stringValue = formatPercent(value)
+            applySettingsLive()
+        }
+    }
+
     @objc func themeDidChange() {
         guard let theme = themePopup.titleOfSelectedItem else { return }
         // A theme is a starting preset: seed the full editable color set, then
@@ -163,9 +191,21 @@ extension SettingsViewController {
             ? (lightThemePopup.titleOfSelectedItem ?? coordinator.snapshot.themeName) : nil
         coordinator.settings.darkThemeName = enabled
             ? (darkThemePopup.titleOfSelectedItem ?? coordinator.snapshot.themeName) : nil
+        // Seed per-mode opacity from the current value the first time auto light/dark is turned
+        // on, so the new sliders start at today's opacity rather than an unset/default value.
+        if enabled {
+            if coordinator.settings.lightThemeOpacity == nil {
+                coordinator.settings.lightThemeOpacity = coordinator.settings.backgroundOpacity
+            }
+            if coordinator.settings.darkThemeOpacity == nil {
+                coordinator.settings.darkThemeOpacity = coordinator.settings.backgroundOpacity
+            }
+        }
         try? coordinator.settings.save()
         lightThemePopup.isEnabled = enabled
         darkThemePopup.isEnabled = enabled
+        lightOpacitySlider.isEnabled = enabled
+        darkOpacitySlider.isEnabled = enabled
         themePopup.isEnabled = !enabled
         // Apply immediately (picks the theme matching the current system), then refresh the main
         // window chrome so it follows / un-follows the system appearance.
@@ -498,6 +538,14 @@ extension SettingsViewController {
         themePopup.isEnabled = !autoThemeOn
         lightThemePopup.selectItem(withTitle: settings.lightThemeName ?? SessionCoordinator.shared.snapshot.themeName)
         darkThemePopup.selectItem(withTitle: settings.darkThemeName ?? SessionCoordinator.shared.snapshot.themeName)
+        lightOpacitySlider.isEnabled = autoThemeOn
+        darkOpacitySlider.isEnabled = autoThemeOn
+        let lightOpacity = settings.lightThemeOpacity ?? settings.backgroundOpacity
+        let darkOpacity = settings.darkThemeOpacity ?? settings.backgroundOpacity
+        lightOpacitySlider.doubleValue = Double(lightOpacity)
+        lightOpacityLabel.stringValue = formatPercent(lightOpacity)
+        darkOpacitySlider.doubleValue = Double(darkOpacity)
+        darkOpacityLabel.stringValue = formatPercent(darkOpacity)
         showStatusLineToggle.state = settings.showStatusLine ? .on : .off
         sidebarVisibleToggle.state = settings.sidebarVisible ? .on : .off
         sidebarOnRightToggle.state = settings.sidebarOnRight ? .on : .off

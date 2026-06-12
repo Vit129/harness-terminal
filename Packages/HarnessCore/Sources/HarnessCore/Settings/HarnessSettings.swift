@@ -241,6 +241,12 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
     /// under Light, `darkThemeName` under Dark. nil = off (the single `themeName` is used).
     public var lightThemeName: String?
     public var darkThemeName: String?
+    /// Per-mode `backgroundOpacity` override applied whenever auto light/dark switches to that
+    /// theme. `nil` leaves `backgroundOpacity` untouched for that mode. Lets a light theme with
+    /// a near-white background stay fully opaque (translucency over a busy desktop makes light
+    /// text/backgrounds unreadable) while a dark theme keeps the translucent look.
+    public var lightThemeOpacity: Float?
+    public var darkThemeOpacity: Float?
     /// Confirm before pasting text containing newlines / control characters when the program has
     /// not enabled bracketed paste — guards against blind multi-line command execution.
     public var pasteProtection: Bool
@@ -356,6 +362,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         minimumContrast: Double = 1,
         lightThemeName: String? = nil,
         darkThemeName: String? = nil,
+        lightThemeOpacity: Float? = nil,
+        darkThemeOpacity: Float? = nil,
         pasteProtection: Bool = true,
         commandFinishedThresholdSeconds: Int = 10,
         notificationEvents: [String: Bool] = [:],
@@ -422,6 +430,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
         self.minimumContrast = HarnessSettings.clampedContrast(minimumContrast)
         self.lightThemeName = lightThemeName
         self.darkThemeName = darkThemeName
+        self.lightThemeOpacity = lightThemeOpacity
+        self.darkThemeOpacity = darkThemeOpacity
         self.pasteProtection = pasteProtection
         self.commandFinishedThresholdSeconds = max(0, commandFinishedThresholdSeconds)
         self.notificationEvents = notificationEvents
@@ -596,6 +606,8 @@ public struct HarnessSettings: Codable, Sendable, Equatable {
             try container.decodeIfPresent(Double.self, forKey: .minimumContrast) ?? fallback.minimumContrast)
         lightThemeName = try container.decodeIfPresent(String.self, forKey: .lightThemeName)
         darkThemeName = try container.decodeIfPresent(String.self, forKey: .darkThemeName)
+        lightThemeOpacity = try container.decodeIfPresent(Float.self, forKey: .lightThemeOpacity)
+        darkThemeOpacity = try container.decodeIfPresent(Float.self, forKey: .darkThemeOpacity)
         pasteProtection = try container.decodeIfPresent(Bool.self, forKey: .pasteProtection) ?? fallback.pasteProtection
         commandFinishedThresholdSeconds =
             try container.decodeIfPresent(Int.self, forKey: .commandFinishedThresholdSeconds) ?? fallback.commandFinishedThresholdSeconds
