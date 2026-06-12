@@ -499,6 +499,8 @@ public final class HarnessTerminalSurfaceView: NSView {
     /// Characters treated as word boundaries for double-click selection and copy-mode word motions.
     /// Maps to the `word-separators` option (default: space + tab).
     public var wordSeparators: String = " \t"
+    /// When false, copy-mode search stops at the buffer edge instead of wrapping. Maps to `wrap-search`.
+    public var wrapSearch: Bool = true
 
     // MARK: Find (in-scrollback search bar)
     /// True while the Cmd+F find bar is open; gates highlight rendering + scroll-to-match.

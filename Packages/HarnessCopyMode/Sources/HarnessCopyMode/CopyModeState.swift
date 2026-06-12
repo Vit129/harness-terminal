@@ -76,19 +76,23 @@ public struct CopyModeState: Equatable, Sendable {
     /// Virtual line index shown at the top of the rendered viewport.
     public var viewTop: Int
     public var search: CopyModeSearch
+    /// When false, search stops at the top/bottom instead of wrapping. Maps to `wrap-search`.
+    public var wrapSearch: Bool = true
 
     public init(
         cursor: GridPosition,
         anchor: GridPosition? = nil,
         mode: CopyModeSelectionMode = .none,
         viewTop: Int = 0,
-        search: CopyModeSearch = CopyModeSearch()
+        search: CopyModeSearch = CopyModeSearch(),
+        wrapSearch: Bool = true
     ) {
         self.cursor = cursor
         self.anchor = anchor
         self.mode = mode
         self.viewTop = viewTop
         self.search = search
+        self.wrapSearch = wrapSearch
     }
 
     /// tmux-style mode label for the status indicator.

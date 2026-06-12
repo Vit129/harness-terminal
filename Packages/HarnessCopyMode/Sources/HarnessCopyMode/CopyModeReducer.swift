@@ -14,14 +14,16 @@ public enum CopyModeReducer {
     public static func initialState(
         grid: CopyModeGridSource,
         cursorLine: Int? = nil,
-        cursorColumn: Int = 0
+        cursorColumn: Int = 0,
+        wrapSearch: Bool = true
     ) -> CopyModeState {
         let total = max(1, grid.totalLines)
         let rows = max(1, grid.viewportRows)
         let line = min(max(0, cursorLine ?? (total - 1)), total - 1)
         let state = CopyModeState(
             cursor: GridPosition(line: line, column: max(0, cursorColumn)),
-            viewTop: max(0, total - rows)
+            viewTop: max(0, total - rows),
+            wrapSearch: wrapSearch
         )
         return reveal(state, grid: grid)
     }
@@ -259,28 +261,30 @@ public enum CopyModeReducer {
             s.search.currentIndex = nil
             return s
         }
-        let idx = matchIndex(after: s.cursor, forward: forward, matches: s.search.matches) ?? (forward ? 0 : s.search.matches.count - 1)
+        guard let idx = matchIndex(after: s.cursor, forward: forward, matches: s.search.matches, wrap: s.wrapSearch) else {
+            return s  // no more matches in this direction and wrap-search is off
+        }
         s.search.currentIndex = idx
         let m = s.search.matches[idx]
         s.cursor = GridPosition(line: m.line, column: m.startColumn)
         return reveal(s, grid: grid)
     }
 
-    /// Index of the next match strictly after `cursor` in reading order (wrapping). `matches`
-    /// are assumed sorted by `(line, startColumn)`.
-    private static func matchIndex(after cursor: GridPosition, forward: Bool, matches: [CopyModeMatch]) -> Int? {
+    /// Index of the next match strictly after `cursor` in reading order. When `wrap` is true
+    /// (the default, tmux's `wrap-search on`), cycles around; when false, returns nil at the end.
+    private static func matchIndex(after cursor: GridPosition, forward: Bool, matches: [CopyModeMatch], wrap: Bool = true) -> Int? {
         guard !matches.isEmpty else { return nil }
         if forward {
             for (i, m) in matches.enumerated() where (m.line, m.startColumn) > (cursor.line, cursor.column) {
                 return i
             }
-            return 0 // wrap
+            return wrap ? 0 : nil
         } else {
             for i in stride(from: matches.count - 1, through: 0, by: -1) {
                 let m = matches[i]
                 if (m.line, m.startColumn) < (cursor.line, cursor.column) { return i }
             }
-            return matches.count - 1 // wrap
+            return wrap ? matches.count - 1 : nil
         }
     }
 

@@ -154,9 +154,10 @@ public final class OptionStore: @unchecked Sendable {
         // keeps a pane's dead leaf so `respawn-pane` can revive it; off closes the pane (or
         // its tab when last) when the shell exits — read in the daemon's PTY-exit handler.
         "remain-on-exit": .bool(true),
-        // `word-separators`: characters treated as word boundaries for double-click selection
-        // and copy-mode word motions. tmux default is " " (space only); we include tab too.
         "word-separators": .string(" \t"),
+        // `wrap-search`: when on (default, tmux default), search wraps around the buffer;
+        // when off, searching stops at the top/bottom without wrapping.
+        "wrap-search": .bool(true),
         // (`bind -r`) so the key repeats without re-pressing the prefix. Read by `PrefixKeymap`.
         "repeat-time": .int(500),
         // How Harness identifies itself to programs (`TERM_PROGRAM` env + XTVERSION/secondary-DA

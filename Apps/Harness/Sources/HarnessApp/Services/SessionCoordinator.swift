@@ -332,10 +332,14 @@ final class SessionCoordinator: NSObject {
             cursorHex: settings.customCursorHex
         )
         let allowClipboard = HarnessOptions.shared.get("set-clipboard")?.boolValue ?? true
+        let wordSep = HarnessOptions.shared.get("word-separators")?.stringValue ?? " \t"
+        let wrapSearch = HarnessOptions.shared.get("wrap-search")?.boolValue ?? true
         for host in terminalHosts.allHosts() {
             host.applyTheme(named: snapshot.themeName)
             host.applySettings(settings)
             host.allowProgramClipboardAccess = allowClipboard
+            host.wordSeparators = wordSep
+            host.wrapSearch = wrapSearch
             applyTerminalIdentity(to: host)
             pushBorderColors(to: host)
         }
@@ -501,10 +505,14 @@ final class SessionCoordinator: NSObject {
             cursorHex: settings.customCursorHex
         )
         let allowClipboard = HarnessOptions.shared.get("set-clipboard")?.boolValue ?? true
+        let wordSep = HarnessOptions.shared.get("word-separators")?.stringValue ?? " \t"
+        let wrapSearch = HarnessOptions.shared.get("wrap-search")?.boolValue ?? true
         for host in terminalHosts.allHosts() {
             host.applyTheme(named: snapshot.themeName)
             host.applySettings(settings)
             host.allowProgramClipboardAccess = allowClipboard
+            host.wordSeparators = wordSep
+            host.wrapSearch = wrapSearch
             applyTerminalIdentity(to: host)
             pushBorderColors(to: host)
         }

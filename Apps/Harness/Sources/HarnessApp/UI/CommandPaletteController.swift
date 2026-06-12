@@ -289,7 +289,7 @@ enum CommandPaletteController {
             }
         }
 
-        // MARK: - Projects
+        // MARK: - Projects (open tabs + zoxide frecency)
         var seenRoots = Set<String>()
         for workspace in snapshot.workspaces {
             for session in workspace.sessions {
@@ -317,6 +317,28 @@ enum CommandPaletteController {
                         })
                     }
                 }
+            }
+        }
+        // Augment with zoxide frecency list (best effort — silently skip if not installed).
+        if let zoxideOutput = try? Process.zoxideQueryAll(), !zoxideOutput.isEmpty {
+            for path in zoxideOutput.components(separatedBy: "\n") {
+                let root = path.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !root.isEmpty, seenRoots.insert(root).inserted else { continue }
+                let title = HarnessDesign.pathDisplayName(root)
+                let subtitle = HarnessDesign.shortenPath(root)
+                let capturedRoot = root
+                actions.append(PaletteAction(
+                    id: "project.\(root)",
+                    title: title,
+                    subtitle: subtitle,
+                    symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    shortcut: "",
+                    section: .projects
+                ) {
+                    if let wsID = coordinator.snapshot.activeWorkspaceID {
+                        coordinator.addSession(to: wsID, cwd: capturedRoot)
+                    }
+                })
             }
         }
 
