@@ -1016,6 +1016,31 @@ final class SessionCoordinator: NSObject {
         syncFromDaemon()
     }
 
+    func closeTabs(under path: String) async {
+        let standardParent = (path as NSString).standardizingPath
+        var tabsToClose: [(tabID: TabID, surfaceIDs: [SurfaceID])] = []
+        for workspace in snapshot.workspaces {
+            for session in workspace.sessions {
+                for tab in session.tabs {
+                    let standardTabPath = (tab.cwd as NSString).standardizingPath
+                    if standardTabPath == standardParent || standardTabPath.hasPrefix(standardParent + "/") {
+                        tabsToClose.append((tab.id, tab.rootPane.allSurfaceIDs()))
+                    }
+                }
+            }
+        }
+        
+        guard !tabsToClose.isEmpty else { return }
+        
+        for item in tabsToClose {
+            for surfaceID in item.surfaceIDs {
+                terminalHosts.removeHost(for: surfaceID)
+            }
+            _ = await requestDaemon(.closeTab(tabID: item.tabID))
+        }
+        _ = await syncFromDaemon()
+    }
+
     /// Select a tab, then split its active pane — used by the tab context menu so the
     /// split lands in the right tab regardless of which tab was previously active.
     func splitTab(workspaceID: WorkspaceID, tabID: TabID, direction: SplitDirection) {

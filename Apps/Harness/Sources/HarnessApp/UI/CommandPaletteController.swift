@@ -7,7 +7,7 @@ import HarnessTerminalKit
 @MainActor
 struct PaletteAction: Identifiable {
     enum Section: Int, CaseIterable {
-        case recent, actions, navigation, tabs, themes
+        case recent, actions, navigation, tabs, projects, themes
 
         var title: String {
             switch self {
@@ -15,6 +15,7 @@ struct PaletteAction: Identifiable {
             case .actions: return "Actions"
             case .navigation: return "Navigation"
             case .tabs: return "Tabs"
+            case .projects: return "Switch Project"
             case .themes: return "Themes"
             }
         }
@@ -282,6 +283,37 @@ enum CommandPaletteController {
                     ) {
                         coordinator.selectTab(workspaceID: workspace.id, tabID: tab.id)
                     })
+                }
+            }
+        }
+
+        // MARK: - Projects
+        var seenRoots = Set<String>()
+        for workspace in snapshot.workspaces {
+            for session in workspace.sessions {
+                for tab in session.tabs {
+                    let cwd = tab.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cwd.isEmpty else { continue }
+                    let root = HarnessDesign.projectGroupRootPath(for: cwd)
+                    if seenRoots.insert(root).inserted {
+                        let title = HarnessDesign.pathDisplayName(root)
+                        let subtitle = HarnessDesign.shortenPath(root)
+                        let wsID = workspace.id
+                        let tabID = tab.id
+                        actions.append(PaletteAction(
+                            id: "project.\(root)",
+                            title: title,
+                            subtitle: subtitle,
+                            symbol: "folder",
+                            shortcut: "",
+                            section: .projects
+                        ) {
+                            if coordinator.snapshot.activeWorkspaceID != wsID {
+                                coordinator.selectWorkspace(wsID)
+                            }
+                            coordinator.selectTab(workspaceID: wsID, tabID: tabID)
+                        })
+                    }
                 }
             }
         }
@@ -622,7 +654,7 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
         var selectable: [Int] = []
         if query.isEmpty {
             // Empty: keep section order natural — recent first, then everything else.
-            let sectionsInOrder: [PaletteAction.Section] = [.recent, .actions, .navigation, .tabs, .themes]
+            let sectionsInOrder: [PaletteAction.Section] = [.recent, .actions, .navigation, .tabs, .projects, .themes]
             for section in sectionsInOrder {
                 let entries = matches.filter { $0.action.section == section }
                 if entries.isEmpty { continue }

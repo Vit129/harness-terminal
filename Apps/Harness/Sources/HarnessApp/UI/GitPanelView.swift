@@ -453,6 +453,12 @@ final class GitPanelView: NSView {
 
         Task {
             _ = await runGit(["worktree", "add", worktreePath, branch], in: path)
+            if FileManager.default.fileExists(atPath: worktreePath) {
+                let coordinator = SessionCoordinator.shared
+                if let workspaceID = coordinator.snapshot.activeWorkspaceID {
+                    coordinator.addSession(to: workspaceID, cwd: worktreePath, name: (worktreePath as NSString).lastPathComponent)
+                }
+            }
             await refresh()
         }
     }
@@ -460,6 +466,7 @@ final class GitPanelView: NSView {
     @objc private func removeWorktreeAction(_ sender: NSButton) {
         guard let path = currentPath, let worktreePath = sender.toolTip else { return }
         Task {
+            await SessionCoordinator.shared.closeTabs(under: worktreePath)
             _ = await runGit(["worktree", "remove", worktreePath], in: path)
             await refresh()
         }
