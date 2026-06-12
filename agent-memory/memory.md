@@ -5,7 +5,7 @@
 - **Fork:** Vit129/harness-terminal (fork of robzilla1738/harness-terminal)
 - **Working branch:** `main`
 - **Preview:** `make preview` (uses `.harness-preview/` dir)
-- **Latest release:** v2.5.1 (build 129 — translucent window legibility tint, per-theme opacity, ⌘1-9 session switch fix)
+- **Latest release:** v2.5.2 (build 130 — Metal surface memory leak fix on pane close, Vi mode crash on surrogate clipboard, ⌘1–9 renamed selectWorkspaceNumber)
 
 ## Current Sprint — Post-v2.1.0 Polish & Shelving
 
@@ -57,6 +57,11 @@
 | 41 | Translucent window legibility: use terminalBackground.withAlphaComponent(opacity) instead of .clear (CASE-027) | ✅ Done |
 | 42 | Code review + bug fixes: async syncFromDaemon missing terminalHosts.prune(), ViNormalMode force-unwrap crash on surrogate unichars, selectSessionNumber rename to selectWorkspaceNumber | ✅ Done |
 | 43 | fzf install + shell integration (brew install fzf + source <(fzf --zsh) in ~/.zshrc) | ✅ Done |
+
+### Removed / Reverted Features
+- **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.
+- **Focus Mode (⌘P)** — status unclear; no TaskBoardView or FocusMode symbol found in source scan. Verify before documenting.
+- **⌘1–9** — `selectSessionNumber` was renamed to `selectWorkspaceNumber` in v2.5.2. Switches workspaces (not sessions within workspace).
 
 
 ### Recent_Lessons
