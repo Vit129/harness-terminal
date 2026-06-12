@@ -1,0 +1,139 @@
+# Navigation & Files
+cd -	go to previous directory
+cd ~	go to home directory
+pwd	print working directory
+ls -la	list all files, long format, including hidden
+ls -lh	list with human-readable sizes
+cp -r src dst	copy directory recursively
+mv src dst	move/rename file or directory
+rm -rf dir	remove directory recursively (careful!)
+mkdir -p a/b/c	create nested directories
+touch file	create empty file / update mtime
+ln -s target link	create symbolic link
+stat file	show file metadata (size, perms, times)
+tree -L 2	show directory tree, 2 levels deep
+file path	detect file type
+
+# Search
+find . -name "*.ts"	find files by name pattern
+find . -mtime -1	find files modified in last day
+find . -type f -size +10M	find files larger than 10MB
+grep -rn "pattern" .	recursive search with line numbers
+grep -v "pattern"	invert match (lines NOT matching)
+grep -i "pattern"	case-insensitive search
+rg "pattern"	ripgrep: fast recursive search, respects .gitignore
+fd "name"	fd: fast find alternative
+fzf	interactive fuzzy finder over stdin
+zoxide / z proj	jump to frequently used directory
+
+# Text Processing
+cat file	print file contents
+less file	paginated viewer (q to quit, / to search)
+head -n 20 file	first 20 lines
+tail -n 20 file	last 20 lines
+tail -f file	follow file for new lines (logs)
+sort file	sort lines
+sort -u file	sort and remove duplicates
+uniq -c	count duplicate adjacent lines
+wc -l file	count lines
+cut -d, -f1,3 file	extract columns 1 and 3 (comma-delimited)
+awk '{print $1}' file	print first whitespace-delimited field
+sed 's/old/new/g' file	replace text (stream editor)
+xargs	build/execute commands from stdin
+tr 'a-z' 'A-Z'	translate characters (e.g. to uppercase)
+diff a b	show differences between two files
+column -t	align columns into a table
+
+# Permissions & Ownership
+chmod +x file	make file executable
+chmod 644 file	rw-r--r-- permissions
+chmod -R 755 dir	apply permissions recursively
+chown user:group file	change owner and group
+sudo command	run command as superuser
+sudo -i	open root shell
+umask	show/set default permission mask
+
+# Processes & Jobs
+ps aux	list all running processes
+ps aux | grep name	find process by name
+top / htop	live process monitor
+kill -9 PID	force kill a process
+killall name	kill all processes by name
+jobs	list background jobs
+bg / fg	resume job in background/foreground
+Ctrl+Z	suspend current foreground job
+nohup cmd &	run command immune to hangups, in background
+disown	detach job from shell
+lsof -i :8080	show what's using port 8080
+pkill -f pattern	kill processes matching command pattern
+
+# Disk & System
+df -h	disk free space, human-readable
+du -sh dir	total size of a directory
+du -sh * | sort -rh	sizes of items in cwd, largest first
+mount	show mounted filesystems
+free -h	memory usage (Linux)
+uname -a	kernel/system info
+uptime	system uptime and load average
+which cmd	show path of command
+whereis cmd	locate binary/source/man for command
+env	show environment variables
+export VAR=value	set environment variable
+
+# Networking
+curl -sS url	fetch URL silently, show errors
+curl -I url	fetch headers only (HEAD request)
+curl -o file url	download to file
+wget url	download file
+ssh user@host	remote shell
+ssh -L 8080:localhost:80 host	local port forward via SSH
+scp file user@host:path	copy file over SSH
+rsync -avz src dst	sync directories (archive, verbose, compress)
+ping host	test connectivity
+ss -tulpn	list listening sockets (modern netstat)
+nc -zv host port	test if a port is open
+
+# Archives
+tar -czf out.tar.gz dir	create gzipped tarball
+tar -xzf file.tar.gz	extract gzipped tarball
+tar -tzf file.tar.gz	list contents of tarball
+zip -r out.zip dir	create zip archive
+unzip file.zip	extract zip archive
+
+# Git Basics
+git status	show working tree status
+git add -A	stage all changes
+git commit -m "msg"	commit staged changes
+git log --oneline -10	compact recent history
+git diff	show unstaged changes
+git diff --staged	show staged changes
+git branch	list local branches
+git checkout -b name	create and switch to new branch
+git stash / git stash pop	shelve and restore uncommitted changes
+git worktree add ../wt branch	add a new worktree for a branch
+git worktree list	list all worktrees
+git worktree remove ../wt	remove a worktree
+
+# tmux
+tmux new -s name	start a new named session
+tmux ls	list sessions
+tmux attach -t name	attach to a session
+Ctrl+b d	detach from session
+Ctrl+b %	split pane vertically
+Ctrl+b "	split pane horizontally
+Ctrl+b arrow	move between panes
+Ctrl+b c	create new window
+Ctrl+b n / p	next/previous window
+Ctrl+b ,	rename current window
+Ctrl+b [	enter copy mode (scroll/select)
+
+# Shell Productivity
+!!	repeat last command
+!$	last argument of previous command
+Ctrl+R	search command history (fzf-enhanced if installed)
+Ctrl+A / Ctrl+E	jump to start/end of line
+Ctrl+W	delete previous word
+Ctrl+U	delete to start of line
+Ctrl+L	clear screen
+alias ll='ls -la'	create a shortcut command
+history | grep cmd	search shell history

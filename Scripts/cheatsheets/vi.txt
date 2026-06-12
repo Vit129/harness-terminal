@@ -1,0 +1,109 @@
+# Modes
+i	insert mode before cursor
+a	insert mode after cursor
+I	insert at start of line
+A	insert at end of line
+o	open new line below, insert mode
+O	open new line above, insert mode
+Esc	return to normal mode
+v	visual mode (character-wise)
+V	visual line mode
+Ctrl+v	visual block mode
+:	command-line mode
+R	replace mode (overtype)
+
+# Movement
+h j k l	left, down, up, right
+w / b	next/previous word start
+e	end of current word
+0 / ^	start of line / first non-blank char
+$	end of line
+gg / G	go to first / last line of file
+:N	go to line N (e.g. :42)
+Ctrl+f / Ctrl+b	page down / page up
+Ctrl+d / Ctrl+u	half-page down / up
+{ / }	previous/next paragraph
+%	jump to matching bracket/paren
+H / M / L	top/middle/bottom of visible screen
+
+# Editing
+x	delete character under cursor
+dd	delete (cut) current line
+yy	yank (copy) current line
+p / P	paste after / before cursor
+dw	delete word
+cw	change word (delete + insert)
+ciw	change inner word (cursor anywhere in word)
+diw	delete inner word
+u	undo
+Ctrl+r	redo
+.	repeat last change
+r{char}	replace single character under cursor
+J	join current line with next
+~	toggle case of character under cursor
+>> / <<	indent / unindent line
+
+# Search & Replace
+/pattern	search forward
+?pattern	search backward
+n / N	repeat search, same / opposite direction
+*	search for word under cursor
+:%s/old/new/g	replace all occurrences in file
+:%s/old/new/gc	replace all, with confirmation
+:noh	clear search highlight
+:s/old/new/	replace first occurrence on current line
+
+# Visual Mode
+v then move, then y/d/c	select range then yank/delete/change
+V then move, then y/d/c	select whole lines then yank/delete/change
+Ctrl+v then move	select column block
+> / <	indent/unindent selection
+gv	reselect last visual selection
+=	auto-indent selection
+
+# Windows & Splits
+:sp / :split	horizontal split
+:vsp / :vsplit	vertical split
+Ctrl+w then arrow	move between splits
+Ctrl+w w	cycle to next split
+Ctrl+w q	close current split
+Ctrl+w =	equalize split sizes
+Ctrl+w _	maximize current split height
+
+# Buffers & Tabs
+:e file	edit/open a file
+:bn / :bp	next / previous buffer
+:ls / :buffers	list open buffers
+:b N	switch to buffer N
+:tabnew file	open file in new tab
+gt / gT	next / previous tab
+
+# Save & Quit
+:w	save (write)
+:w file	save as a new filename
+:q	quit (fails if unsaved changes)
+:q!	quit without saving
+:wq / :x	save and quit
+:wqa	save and quit all windows
+ZZ	save and quit (normal mode shortcut)
+
+# Marks & Jumps
+m{letter}	set a mark at cursor position
+'{letter}	jump to line of mark
+`{letter}	jump to exact position of mark
+Ctrl+o / Ctrl+i	jump back / forward in jump list
+``	jump to position before last jump
+
+# Macros & Registers
+qa ... q	record macro into register a
+@a	run macro from register a
+@@	repeat last run macro
+"ayy	yank line into register a
+"ap	paste from register a
+
+# Useful Settings (:set / .vimrc)
+:set number	show line numbers
+:set relativenumber	show relative line numbers
+:set hlsearch	highlight search matches
+:set ignorecase smartcase	smarter case-insensitive search
+:set expandtab tabstop=2 shiftwidth=2	spaces instead of tabs, width 2
