@@ -7,12 +7,13 @@ import HarnessTerminalKit
 @MainActor
 struct PaletteAction: Identifiable {
     enum Section: Int, CaseIterable {
-        case recent, files, actions, navigation, tabs, projects, themes
+        case recent, files, symbols, actions, navigation, tabs, projects, themes
 
         var title: String {
             switch self {
             case .recent: return "Recent"
             case .files: return "Files"
+            case .symbols: return "Symbols"
             case .actions: return "Actions"
             case .navigation: return "Navigation"
             case .tabs: return "Tabs"
@@ -409,6 +410,7 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
     /// Cached file matches from background scan; keyed by rootPath.
     private var cachedFileEntries: (rootPath: String, entries: [(path: String, relativePath: String, fileName: String)]) = ("", [])
     private var fileScanTask: Task<Void, Never>?
+    private let symbolIndex = WorkspaceSymbolIndex()
     /// Flat list of rows shown — alternating section headers and items.
     private var rows: [Row] = []
     /// Logical positions of actionable rows so arrow-keys skip headers.
@@ -597,6 +599,7 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
     private func startFileScanIfNeeded() {
         guard let rootPath = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd,
               rootPath != cachedFileEntries.rootPath else { return }
+        symbolIndex.scan(root: rootPath)
         fileScanTask?.cancel()
         fileScanTask = Task.detached(priority: .userInitiated) { [weak self] in
             let rootURL = URL(fileURLWithPath: rootPath)
@@ -687,6 +690,7 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
                 }
             }
             matches.append(contentsOf: fileMatches(query: query))
+            matches.append(contentsOf: symbolMatches(query: query))
             matches.sort { $0.score > $1.score }
         }
 
@@ -762,6 +766,24 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
             .sorted { $0.score > $1.score }
             .prefix(20)
             .map { $0 }
+    }
+
+    private func symbolMatches(query: String) -> [(action: PaletteAction, score: Int)] {
+        guard query.count >= 2 else { return [] }
+        return symbolIndex.completions(prefix: query, limit: 10).map { symbol in
+            (action: PaletteAction(
+                id: "symbol.\(symbol)",
+                title: symbol,
+                subtitle: "Symbol",
+                symbol: "curlybraces",
+                shortcut: "",
+                section: .symbols
+            ) {
+                let coordinator = SessionCoordinator.shared
+                guard let surfaceID = coordinator.activeSurfaceID else { return }
+                coordinator.requestDaemon(.sendKeys(surfaceID: surfaceID.uuidString, keys: [symbol]))
+            }, score: FuzzyMatcher.score(query: query, in: symbol) ?? 0)
+        }
     }
 
     private func selectFirstSelectable() {

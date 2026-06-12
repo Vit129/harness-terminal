@@ -162,6 +162,18 @@ enum MainMenuBuilder {
         let sidebarPosItem = NSMenuItem(title: "Move Sidebar to Right", action: #selector(MenuTarget.toggleSidebarPosition), keyEquivalent: "")
         sidebarPosItem.target = MenuTarget.shared
         view.submenu?.addItem(sidebarPosItem)
+        view.submenu?.addItem(.separator())
+        let layoutNames: [(String, String)] = [
+            ("Even Horizontal", "1"), ("Even Vertical", "2"),
+            ("Main Horizontal", "3"), ("Main Vertical", "4"), ("Tiled", "5")
+        ]
+        for (title, key) in layoutNames {
+            let item = NSMenuItem(title: title, action: #selector(MenuTarget.applyLayoutPreset(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.target = MenuTarget.shared
+            view.submenu?.addItem(item)
+        }
+        view.submenu?.addItem(.separator())
         let zoomIn = NSMenuItem(title: "Increase Font Size", action: #selector(MenuTarget.zoomIn), keyEquivalent: "+")
         zoomIn.keyEquivalentModifierMask = [.command]
         zoomIn.target = MenuTarget.shared
@@ -461,6 +473,17 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
 
     @objc func installCLI() {
         CLIInstaller.install()
+    }
+
+    @objc func applyLayoutPreset(_ sender: NSMenuItem) {
+        let layouts: [LayoutTemplate] = [.evenHorizontal, .evenVertical, .mainHorizontal, .mainVertical, .tiled]
+        let keys = ["1", "2", "3", "4", "5"]
+        guard let idx = keys.firstIndex(of: sender.keyEquivalent), idx < layouts.count else { return }
+        let coordinator = SessionCoordinator.shared
+        guard let workspace = coordinator.snapshot.activeWorkspace,
+              let tab = workspace.activeTab else { return }
+        coordinator.requestDaemon(.applyLayout(tabID: tab.id, layout: layouts[idx].rawValue, mainPaneID: tab.activePaneID))
+        coordinator.syncFromDaemon()
     }
 
     @objc func showAbout() {
