@@ -15,7 +15,8 @@ public enum CopyModeReducer {
         grid: CopyModeGridSource,
         cursorLine: Int? = nil,
         cursorColumn: Int = 0,
-        wrapSearch: Bool = true
+        wrapSearch: Bool = true,
+        wordSeparators: String = " \t"
     ) -> CopyModeState {
         let total = max(1, grid.totalLines)
         let rows = max(1, grid.viewportRows)
@@ -23,7 +24,8 @@ public enum CopyModeReducer {
         let state = CopyModeState(
             cursor: GridPosition(line: line, column: max(0, cursorColumn)),
             viewTop: max(0, total - rows),
-            wrapSearch: wrapSearch
+            wrapSearch: wrapSearch,
+            wordSeparators: wordSeparators
         )
         return reveal(state, grid: grid)
     }
@@ -57,8 +59,8 @@ public enum CopyModeReducer {
         case .pageDown: s.cursor.line = min(grid.totalLines - 1, s.cursor.line + grid.viewportRows)
         case .halfPageUp: s.cursor.line = max(0, s.cursor.line - max(1, grid.viewportRows / 2))
         case .halfPageDown: s.cursor.line = min(grid.totalLines - 1, s.cursor.line + max(1, grid.viewportRows / 2))
-        case .nextWord: s.cursor = nextWord(from: s.cursor, grid: grid)
-        case .previousWord: s.cursor = previousWord(from: s.cursor, grid: grid)
+        case .nextWord: s.cursor = nextWord(from: s.cursor, grid: grid, separators: s.wordSeparators)
+        case .previousWord: s.cursor = previousWord(from: s.cursor, grid: grid, separators: s.wordSeparators)
 
         case .beginSelection:
             if s.mode == .char { s.mode = .none; s.anchor = nil }
@@ -150,19 +152,19 @@ public enum CopyModeReducer {
         return s
     }
 
-    private static func isSeparator(_ c: Character) -> Bool { c == " " || c == "\t" }
+    private static func isSeparator(_ c: Character, separators: String = " \t") -> Bool {
+        separators.contains(c)
+    }
 
     // MARK: - Word motion (crosses line boundaries, vi `w` / `b`)
 
-    private static func nextWord(from pos: GridPosition, grid: CopyModeGridSource) -> GridPosition {
+    private static func nextWord(from pos: GridPosition, grid: CopyModeGridSource, separators: String = " \t") -> GridPosition {
         var line = pos.line
         var rl = grid.renderedLine(line)
         var i = rl.charIndex(atOrAfter: pos.column)
-        // If sitting on a word, step past it first.
-        while i < rl.chars.count, !isSeparator(rl.chars[i]) { i += 1 }
-        // Skip separators, advancing across lines, to land on the next word's first char.
+        while i < rl.chars.count, !isSeparator(rl.chars[i], separators: separators) { i += 1 }
         while true {
-            while i < rl.chars.count, isSeparator(rl.chars[i]) { i += 1 }
+            while i < rl.chars.count, isSeparator(rl.chars[i], separators: separators) { i += 1 }
             if i < rl.chars.count { break }
             if line >= grid.totalLines - 1 {
                 return GridPosition(line: line, column: rl.columnOf.last ?? 0)
@@ -170,26 +172,24 @@ public enum CopyModeReducer {
             line += 1
             rl = grid.renderedLine(line)
             i = 0
-            if i < rl.chars.count, !isSeparator(rl.chars[i]) { break }
+            if i < rl.chars.count, !isSeparator(rl.chars[i], separators: separators) { break }
         }
         return GridPosition(line: line, column: i < rl.columnOf.count ? rl.columnOf[i] : 0)
     }
 
-    private static func previousWord(from pos: GridPosition, grid: CopyModeGridSource) -> GridPosition {
+    private static func previousWord(from pos: GridPosition, grid: CopyModeGridSource, separators: String = " \t") -> GridPosition {
         var line = pos.line
         var rl = grid.renderedLine(line)
         var i = rl.charIndex(atOrBefore: pos.column) - 1
-        // Skip separators (and empty lines) backward to the previous word's last char.
         while true {
-            while i >= 0, i < rl.chars.count, isSeparator(rl.chars[i]) { i -= 1 }
+            while i >= 0, i < rl.chars.count, isSeparator(rl.chars[i], separators: separators) { i -= 1 }
             if i >= 0, i < rl.chars.count { break }
             if line == 0 { return GridPosition(line: 0, column: 0) }
             line -= 1
             rl = grid.renderedLine(line)
             i = rl.chars.count - 1
         }
-        // Back up to the start of this word.
-        while i > 0, !isSeparator(rl.chars[i - 1]) { i -= 1 }
+        while i > 0, !isSeparator(rl.chars[i - 1], separators: separators) { i -= 1 }
         return GridPosition(line: line, column: (i >= 0 && i < rl.columnOf.count) ? rl.columnOf[i] : 0)
     }
 

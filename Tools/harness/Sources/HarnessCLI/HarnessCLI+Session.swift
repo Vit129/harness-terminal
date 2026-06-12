@@ -144,6 +144,21 @@ extension HarnessCLI {
 
     static func printSessions(_ args: [String], client: DaemonClient) throws {
         let snap = try snapshot(client)
+        if let fmt = flagValue(args, flag: "-F") {
+            // -F format string: render each session with FormatString
+            for (si, ws) in snap.workspaces.enumerated() {
+                for session in ws.sessions {
+                    var ctx = FormatContext()
+                    ctx.sessionName = session.name.isEmpty ? ws.name : session.name
+                    ctx.sessionID = session.id.uuidString
+                    ctx.sessionWindows = session.tabs.count
+                    ctx.tabIndex = si
+                    ctx.sessionAttached = 1
+                    print(FormatString.evaluate(fmt, context: ctx))
+                }
+            }
+            return
+        }
         try emit(SnapshotQueryFormatter.sessionRows(snap), args) {
             SnapshotQueryFormatter.sessions(snap).forEach { print($0) }
         }
@@ -163,11 +178,33 @@ extension HarnessCLI {
 
     static func printWindows(_ args: [String], client: DaemonClient) throws {
         let snap = try snapshot(client)
+        let fmt = flagValue(args, flag: "-F")
+        let sessions: [SessionGroup]
         if let target = flagValue(args, flag: "--session") {
             guard let session = resolveSession(snap, nameOrID: target) else {
                 fputs("list-windows: no session matches '\(target)'\n", harnessStderr)
                 exit(1)
             }
+            sessions = [session]
+        } else {
+            sessions = snap.workspaces.flatMap(\.sessions)
+        }
+        if let fmt {
+            for session in sessions {
+                for (ti, tab) in session.tabs.enumerated() {
+                    var ctx = FormatContext()
+                    ctx.tabName = tab.title; ctx.tabIndex = ti
+                    ctx.windowID = tab.id.uuidString
+                    ctx.windowPanes = tab.rootPane.allSurfaceIDs().count
+                    ctx.windowActive = tab.id == session.activeTabID
+                    ctx.windowFlags = tab.id == session.activeTabID ? "*" : ""
+                    print(FormatString.evaluate(fmt, context: ctx))
+                }
+            }
+            return
+        }
+        if let target = flagValue(args, flag: "--session") {
+            let session = sessions.first!
             try emit(SnapshotQueryFormatter.windowRows(in: session), args) {
                 SnapshotQueryFormatter.windows(in: session).forEach { print($0) }
             }
@@ -193,6 +230,16 @@ extension HarnessCLI {
         guard let tab else {
             fputs("list-panes: no matching tab\n", harnessStderr)
             exit(1)
+        }
+        if let fmt = flagValue(args, flag: "-F") {
+            for (pi, pid) in tab.rootPane.allPaneIDs().enumerated() {
+                var ctx = FormatContext()
+                ctx.paneIndex = pi
+                ctx.paneID = pid.uuidString
+                ctx.paneActive = pid == tab.activePaneID
+                print(FormatString.evaluate(fmt, context: ctx))
+            }
+            return
         }
         try emit(SnapshotQueryFormatter.paneRows(in: tab), args) {
             SnapshotQueryFormatter.panes(in: tab).forEach { print($0) }

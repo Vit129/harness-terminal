@@ -19,7 +19,7 @@ extension HarnessTerminalSurfaceView {
         copyMode = emulatorSync { emulator in
             let live = emulator.readGrid()
             let cursorLine = emulator.historyCount + live.cursor.row
-            return CopyModeReducer.initialState(grid: emulator, cursorLine: cursorLine, cursorColumn: live.cursor.col, wrapSearch: wrapSearch)
+            return CopyModeReducer.initialState(grid: emulator, cursorLine: cursorLine, cursorColumn: live.cursor.col, wrapSearch: wrapSearch, wordSeparators: wordSeparators)
         }
         scrollOffset = 0
         scrollFraction = 0 // copy mode is line-based; don't carry a smooth-scroll fraction in

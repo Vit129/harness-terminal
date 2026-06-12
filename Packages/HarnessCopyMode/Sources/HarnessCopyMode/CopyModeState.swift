@@ -78,6 +78,8 @@ public struct CopyModeState: Equatable, Sendable {
     public var search: CopyModeSearch
     /// When false, search stops at the top/bottom instead of wrapping. Maps to `wrap-search`.
     public var wrapSearch: Bool = true
+    /// Characters treated as word boundaries in w/b/e motions. Maps to `word-separators` option.
+    public var wordSeparators: String = " \t"
 
     public init(
         cursor: GridPosition,
@@ -85,7 +87,8 @@ public struct CopyModeState: Equatable, Sendable {
         mode: CopyModeSelectionMode = .none,
         viewTop: Int = 0,
         search: CopyModeSearch = CopyModeSearch(),
-        wrapSearch: Bool = true
+        wrapSearch: Bool = true,
+        wordSeparators: String = " \t"
     ) {
         self.cursor = cursor
         self.anchor = anchor
@@ -93,6 +96,7 @@ public struct CopyModeState: Equatable, Sendable {
         self.viewTop = viewTop
         self.search = search
         self.wrapSearch = wrapSearch
+        self.wordSeparators = wordSeparators
     }
 
     /// tmux-style mode label for the status indicator.
