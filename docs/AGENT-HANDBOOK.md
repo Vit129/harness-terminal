@@ -601,11 +601,15 @@ Global menu shortcuts are defined in `MainMenuBuilder`, not `KeyTableSet.root` (
 | Jump to notification | `Cmd+Shift+U` |
 | Command palette | `Cmd+K` |
 | Command prompt | `Cmd+;` |
+| Search command history | `Ctrl+R` |
 | Settings | `Cmd+,` |
 | Toggle sidebar | `Cmd+\` |
+| Toggle IDE Mode | `Cmd+Shift+D` |
+| Toggle Focus Mode | `Cmd+P` |
 | Switch to tab 1–9 | `Cmd+1` … `Cmd+9` (shown as ⌘N on the pills) |
 | Tab prev/next | `Cmd+Shift+[` / `]` |
 | Font +/- / reset | `Cmd++` / `Cmd+-` / `Cmd+0` |
+| Layout preset (Even H/V, Main H/V, Tiled) | `Cmd+Opt+1` … `Cmd+Opt+5` |
 
 **Prefix (default `Ctrl-A`):** [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md)
 

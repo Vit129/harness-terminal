@@ -489,7 +489,13 @@ Panes
   prefix x      kill pane
   prefix q      pane numbers
   prefix Space  next layout
-  prefix S      synchronize panes
+
+Layout presets
+  Cmd-Opt-1     even horizontal
+  Cmd-Opt-2     even vertical
+  Cmd-Opt-3     main horizontal
+  Cmd-Opt-4     main vertical
+  Cmd-Opt-5     tiled
 
 Tabs
   prefix c      new tab
@@ -517,5 +523,6 @@ Attach
 Command
   prefix :      command prompt
   Cmd-;         command prompt
-  Cmd-K         command palette
+  Cmd-K         command palette (files, symbols, switch project)
+  Ctrl-R        search command history
 ```
