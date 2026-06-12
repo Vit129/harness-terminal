@@ -59,12 +59,31 @@ extension SettingsViewController {
 
         lightThemePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         darkThemePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+
+        let lightOpacityRow = NSStackView(views: [lightOpacitySlider, lightOpacityLabel])
+        lightOpacityRow.orientation = .horizontal
+        lightOpacityRow.spacing = 12
+        lightOpacitySlider.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        lightOpacityLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        lightOpacityLabel.alignment = .right
+
+        let darkOpacityRow = NSStackView(views: [darkOpacitySlider, darkOpacityLabel])
+        darkOpacityRow.orientation = .horizontal
+        darkOpacityRow.spacing = 12
+        darkOpacitySlider.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        darkOpacityLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        darkOpacityLabel.alignment = .right
+
         let themeGroup = settingsGroup("Theme", [
             settingsRow("Theme", themePopup),
             settingsToggleRow("Auto light/dark", autoThemeToggle,
                               hint: "Switch theme with the macOS system appearance."),
             settingsRow("Light theme", lightThemePopup),
             settingsRow("Dark theme", darkThemePopup),
+            settingsRow("Light opacity", lightOpacityRow,
+                        hint: "Window opacity while the light theme is active."),
+            settingsRow("Dark opacity", darkOpacityRow,
+                        hint: "Window opacity while the dark theme is active."),
             settingsRow("", themeActions),
         ])
         let windowGroup = settingsGroup("Window", [

@@ -91,6 +91,10 @@ final class SettingsViewController: NSViewController, NSFontChanging {
     let autoThemeToggle = HarnessToggle(title: "Match the macOS light/dark appearance")
     let lightThemePopup = HarnessSelect(frame: .zero)
     let darkThemePopup = HarnessSelect(frame: .zero)
+    let lightOpacitySlider = HarnessSlider(frame: .zero)
+    let lightOpacityLabel = NSTextField(labelWithString: "")
+    let darkOpacitySlider = HarnessSlider(frame: .zero)
+    let darkOpacityLabel = NSTextField(labelWithString: "")
     let minContrastSlider = HarnessSlider(frame: .zero)
     let minContrastLabel = NSTextField(labelWithString: "")
     let pasteProtectionToggle = HarnessToggle(title: "Confirm risky pastes (multi-line or control characters)")
@@ -493,6 +497,31 @@ final class SettingsViewController: NSViewController, NSFontChanging {
         lightThemePopup.selectItem(withTitle: settings.lightThemeName ?? coordinator.snapshot.themeName)
         darkThemePopup.selectItem(withTitle: settings.darkThemeName ?? coordinator.snapshot.themeName)
         themePopup.isEnabled = !autoThemeOn
+
+        // Per-mode opacity overrides (e.g. opaque for a white light theme, translucent for
+        // dark) — only meaningful while auto light/dark is on. `nil` falls back to the main
+        // Window ▸ Opacity slider's current value for display.
+        for (slider, label, value) in [
+            (lightOpacitySlider, lightOpacityLabel, settings.lightThemeOpacity ?? settings.backgroundOpacity),
+            (darkOpacitySlider, darkOpacityLabel, settings.darkThemeOpacity ?? settings.backgroundOpacity),
+        ] {
+            slider.minValue = 0.05
+            slider.maxValue = 1.0
+            slider.doubleValue = Double(value)
+            slider.isContinuous = true
+            slider.isEnabled = autoThemeOn
+            label.stringValue = formatPercent(value)
+            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            label.textColor = .secondaryLabelColor
+        }
+        lightOpacitySlider.target = self
+        lightOpacitySlider.action = #selector(lightOpacityDidChange)
+        lightOpacitySlider.onCommit = { [weak self] in self?.flushAndApply() }
+        lightOpacitySlider.toolTip = "Background opacity used when the light theme is active (5%–100%)."
+        darkOpacitySlider.target = self
+        darkOpacitySlider.action = #selector(darkOpacityDidChange)
+        darkOpacitySlider.onCommit = { [weak self] in self?.flushAndApply() }
+        darkOpacitySlider.toolTip = "Background opacity used when the dark theme is active (5%–100%)."
 
         useThemeColorsButton.title = "Use Theme Colors"
         useThemeColorsButton.target = self

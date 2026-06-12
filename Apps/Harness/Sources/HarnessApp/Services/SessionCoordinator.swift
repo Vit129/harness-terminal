@@ -636,15 +636,38 @@ final class SessionCoordinator: NSObject {
         syncFromDaemon()
     }
 
+    /// Whether the macOS system appearance is currently Dark. Shared by the auto theme switch
+    /// and the Settings UI (which needs to know which per-mode opacity slider is "live").
+    static var isSystemAppearanceDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
     /// When auto light/dark is configured (both `lightThemeName` + `darkThemeName` set), switch the
-    /// active theme to the one matching the current macOS system appearance. No-op when auto is off
-    /// or already on the matching theme. Called at startup and on every system appearance change.
+    /// active theme — and its per-mode `backgroundOpacity` override, if set — to match the current
+    /// macOS system appearance. No-op when auto is off. Called at startup and on every system
+    /// appearance change.
     func applyAutoThemeForCurrentAppearance() {
         guard let light = settings.lightThemeName, let dark = settings.darkThemeName else { return }
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let isDark = SessionCoordinator.isSystemAppearanceDark
         let target = isDark ? dark : light
-        guard target != snapshot.themeName else { return }
-        setTheme(target, seedColors: true)
+        let targetOpacity = isDark ? settings.darkThemeOpacity : settings.lightThemeOpacity
+
+        var didChange = false
+        if target != snapshot.themeName {
+            setTheme(target, seedColors: true)
+            didChange = true
+        }
+        if let targetOpacity {
+            let clamped = HarnessSettings.clampedOpacity(targetOpacity)
+            if settings.backgroundOpacity != clamped {
+                settings.backgroundOpacity = clamped
+                try? settings.save()
+                didChange = true
+            }
+        }
+        if didChange {
+            applySettingsToHosts()
+        }
     }
 
     func addWorkspace(name: String) {
