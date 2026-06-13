@@ -27,9 +27,14 @@ echo "  2) Preview build, isolated (make preview)"
 echo "  3) Run dev build (make debug)"
 echo "  4) Build app and install to /Applications (make install)"
 echo "  5) Build app only, no copy (make prod)"
-echo "  6) Full cycle: commit+push -> prepare release -> build (4 or 5)"
+echo "  6) Full cycle: commit+push (merge if worktree) -> prepare release -> build (4 or 5)"
 echo ""
 read -rp "Enter choice (1-6): " choice
+
+if [[ ! "$choice" =~ ^[1-6]$ ]]; then
+  echo "Invalid choice — enter a number from 1 to 6" >&2
+  exit 1
+fi
 
 case "$choice" in
   1) exec Scripts/commit-push.sh ;;
@@ -38,8 +43,4 @@ case "$choice" in
   4) exec Scripts/install-app.sh ;;
   5) exec ./Scripts/run.sh prod ;;
   6) exec Scripts/full-cycle.sh ;;
-  *)
-    echo "Invalid choice" >&2
-    exit 1
-    ;;
 esac
