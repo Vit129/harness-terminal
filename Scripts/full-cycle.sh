@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Full cycle: commit+push (merging into main first if run from a worktree)
-# -> prepare release -> build (install or prod).
+# Full cycle: bump version -> commit+push (merging into main first if run
+# from a worktree) -> build (install or prod).
 #
 # Usage: Scripts/full-cycle.sh
 set -euo pipefail
@@ -19,15 +19,16 @@ if [[ "$git_dir" == *"worktrees"* ]]; then
 
   echo ""
   echo "Code merged to main."
-  echo "To continue the release, run in the main repo:"
+  echo "To continue, run in the main repo:"
   echo "  cd \"$main_repo\""
   echo "  git pull origin main"
-  echo "  make start   # choose option 6"
+  echo "  make start   # choose 4 (install) or 5 (prod)"
   exit 0
 fi
 
 ./Scripts/commit-push.sh
-./Scripts/prepare-release.sh
+./Scripts/bump-version.sh
+git push origin main
 
 echo ""
 read -rp "Build step — 4) install to /Applications or 5) build only (prod)? [4/5]: " build_choice
