@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Remove persisted session state (layout snapshot + scrollback) for debug builds,
-# so the next `make debug` doesn't reopen stale panes/scrollback from a previous run.
+# Remove persisted session state (layout snapshot + scrollback) for the legacy
+# repo-root debug home.
 #
 # Scoped to ~/Library/Application Support/HarnessDebug — never touches
 # ~/Library/Application Support/Harness, which holds the production app's real

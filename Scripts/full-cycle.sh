@@ -1,14 +1,38 @@
 #!/usr/bin/env bash
-# Full cycle: bump version -> commit+push (merging into main first if run
-# from a worktree) -> build (install or prod).
+# Full cycle: bump version -> commit+push (merging into main first if run from
+# a worktree) -> build (install or prod).
 #
-# Usage: Scripts/full-cycle.sh
+# Usage:
+#   Scripts/full-cycle.sh [patch|minor|major] [--version X.Y.Z] [--build N]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+usage() {
+  cat <<'USAGE'
+Usage:
+  Scripts/full-cycle.sh [patch|minor|major] [--version X.Y.Z] [--build N]
+
+Runs:
+  1. Bump release metadata.
+  2. Commit and push changes.
+  3. Merge to main first when launched from a worktree.
+  4. Prompt for install build (3) or repo-root prod build (4).
+USAGE
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
 git_dir="$(git rev-parse --git-dir)"
+merged_from_worktree=0
+
+./Scripts/prepare-release.sh "$@"
 
 if [[ "$git_dir" == *"worktrees"* ]]; then
   echo "Detected: running in a worktree — merging into main first."
@@ -18,22 +42,21 @@ if [[ "$git_dir" == *"worktrees"* ]]; then
   main_repo="$(cd "$(dirname "$common_dir")" && pwd)"
 
   echo ""
-  echo "Code merged to main."
-  echo "To continue, run in the main repo:"
-  echo "  cd \"$main_repo\""
-  echo "  git pull origin main"
-  echo "  make start   # choose 4 (install) or 5 (prod)"
-  exit 0
+  echo "Code merged to main. Continuing build from:"
+  echo "  $main_repo"
+  cd "$main_repo"
+  git pull --ff-only origin main
+  merged_from_worktree=1
 fi
 
-./Scripts/commit-push.sh
-./Scripts/bump-version.sh
-git push origin main
+if [[ "$merged_from_worktree" == "0" ]]; then
+  ./Scripts/commit-push.sh
+fi
 
 echo ""
-read -rp "Build step — 4) install to /Applications or 5) build only (prod)? [4/5]: " build_choice
+read -rp "Build step — 3) install to /Applications or 4) build only (prod)? [3/4]: " build_choice
 case "$build_choice" in
-  4) exec Scripts/install-app.sh ;;
-  5) exec ./Scripts/run.sh prod ;;
+  3) exec Scripts/install-app.sh ;;
+  4) exec ./Scripts/run.sh prod ;;
   *) echo "Invalid choice" >&2; exit 1 ;;
 esac

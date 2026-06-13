@@ -25,8 +25,8 @@ Everything is first-party Swift — GPU terminal engine, session daemon, CLI. On
 ## Quick start
 
 ```bash
-make debug        # build (debug) + sign + open Harness.app
 make preview      # isolated preview (separate daemon socket)
+make debug        # alias for make preview
 swift build       # compile all targets
 swift test        # run tests
 ```
@@ -52,7 +52,7 @@ swift test        # run tests
 ```bash
 git clone https://github.com/Vit129/harness-terminal
 cd harness-terminal
-make debug
+make preview
 ```
 
 Requires Xcode 16+ / Swift 6.0. Daemon and CLI also build on Linux: `swift build --product HarnessDaemon`.

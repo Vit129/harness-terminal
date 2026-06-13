@@ -10,7 +10,7 @@ Usage: Scripts/run.sh [command]
 
 Commands:
   preview   Build and launch isolated preview app (.harness-preview) [default]
-  debug     Build (debug), package, sign, and open Harness.app
+  debug     Alias for preview (kept for old muscle memory)
   prod      Build (release), package, sign, and open Harness.app (no /Applications copy)
   run       Re-open the existing Harness.app without rebuilding
   build     Run swift build
@@ -18,7 +18,7 @@ Commands:
   graphify  Refresh graphify-out without committed HTML output
 
 Examples:
-  make debug              # build (debug) + open
+  make debug              # alias for make preview
   make prod               # build (release) + open
   make run                # just re-open the existing build
   Scripts/run.sh preview  # isolated preview
@@ -34,11 +34,11 @@ kill_stale() {
   sleep 0.5
 }
 
-# prod/run builds at the repo root are release builds, so they share the production
-# HARNESS_HOME (~/Library/Application Support/Harness) with /Applications/Harness.app
-# and the launchd-managed daemon (`make install`). Without stopping those too, the
-# fresh repo-root app reconnects to the old launchd daemon/socket and looks unchanged.
-# `debug` builds use an isolated HarnessDebug home and don't need this.
+# prod/run builds at the repo root share the production HARNESS_HOME
+# (~/Library/Application Support/Harness) with /Applications/Harness.app and the
+# launchd-managed daemon (`make install`). Without stopping those too, the fresh
+# repo-root app reconnects to the old launchd daemon/socket and looks unchanged.
+# `preview` uses an isolated HARNESS_HOME and never goes through this path.
 kill_stale_prod() {
   kill_stale
   pkill -f "/Applications/Harness.app/Contents/MacOS/HarnessDaemon" 2>/dev/null || true
@@ -55,11 +55,8 @@ case "$command" in
     exec make preview
     ;;
   debug)
-    make build
-    Scripts/package-app.sh debug
-    codesign --force --sign - --deep Harness.app >/dev/null
-    kill_stale
-    open Harness.app
+    echo "make debug is now an alias for make preview."
+    exec make preview
     ;;
   prod)
     # `swift build` only honors the last `--product` flag, not all of them — build
@@ -68,14 +65,16 @@ case "$command" in
     Scripts/package-app.sh release
     codesign --force --sign - --deep Harness.app >/dev/null
     kill_stale_prod
+    Scripts/clear-runtime-state.sh
     open Harness.app
     ;;
   run)
     if [[ ! -d Harness.app ]]; then
-      echo "error: Harness.app not found at repo root — run 'make debug' or 'make prod' first" >&2
+      echo "error: Harness.app not found at repo root — run 'make prod' first" >&2
       exit 1
     fi
     kill_stale_prod
+    Scripts/clear-runtime-state.sh
     open Harness.app
     ;;
   build)
