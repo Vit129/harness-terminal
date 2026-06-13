@@ -58,6 +58,8 @@
 | 42 | Code review + bug fixes: async syncFromDaemon missing terminalHosts.prune(), ViNormalMode force-unwrap crash on surrogate unichars, selectSessionNumber rename to selectWorkspaceNumber | ✅ Done |
 | 43 | fzf install + shell integration (brew install fzf + source <(fzf --zsh) in ~/.zshrc) | ✅ Done |
 | 44 | CASE-028: ⌘1-9 verified/kept as Switch to Session N (selectWorkspaceNumber→selectSession); added ⌘[/⌘] = Previous/Next Session (selectAdjacentSession); removed dead selectTabNumber/selectTab(atIndex:)/selectAdjacentTab; menu cleanup (removed New Tab, Layout presets, native fullscreen; Toggle Focus Mode → Show Git Panel ⌘G); fixed make preview socket path | ✅ Done |
+| 45 | Notification dropdown keyboard nav (arrow/Enter/Escape + first-responder restore); tab bar close-button vs ⌘N badge overlap at rest fix | ✅ Done |
+| 46 | CASE-029: terminal text selection survives scroll — selectionAnchor/Head now virtual-line coords (matches CopyModeGridSource convention); removed clearSelection() on scroll; copy reads via TerminalEmulator.line(_:) | ✅ Done |
 
 ### Removed / Reverted Features
 - **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.
@@ -91,6 +93,7 @@
 - **RL-022:** `selectSessionNumber` (⌘1–9) must call `selectSession(workspaceID:sessionID:)` not `selectWorkspace(byIndex:)`. The latter is a no-op when only one workspace exists (index 0 already active), and out-of-bounds for index ≥ 1. Always navigate workspace → sessions array → select by ID.
 - **RL-023:** The async `syncFromDaemon` variant must mirror every side-effect of the sync variant — including `terminalHosts.prune(keeping:)` on structure changes. Missing it causes dead TerminalHostViews (and their Metal surfaces) to accumulate for the app lifetime because the `scheduleSnapshotRefresh()` path always uses the async variant.
 - **RL-024:** `unichar` (UInt16) can hold surrogate code units (0xD800–0xDFFF). `UnicodeScalar(unichar)` returns nil for those — force-unwrapping it crashes on malformed clipboard content. Always `guard let scalar = UnicodeScalar(c) else { return <safe_default> }` when converting unichar → Character.
+- **RL-025:** Any per-cell state tied to terminal content (selection, marks, cursors held across frames) must be stored in **virtual-line space** (`historyCount - scrollOffset + viewportRow`, 0 = oldest retained line), not viewport-relative `(row, column)`. Viewport-relative coordinates silently go stale the moment `scrollOffset` changes. Copy mode (`CopyModePosition`/`CopyModeGridSource`) already used this convention; mouse selection didn't, causing scroll to clear/misplace selections (CASE-029). `TerminalEmulator.line(_:)`/`bufferLine(_:)` are virtual-line indexed and return blank rows out-of-range — safe to read without clamping for display/copy purposes.
 
 ### Decisions_In_Force
 

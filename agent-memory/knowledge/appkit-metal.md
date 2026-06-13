@@ -79,3 +79,30 @@ contrast. CGS blur still applies on top.
 NSFont has no `.italicSystemFont` (unlike UIFont).
 
 **Fix:** `NSFontManager.shared.convert(.systemFont(ofSize:), toHaveTrait: .italicFontMask)`
+
+## Mouse Selection Must Use Virtual-Line Coordinates (CASE-029)
+
+**Problem:** `HarnessTerminalSurfaceView.selectionAnchor`/`selectionHead` were stored as
+viewport-relative `(row, column)`. Scrolling reinterpreted the same row numbers against new
+content, and `scrollByContinuous`/`scrollToBufferLine` unconditionally called
+`clearSelection()` — so any scroll while a selection was held wiped or misplaced it, and
+`selectionTextIfAny()` read from a `readGrid(scrollbackOffset:)` snapshot at the *current*
+scroll position, which no longer matched the selection's rows.
+
+**Fix:** Store selection endpoints as **virtual-line** positions
+(`historyCount - scrollOffset + viewportRow`, 0 = oldest retained line) — the exact
+coordinate space `CopyModeGridSource`/`CopyModePosition` already use for copy mode ("Vi"), so
+it's scroll-stable by construction. `selectionTopLine` (= `historyCount - scrollOffset`)
+converts between the two spaces: `mouseDown`/`mouseDragged`/`selectAll` add it to a viewport
+row to get a virtual line; `currentSelectionRegion`/`SelectionResolver.resolve` subtract it
+from a virtual line to get the *current* viewport row for rendering. Removed the
+`clearSelection()` calls from both scroll paths — a selection now survives scrolling.
+`selectionTextIfAny()` now reads each selected line via `TerminalEmulator.line(_:)`
+(`CopyModeGridSource` conformance, also virtual-line indexed) instead of a viewport snapshot,
+so copy is correct regardless of scroll position.
+
+**Files:** `HarnessTerminalSurfaceView.swift` (`selectionAnchor`/`selectionHead`,
+`testingSetSelection`), `HarnessTerminalSurfaceView+SelectionAndLinks.swift`
+(`selectionTopLine`, `currentSelectionRegion`, `mouseDown`/`mouseDragged`), `SelectionResolver.swift`,
+`HarnessTerminalSurfaceView+Find.swift` (`selectAll`, `selectionTextIfAny`),
+`HarnessTerminalSurfaceView+Scrollback.swift` (removed `clearSelection()` calls).
