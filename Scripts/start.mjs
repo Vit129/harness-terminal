@@ -86,8 +86,8 @@ async function selectWithArrows(options) {
 async function selectWithReadline(options) {
   console.log('\n🚀 Harness Build & Release');
   console.log(`\x1b[2mCurrent Version:\x1b[0m \x1b[1;33mv${currentVersion}\x1b[0m \x1b[2m(build ${currentBuild})\x1b[0m\n`);
-  options.forEach((opt, i) => {
-    console.log(`  ${i + 1}) ${opt.display}`);
+  options.forEach((opt) => {
+    console.log(`  ${opt.display}`);
   });
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
