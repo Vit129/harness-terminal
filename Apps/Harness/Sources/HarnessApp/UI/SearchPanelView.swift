@@ -7,6 +7,7 @@ import HarnessCore
 struct SearchResult {
     let filePath: String
     let fileName: String
+    let isDirectory: Bool
     let lineNumber: Int?      // nil for filename-only matches
     let snippet: String?      // line content for content matches
     let matchRange: NSRange?  // range within snippet for highlighting
@@ -43,7 +44,7 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
     private var searchTask: Process?
     private var debounceItem: DispatchWorkItem?
 
-    /// Called when user clicks a result — open file at path (and optionally line).
+    /// Called when user clicks a file result — open file at path (and optionally line).
     var onOpenFile: ((String, Int?) -> Void)?
 
     // MARK: Init
@@ -212,6 +213,7 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
         let row = resultTable.clickedRow
         guard row >= 0, row < results.count else { return }
         let r = results[row]
+        guard !r.isDirectory else { return }
         onOpenFile?(r.filePath, r.lineNumber)
     }
 
@@ -231,7 +233,9 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
             // Enter: open first result
             if !results.isEmpty {
                 let r = results[0]
-                onOpenFile?(r.filePath, r.lineNumber)
+                if !r.isDirectory {
+                    onOpenFile?(r.filePath, r.lineNumber)
+                }
             }
             return true
         }
@@ -269,40 +273,45 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var matches: [SearchResult] = []
-            let queryLower = caseSens ? query : query.lowercased()
+            let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
+            let rootPath = rootURL.path
+            let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
 
             let enumerator = FileManager.default.enumerator(
-                at: URL(fileURLWithPath: root),
+                at: rootURL,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             )
 
             while let url = enumerator?.nextObject() as? URL {
-                // Skip directories
-                if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                    let name = url.lastPathComponent
-                    if name == "node_modules" || name == ".git" || name == ".build" || name == "DerivedData" {
-                        enumerator?.skipDescendants()
-                    }
+                let standardizedURL = url.standardizedFileURL
+                let name = standardizedURL.lastPathComponent
+                let isDirectory = (try? standardizedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                if isDirectory, Self.excludedSearchDirectoryNames.contains(name) {
+                    enumerator?.skipDescendants()
                     continue
                 }
 
-                let fileName = url.lastPathComponent
-                let target = caseSens ? fileName : fileName.lowercased()
+                let relativePath = standardizedURL.path.hasPrefix(rootPrefix)
+                    ? String(standardizedURL.path.dropFirst(rootPrefix.count))
+                    : standardizedURL.path
 
                 let matched: Bool
                 if regex {
                     matched = (try? NSRegularExpression(pattern: query, options: caseSens ? [] : .caseInsensitive))
-                        .map { $0.firstMatch(in: fileName, range: NSRange(fileName.startIndex..., in: fileName)) != nil } ?? false
+                        .map {
+                            $0.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil ||
+                                $0.firstMatch(in: relativePath, range: NSRange(relativePath.startIndex..., in: relativePath)) != nil
+                        } ?? false
                 } else {
-                    matched = Self.fuzzyMatch(query: queryLower, target: target)
+                    matched = Self.spotlightMatch(query: query, name: name, relativePath: relativePath, caseSensitive: caseSens)
                 }
 
                 if matched {
-                    let relativePath = String(url.path.dropFirst(root.count + 1))
                     matches.append(SearchResult(
-                        filePath: url.path,
+                        filePath: standardizedURL.path,
                         fileName: relativePath,
+                        isDirectory: isDirectory,
                         lineNumber: nil,
                         snippet: nil,
                         matchRange: nil
@@ -314,23 +323,69 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.results = matches
-                self.statusLabel.stringValue = "\(matches.count) file\(matches.count == 1 ? "" : "s")"
+                self.statusLabel.stringValue = "\(matches.count) item\(matches.count == 1 ? "" : "s")"
                 self.resultTable.reloadData()
             }
         }
     }
 
-    /// Simple subsequence fuzzy match.
-    nonisolated private static func fuzzyMatch(query: String, target: String) -> Bool {
-        var qi = query.startIndex
-        var ti = target.startIndex
-        while qi < query.endIndex, ti < target.endIndex {
-            if query[qi] == target[ti] {
-                qi = query.index(after: qi)
-            }
-            ti = target.index(after: ti)
+    nonisolated private static let excludedSearchDirectoryNames: Set<String> = [
+        ".git",
+        "node_modules",
+        ".build",
+        "DerivedData",
+    ]
+
+    /// Spotlight-style name search over basename and project-relative path.
+    nonisolated static func spotlightMatch(
+        query: String,
+        name: String,
+        relativePath: String,
+        caseSensitive: Bool
+    ) -> Bool {
+        let matcher = SpotlightNameMatcher(query: query, caseSensitive: caseSensitive)
+        return matcher.matches(name: name, relativePath: relativePath)
+    }
+
+    nonisolated private struct SpotlightNameMatcher {
+        let wholeQuery: String
+        let tokens: [String]
+        let caseSensitive: Bool
+
+        init(query: String, caseSensitive: Bool) {
+            self.caseSensitive = caseSensitive
+            wholeQuery = Self.normalized(query, caseSensitive: caseSensitive)
+            tokens = wholeQuery
+                .split(whereSeparator: Self.isTokenSeparator)
+                .map(String.init)
+                .filter { !$0.isEmpty }
         }
-        return qi == query.endIndex
+
+        func matches(name: String, relativePath: String) -> Bool {
+            let haystacks = [
+                Self.normalized(name, caseSensitive: caseSensitive),
+                Self.normalized(relativePath, caseSensitive: caseSensitive),
+            ]
+            if !wholeQuery.isEmpty, haystacks.contains(where: { $0.contains(wholeQuery) }) {
+                return true
+            }
+            guard !tokens.isEmpty else { return false }
+            return tokens.allSatisfy { token in
+                haystacks.contains { $0.contains(token) }
+            }
+        }
+
+        private static func normalized(_ value: String, caseSensitive: Bool) -> String {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if caseSensitive { return trimmed }
+            return trimmed
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .lowercased()
+        }
+
+        private static func isTokenSeparator(_ character: Character) -> Bool {
+            character.isWhitespace || character == "/" || character == "." || character == "-" || character == "_"
+        }
     }
 
     // MARK: Content Search (grep)
@@ -385,6 +440,7 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
                 matches.append(SearchResult(
                     filePath: filePath,
                     fileName: relativePath,
+                    isDirectory: false,
                     lineNumber: lineNum,
                     snippet: String(snippet.prefix(200)),
                     matchRange: nil
@@ -422,6 +478,7 @@ final class SearchPanelView: NSView, NSTextFieldDelegate, NSTableViewDataSource,
         let row = resultTable.selectedRow
         guard row >= 0, row < results.count else { return }
         let r = results[row]
+        guard !r.isDirectory else { return }
         onOpenFile?(r.filePath, r.lineNumber)
     }
 }
@@ -471,7 +528,7 @@ private final class SearchResultCellView: NSTableCellView {
         } else {
             fileLabel.stringValue = result.fileName
         }
-        snippetLabel.stringValue = result.snippet ?? ""
-        snippetLabel.isHidden = result.snippet == nil
+        snippetLabel.stringValue = result.snippet ?? (result.isDirectory ? "Folder" : "")
+        snippetLabel.isHidden = result.snippet == nil && !result.isDirectory
     }
 }

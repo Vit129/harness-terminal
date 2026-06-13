@@ -84,6 +84,55 @@ final class FileTreeWatcherTests: XCTestCase {
         XCTAssertFalse(children[0].isDirectory)
     }
 
+    func testSearchFindsNestedFilesByExtensionFragmentWithoutExpandingFolder() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let nested = root.appendingPathComponent("Tests").appendingPathComponent("Feature")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try writeFile(nested.appendingPathComponent("login.spec.ts"))
+        try writeFile(root.appendingPathComponent("README.md"))
+
+        let results = try await FileTreeWatcher().search(rootPath: root.path, query: ".spec.ts")
+
+        XCTAssertEqual(results.map(\.name), ["login.spec.ts"])
+        XCTAssertEqual(results.first?.path, nested.appendingPathComponent("login.spec.ts").path)
+    }
+
+    func testSearchFindsNestedItemsByPathTokens() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("src").appendingPathComponent("components").appendingPathComponent("Button")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try writeFile(folder.appendingPathComponent("Button.tsx"))
+
+        let results = try await FileTreeWatcher().search(rootPath: root.path, query: "components button")
+
+        XCTAssertTrue(results.contains { $0.isDirectory && $0.path == folder.path })
+        XCTAssertTrue(results.contains { !$0.isDirectory && $0.name == "Button.tsx" })
+    }
+
+    func testSearchSplitsCommonFilenameSeparatorsLikeSpotlightStyleSearch() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let nested = root.appendingPathComponent("tests")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try writeFile(nested.appendingPathComponent("checkout-flow.spec.ts"))
+
+        let results = try await FileTreeWatcher().search(rootPath: root.path, query: "checkout spec ts")
+
+        XCTAssertEqual(results.map(\.name), ["checkout-flow.spec.ts"])
+    }
+
+    func testSearchIsCaseAndDiacriticInsensitive() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeFile(root.appendingPathComponent("RésuméView.swift"))
+
+        let results = try await FileTreeWatcher().search(rootPath: root.path, query: "resumeview")
+
+        XCTAssertEqual(results.map(\.name), ["RésuméView.swift"])
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("file-tree-\(UUID().uuidString)", isDirectory: true)

@@ -42,6 +42,7 @@ struct FileTreeSwiftUIView: View {
     let keyboard: FileTreeKeyboardState
     let onPreview: (FileNode) -> Void
     @State private var rootNodes: [FileTreeNode] = []
+    @State private var searchResultNodes: [FileTreeNode] = []
     @State private var gitBranch: String?
     /// Kept alive across expands so child nodes inherit the same status map.
     @State private var currentGitStatus: [String: GitStatusType] = [:]
@@ -58,14 +59,12 @@ struct FileTreeSwiftUIView: View {
 
     @State private var searchText: String = ""
 
-    private var filteredNodes: [FileTreeNode] {
-        guard !searchText.isEmpty else { return rootNodes }
-        return rootNodes.filter { matchesSearch($0, query: searchText.lowercased()) }
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func matchesSearch(_ node: FileTreeNode, query: String) -> Bool {
-        if node.node.name.lowercased().contains(query) { return true }
-        return node.children?.contains(where: { matchesSearch($0, query: query) }) ?? false
+    private var filteredNodes: [FileTreeNode] {
+        trimmedSearchText.isEmpty ? rootNodes : searchResultNodes
     }
 
     var body: some View {
@@ -110,7 +109,8 @@ struct FileTreeSwiftUIView: View {
                         scanOptions: scanOptions,
                         gitStatus: currentGitStatus,
                         keyboard: keyboard,
-                        onPreview: onPreview
+                        onPreview: onPreview,
+                        isSearching: !trimmedSearchText.isEmpty
                     )
                 }
             }
@@ -131,6 +131,7 @@ struct FileTreeSwiftUIView: View {
         // React to both path and session changes — different sessions may be on
         // different branches sharing the same rootPath.
         .task(id: taskID) { await loadRoot() }
+        .task(id: "\(taskID)|search|\(trimmedSearchText)") { await loadSearchResults() }
         // FSEvents live watcher: starts alongside loadRoot, auto-cancelled on
         // key change (session/path switch) or view disappearance.
         .task(id: taskID) {
@@ -282,6 +283,25 @@ struct FileTreeSwiftUIView: View {
         if keyboard.focusedPath == nil { keyboard.focusedPath = paths.first }
     }
 
+    private func loadSearchResults() async {
+        let query = trimmedSearchText
+        guard !query.isEmpty else {
+            searchResultNodes = []
+            updateVisiblePaths()
+            return
+        }
+
+        let rawNodes = (try? await watcher.search(
+            rootPath: rootPath,
+            query: query,
+            gitStatus: currentGitStatus,
+            options: scanOptions
+        )) ?? []
+        guard query == trimmedSearchText else { return }
+        searchResultNodes = rawNodes.map { FileTreeNode(node: $0) }
+        updateVisiblePaths()
+    }
+
     private func loadRoot() async {
         let statusProvider = GitStatusProvider()
         async let gitStatusTask  = statusProvider.status(rootPath: rootPath)
@@ -315,6 +335,9 @@ struct FileTreeSwiftUIView: View {
             }
         }
         rootNodes = reconciled
+        if !trimmedSearchText.isEmpty {
+            await loadSearchResults()
+        }
 
         let branch = await getCurrentBranch()
         if gitBranch != branch {
@@ -335,8 +358,19 @@ private struct NodeRow: View {
     let gitStatus: [String: GitStatusType]
     let keyboard: FileTreeKeyboardState
     let onPreview: (FileNode) -> Void
+    let isSearching: Bool
 
     private var isFocused: Bool { keyboard.focusedPath == node.node.path }
+
+    private var parentDirectory: String? {
+        guard isSearching else { return nil }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard node.node.path.hasPrefix(prefix) else { return nil }
+        let rel = String(node.node.path.dropFirst(prefix.count))
+        let url = URL(fileURLWithPath: rel)
+        let parent = url.deletingLastPathComponent().path
+        return parent.isEmpty || parent == "/" || parent == "." ? nil : parent
+    }
 
     var body: some View {
         if node.node.isDirectory {
@@ -349,7 +383,8 @@ private struct NodeRow: View {
                         scanOptions: scanOptions,
                         gitStatus: gitStatus,
                         keyboard: keyboard,
-                        onPreview: onPreview
+                        onPreview: onPreview,
+                        isSearching: false
                     )
                 }
             } label: {
@@ -398,8 +433,17 @@ private struct NodeRow: View {
     private func rowLabel(systemImage: String) -> some View {
         HStack(spacing: 4) {
             Label {
-                Text(node.node.name)
-                    .strikethrough(node.node.gitStatus == .deleted, color: gitStatusColor(node.node.gitStatus))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(node.node.name)
+                        .strikethrough(node.node.gitStatus == .deleted, color: gitStatusColor(node.node.gitStatus))
+                    if let parent = parentDirectory {
+                        Text(parent)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                }
             } icon: {
                 Image(systemName: systemImage)
             }

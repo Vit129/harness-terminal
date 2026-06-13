@@ -55,6 +55,18 @@ public actor FileTreeWatcher {
         return applyGitStatus(gitStatus, rootPath: node.path, to: nodes)
     }
 
+    public func search(
+        rootPath: String,
+        query: String,
+        gitStatus: [String: GitStatusType]? = nil,
+        options: FileTreeScanOptions = FileTreeScanOptions(),
+        limit: Int = 400
+    ) async throws -> [FileNode] {
+        let nodes = try searchRecursively(rootPath: rootPath, query: query, options: options, limit: limit)
+        guard let gitStatus, !gitStatus.isEmpty else { return nodes }
+        return applyGitStatus(gitStatus, rootPath: rootPath, to: nodes)
+    }
+
     // MARK: - FSEvents live watcher (F1-G)
 
     private final class WatcherContext: @unchecked Sendable {
@@ -203,5 +215,104 @@ public actor FileTreeWatcher {
         guard !Self.excludedDirectoryNames.contains(name) else { return false }
         guard name.hasPrefix(".") else { return true }
         return isDirectory ? options.showsHiddenFolders : options.showsHiddenFiles
+    }
+
+    private func searchRecursively(
+        rootPath: String,
+        query: String,
+        options: FileTreeScanOptions,
+        limit: Int
+    ) throws -> [FileNode] {
+        let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true).standardizedFileURL
+        let rootPrefix = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
+        let matcher = Self.SearchMatcher(query: query)
+        guard matcher.hasQuery else { return [] }
+
+        let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsPackageDescendants]
+        )
+
+        var matches: [FileNode] = []
+        while let url = enumerator?.nextObject() as? URL, matches.count < limit {
+            let standardizedURL = url.standardizedFileURL
+            let name = standardizedURL.lastPathComponent
+            guard !name.isEmpty else { continue }
+
+            let values = try standardizedURL.resourceValues(forKeys: [.isDirectoryKey])
+            let isDirectory = values.isDirectory ?? false
+            if isDirectory, Self.excludedDirectoryNames.contains(name) {
+                enumerator?.skipDescendants()
+                continue
+            }
+            guard shouldInclude(name: name, isDirectory: isDirectory, options: options) else {
+                if isDirectory { enumerator?.skipDescendants() }
+                continue
+            }
+
+            let path = standardizedURL.path
+            let relativePath = path.hasPrefix(rootPrefix)
+                ? String(path.dropFirst(rootPrefix.count))
+                : path
+            guard matcher.matches(name: name, relativePath: relativePath) else { continue }
+
+            matches.append(FileNode(
+                id: path,
+                name: name,
+                path: path,
+                isDirectory: isDirectory,
+                children: nil,
+                gitStatus: .unmodified
+            ))
+        }
+
+        return matches.sorted { lhs, rhs in
+            let lhsPath = lhs.path.hasPrefix(rootPrefix) ? String(lhs.path.dropFirst(rootPrefix.count)) : lhs.path
+            let rhsPath = rhs.path.hasPrefix(rootPrefix) ? String(rhs.path.dropFirst(rootPrefix.count)) : rhs.path
+            return lhsPath.localizedStandardCompare(rhsPath) == .orderedAscending
+        }
+    }
+
+    nonisolated struct SearchMatcher {
+        let wholeQuery: String
+        let tokens: [String]
+
+        init(query: String) {
+            wholeQuery = Self.normalized(query)
+            tokens = wholeQuery
+                .split(whereSeparator: Self.isTokenSeparator)
+                .map(String.init)
+                .filter { !$0.isEmpty }
+        }
+
+        var hasQuery: Bool {
+            !wholeQuery.isEmpty || !tokens.isEmpty
+        }
+
+        func matches(name: String, relativePath: String) -> Bool {
+            let haystacks = [
+                Self.normalized(name),
+                Self.normalized(relativePath),
+            ]
+
+            if !wholeQuery.isEmpty, haystacks.contains(where: { $0.contains(wholeQuery) }) {
+                return true
+            }
+            guard !tokens.isEmpty else { return false }
+            return tokens.allSatisfy { token in
+                haystacks.contains { $0.contains(token) }
+            }
+        }
+
+        private static func normalized(_ value: String) -> String {
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        private static func isTokenSeparator(_ character: Character) -> Bool {
+            character.isWhitespace || character == "/" || character == "." || character == "-" || character == "_"
+        }
     }
 }

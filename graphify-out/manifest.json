@@ -2185,8 +2185,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/FileTreeSwiftUIView.swift": {
-    "mtime": 1781240470.861197,
-    "ast_hash": "5fb402b69a7d7b78e086f823a6909726",
+    "mtime": 1781316934.849148,
+    "ast_hash": "65fbec558321ec32f5988c9414c486fd",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Scripts/run.sh": {
@@ -2595,8 +2595,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/UI/SearchPanelView.swift": {
-    "mtime": 1780907067.1593504,
-    "ast_hash": "e8c154a688f36e277461bb310beaba0c",
+    "mtime": 1781316104.1486123,
+    "ast_hash": "fef04917a1b550451d878daf47460a74",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Scripts/install-app.sh": {
@@ -2625,8 +2625,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Tests/HarnessAppTests/FileTreeWatcherTests.swift": {
-    "mtime": 1781083953.304658,
-    "ast_hash": "04e08d0b8e5e3a64ebb901abce24d659",
+    "mtime": 1781316085.908021,
+    "ast_hash": "16a0d7a7636d56588d9d730ef09ae59f",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Tests/HarnessAppTests/NotchLayoutMetricsTests.swift": {
@@ -2745,8 +2745,8 @@
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/Services/FileExplorer/FileTreeWatcher.swift": {
-    "mtime": 1781083906.0414517,
-    "ast_hash": "c2dd9aa1769cf606eb9c23f5dfbef7e2",
+    "mtime": 1781316068.1398482,
+    "ast_hash": "410bf1d4d6a5c53428f70c82b0d1023a",
     "semantic_hash": ""
   },
   "/Users/supavit.cho/Git/harness-terminal/Apps/Harness/Sources/HarnessApp/Services/FileExplorer/GitStatusProvider.swift": {
@@ -8652,6 +8652,11 @@
   "/Users/supavit.cho/Git/harness-terminal/docs/HOW_TO_USE.md": {
     "mtime": 1781272195.7383292,
     "ast_hash": "ada49e0304a17091916711c042382213",
+    "semantic_hash": ""
+  },
+  "/Users/supavit.cho/Git/harness-terminal/Tests/HarnessAppTests/SearchPanelViewTests.swift": {
+    "mtime": 1781316109.8206234,
+    "ast_hash": "15afea4a62e401de9f18b8744a66856b",
     "semantic_hash": ""
   }
 }
