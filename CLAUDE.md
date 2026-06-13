@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make debug` -> `./Scripts/run.sh debug`: backward-compatible alias for `make preview`.
 - `make prod` -> `./Scripts/run.sh prod`: builds `Harness`/`HarnessDaemon`/`harness-cli` in release config, packages/signs the repo-root `Harness.app`, and opens it without copying to `/Applications`.
 - `make run` -> `./Scripts/run.sh run`: kills any stale running instance and re-opens the existing repo-root `Harness.app` without rebuilding (fails if it doesn't exist yet — run `make prod` first).
-- `make install` -> `./Scripts/install-app.sh`: release build + package + sign, stops the old daemon, copies into `/Applications/Harness.app`, clears quarantine/LaunchServices cache, then opens it from `/Applications`. `make install-no-build` skips the build step.
+- `make install` -> `./Scripts/install-app.sh`: manual-only release build + package + sign, stops the old daemon, copies into `/Applications/Harness.app`, clears quarantine/LaunchServices cache, then opens it from `/Applications`. It is not part of the interactive/full-cycle release flow. `make install-no-build` skips the build step.
 - `make preview-stop` stops preview `Harness` and `HarnessDaemon` processes under `.harness-preview`; `make preview-clean` removes `.harness-preview`.
 - `swift run HarnessDaemon` runs the daemon foreground executable from the SwiftPM product.
 - `swift run harness-cli -- <command>` runs the CLI product; `swift run harness-cli -- daemon` execs `HarnessDaemon`.

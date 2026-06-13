@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full cycle: bump version -> commit+push (merging into main first if run from
-# a worktree) -> build (install or prod).
+# a worktree) -> repo-root prod build.
 #
 # Usage:
 #   Scripts/full-cycle.sh [patch|minor|major] [--version X.Y.Z] [--build N]
@@ -18,7 +18,7 @@ Runs:
   1. Bump release metadata.
   2. Commit and push changes.
   3. Merge to main first when launched from a worktree.
-  4. Prompt for install build (3) or repo-root prod build (4).
+  4. Build and open the repo-root production app.
 USAGE
 }
 
@@ -54,9 +54,5 @@ if [[ "$merged_from_worktree" == "0" ]]; then
 fi
 
 echo ""
-read -rp "Build step — 3) install to /Applications or 4) build only (prod)? [3/4]: " build_choice
-case "$build_choice" in
-  3) exec Scripts/install-app.sh ;;
-  4) exec ./Scripts/run.sh prod ;;
-  *) echo "Invalid choice" >&2; exit 1 ;;
-esac
+echo "Building repo-root production app..."
+exec ./Scripts/run.sh prod

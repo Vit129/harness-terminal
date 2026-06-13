@@ -175,5 +175,5 @@ git diff -- "$INFO_PLIST" "$HARNESS_VERSION_SWIFT" "$RELEASE_NOTES_SWIFT" CHANGE
 echo ""
 echo "Release metadata prepared. Next:"
 echo "  Scripts/commit-push.sh"
-echo "  make install   # copy to /Applications"
-echo "  make prod      # repo-root production build only"
+echo "  make prod      # repo-root production build"
+echo "  make install   # manual /Applications install only"

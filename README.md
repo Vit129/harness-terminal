@@ -27,6 +27,7 @@ Everything is first-party Swift — GPU terminal engine, session daemon, CLI. On
 ```bash
 make preview      # isolated preview (separate daemon socket)
 make debug        # alias for make preview
+make prod         # repo-root production build, no /Applications copy
 swift build       # compile all targets
 swift test        # run tests
 ```

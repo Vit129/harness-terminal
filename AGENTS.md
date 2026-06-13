@@ -21,6 +21,7 @@ make preview      # isolated preview build under .harness-preview/
 make debug        # alias for make preview
 make prod         # release-style repo-root Harness.app (no /Applications copy)
 make run          # re-open existing repo-root Harness.app without rebuilding
+make install      # manual-only copy to /Applications
 make preview-stop # kill preview processes
 make clean        # remove build artifacts, Harness.app, dist/
 ```
