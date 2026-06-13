@@ -57,11 +57,12 @@
 | 41 | Translucent window legibility: use terminalBackground.withAlphaComponent(opacity) instead of .clear (CASE-027) | ✅ Done |
 | 42 | Code review + bug fixes: async syncFromDaemon missing terminalHosts.prune(), ViNormalMode force-unwrap crash on surrogate unichars, selectSessionNumber rename to selectWorkspaceNumber | ✅ Done |
 | 43 | fzf install + shell integration (brew install fzf + source <(fzf --zsh) in ~/.zshrc) | ✅ Done |
+| 44 | CASE-028: ⌘1-9 verified/kept as Switch to Session N (selectWorkspaceNumber→selectSession); added ⌘[/⌘] = Previous/Next Session (selectAdjacentSession); removed dead selectTabNumber/selectTab(atIndex:)/selectAdjacentTab; menu cleanup (removed New Tab, Layout presets, native fullscreen; Toggle Focus Mode → Show Git Panel ⌘G); fixed make preview socket path | ✅ Done |
 
 ### Removed / Reverted Features
 - **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.
 - **Focus Mode (⌘P)** — status unclear; no TaskBoardView or FocusMode symbol found in source scan. Verify before documenting.
-- **⌘1–9** — `selectSessionNumber` was renamed to `selectWorkspaceNumber` in v2.5.2. Switches workspaces (not sessions within workspace).
+- **⌘1–9** — `selectSessionNumber` was renamed to `selectWorkspaceNumber` in v2.5.2. Confirmed CASE-028: it calls `selectSession(workspaceID:sessionID:)` over `workspace.sessions[index]` — switches the Session pill within the active workspace (matches the top bar 1:1), not workspaces/windows. See [[session-tab-hierarchy]].
 
 
 ### Recent_Lessons
@@ -98,7 +99,7 @@
 - **CWD tracking** — daemon polls proc_pidinfo every 500ms (lightweight); no shell integration needed
 - **File preview** — constraint-based sibling panel (never reparent terminal views)
 - **vi mode** — `ViNormalMode.swift` is a self-contained engine (`@MainActor final class ViEngine`); `SyntaxTextView` owns the instance and wires callbacks. Notifications used for cross-layer actions (:q → `viQuitCommand`, :e → `viOpenFileCommand`, :bn/:bp → `viNextBufferCommand`).
-- **⌘1–9** — switches workspaces (sidebar sessions), not tabs within a workspace
+- **⌘1–9** — switches Session pills (top bar) within the active workspace via `selectSession`; **⌘[ / ⌘]** — Previous/Next Session via `selectAdjacentSession` (CASE-028). "Tab within Session" has no visible UI and its menu shortcuts/dead code were removed — see [[session-tab-hierarchy]].
 - **Keyboard file tree** — `FileTreeKeyboardNav.swift` holds `FileTreeKeyboardState` (@Observable); AppKit (`WorkspaceFileTreeView.keyDown`) writes, SwiftUI (`NodeRow`) reads for highlight; `updateVisiblePaths()` keeps flat ordered list in sync
 
 ## Known Issues
@@ -127,6 +128,6 @@
 - ACP Client: SHELVED — code intact (`ACPClient`, `ACPSession`, `AgentChatPanelView`, `AgentConfig`)
 - Preview uses `.harness-preview/` — socket path max 103 bytes (use `/tmp/hp` symlink for worktree)
 - SoftIconButton: supports `rightMouseDown` → pops up assigned `.menu`
-- ⌘1–9: `MenuTarget.selectWorkspaceNumber` → `SessionCoordinator.selectWorkspace(byIndex:)` (renamed from selectSessionNumber in v2.5.1)
+- ⌘1–9: `MenuTarget.selectWorkspaceNumber` → `SessionCoordinator.selectSession(workspaceID:sessionID:)` over `workspace.sessions[index]` (renamed from selectSessionNumber in v2.5.1; confirmed CASE-028 — not `selectWorkspace(byIndex:)`)
 - fzf: installed at `/opt/homebrew/bin/fzf` (v0.73.1); shell integration sourced via `source <(fzf --zsh)` in ~/.zshrc — Ctrl+R history, Ctrl+T files, Option+C cd. Terminal input pipeline sends ESC-prefix for Option keys natively.
 - tmux: `window-size` option read in `DaemonServer.applyEffectiveSize`; `list-*` commands in `MainExecutor` render `-F` format strings and `--json` arrays
