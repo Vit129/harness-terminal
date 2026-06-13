@@ -158,15 +158,43 @@ else
   echo "+ update $HARNESS_VERSION_SWIFT short=$version build=$build"
 fi
 
-if [[ "$cl_version" == "$version" ]]; then
+if [[ "$cl_version" != "$version" ]]; then
   echo ""
-  echo "Regenerating release notes from CHANGELOG.md [$version]..."
-  run make release-notes
-else
-  echo ""
-  echo "CHANGELOG.md top entry is [$cl_version], not [$version]; release notes left unchanged."
-  echo "Add the changelog section before running a signed release."
+  echo "CHANGELOG.md top entry is [$cl_version], not [$version]."
+  if [[ "$dry_run" == "0" ]]; then
+    echo "Prepending new release block to CHANGELOG.md..."
+    date_str="$(date +%Y-%m-%d)"
+    tmp_block="$(mktemp)"
+    cat <<EOF > "$tmp_block"
+## [$version] - $date_str
+
+### Added
+- Release version bump to v$version.
+EOF
+    tmp_cl="$(mktemp)"
+    awk -v block_file="$tmp_block" '
+      BEGIN { inserted = 0 }
+      /^## \[/ && !inserted {
+        while ((getline line < block_file) > 0) {
+          print line
+        }
+        close(block_file)
+        print ""
+        inserted = 1
+      }
+      { print }
+    ' CHANGELOG.md > "$tmp_cl"
+    mv "$tmp_cl" CHANGELOG.md
+    rm "$tmp_block"
+    cl_version="$version"
+  else
+    echo "+ would prepend new release block to CHANGELOG.md for $version"
+  fi
 fi
+
+echo ""
+echo "Regenerating release notes from CHANGELOG.md [$version]..."
+run make release-notes
 
 echo ""
 echo "Changed release files:"
