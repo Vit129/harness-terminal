@@ -25,9 +25,9 @@ echo ""
 echo "  1) Commit + push changes"
 echo "  2) Preview build, isolated (make preview)"
 echo "  3) Run dev build (make debug)"
-echo "  4) Build app and install to /Applications (make install)"
-echo "  5) Build app only, no copy (make prod)"
-echo "  6) Full cycle: commit+push (merge if worktree) -> prepare release -> build (4 or 5)"
+echo "  4) Bump version, build app, and install to /Applications (make install)"
+echo "  5) Bump version, build app only, no copy (make prod)"
+echo "  6) Full cycle: bump version -> commit+push (merge if worktree) -> build (4 or 5)"
 echo ""
 read -rp "Enter choice (1-6): " choice
 
@@ -40,7 +40,7 @@ case "$choice" in
   1) exec Scripts/commit-push.sh ;;
   2) exec ./Scripts/run.sh preview ;;
   3) exec ./Scripts/run.sh debug ;;
-  4) exec Scripts/install-app.sh ;;
-  5) exec ./Scripts/run.sh prod ;;
+  4) ./Scripts/bump-version.sh; exec Scripts/install-app.sh ;;
+  5) ./Scripts/bump-version.sh; exec ./Scripts/run.sh prod ;;
   6) exec Scripts/full-cycle.sh ;;
 esac
