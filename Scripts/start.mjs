@@ -13,6 +13,18 @@ try {
   currentBuild = "unknown";
 }
 
+// Calculate next versions
+let nextPatch = "";
+let nextMinor = "";
+let nextMajor = "";
+if (currentVersion !== "unknown" && currentVersion.includes('.')) {
+  const [major, minor, patch] = currentVersion.split('.').map(Number);
+  nextPatch = `${major}.${minor}.${patch + 1}`;
+  nextMinor = `${major}.${minor + 1}.0`;
+  nextMajor = `${major + 1}.0.0`;
+}
+const nextVersions = nextPatch ? ` (${nextPatch} / ${nextMinor} / ${nextMajor})` : "";
+
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'inherit' });
@@ -118,11 +130,11 @@ async function main() {
         value: 'preview'
       },
       {
-        display: '3) Bump version, then build repo-root production app (make prod)',
+        display: `3) Bump version, then build repo-root production app (make prod)${nextVersions}`,
         value: 'prod'
       },
       {
-        display: '4) Full cycle: bump version -> commit+push -> make prod',
+        display: `4) Full cycle: bump version -> commit+push -> make prod${nextVersions}`,
         value: 'full-cycle'
       }
     ];
