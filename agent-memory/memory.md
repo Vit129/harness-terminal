@@ -70,6 +70,7 @@
 | 54 | P12 PBI-ORCH-002/003: harness-mcp env-gated pane/session control tools plus waitForPaneOutput | ✅ Done |
 | 55 | P12 PBI-ORCH-004/005: persisted MCP tool policy for mutating tools; scoped UI visibility design note only | ✅ Done |
 | 56 | P4 Track 1 Syntax Highlighting: verified and structured. Integrated SyntaxTextView highlighting (regex-based heuristics supporting 30+ languages) in FileViewerViewController; preserved size guards, binary/non-UTF8 placeholders, copy/select and scroll behaviors; added SyntaxHighlighterTests.swift verifying correctness; noted CLI cat/view commands absence. | ✅ Done |
+| 57 | P15 plan: integration roadmap for P4+P10+P11+P12+P13/P14 — maps shared primitives (pane/session command facade, PaneNode split tree, harness.events bridge), flags divergent P4 docs, recommends merge/sequencing order. P16 plan: Kanban-style Agent/Session Board (Jira/Trello/Devin-Windsurf parity) for GUI sidebar + `harness board` CLI + harness.board scripting + harnessBoard MCP, backed by shared HarnessCore BoardModel; PBI-BOARD-001..006. Docs only, no code changes. | ✅ Done |
 
 ### Removed / Reverted Features
 - **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.
