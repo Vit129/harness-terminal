@@ -1069,7 +1069,7 @@ public struct SessionEditor: Sendable {
                     case .left, .up: signed = -delta
                     case .right, .down: signed = delta
                     }
-                    _ = adjustRatio(&tab.rootPane, target: paneID, delta: signed)
+                    _ = adjustRatio(&tab.rootPane, target: paneID, direction: direction, delta: signed)
                     snapshot.workspaces[workspaceIndex].sessions[sessionIndex].tabs[tabIndex] = tab
                     bumpRevision()
                     return true
@@ -1080,19 +1080,30 @@ public struct SessionEditor: Sendable {
     }
 
     @discardableResult
-    private func adjustRatio(_ node: inout PaneNode, target: PaneID, delta: CGFloat) -> Bool {
+    private func adjustRatio(_ node: inout PaneNode, target: PaneID, direction: ResizeDirection, delta: CGFloat) -> Bool {
         switch node {
         case let .leaf(leaf) where leaf.id == target:
             return true
-        case .branch(let direction, var ratio, var first, var second):
-            if adjustRatio(&first, target: target, delta: delta) {
-                ratio = min(0.9, max(0.1, ratio + delta))
-                node = .branch(direction: direction, ratio: ratio, first: first, second: second)
+        case .branch(let splitDir, var ratio, var first, var second):
+            let matchesAxis: Bool
+            switch direction {
+            case .left, .right:
+                matchesAxis = splitDir == .horizontal
+            case .up, .down:
+                matchesAxis = splitDir == .vertical
+            }
+            if adjustRatio(&first, target: target, direction: direction, delta: delta) {
+                if matchesAxis {
+                    ratio = min(0.9, max(0.1, ratio + delta))
+                }
+                node = .branch(direction: splitDir, ratio: ratio, first: first, second: second)
                 return true
             }
-            if adjustRatio(&second, target: target, delta: delta) {
-                ratio = min(0.9, max(0.1, ratio - delta))
-                node = .branch(direction: direction, ratio: ratio, first: first, second: second)
+            if adjustRatio(&second, target: target, direction: direction, delta: delta) {
+                if matchesAxis {
+                    ratio = min(0.9, max(0.1, ratio - delta))
+                }
+                node = .branch(direction: splitDir, ratio: ratio, first: first, second: second)
                 return true
             }
             return false

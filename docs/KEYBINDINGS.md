@@ -18,7 +18,7 @@ Trigger: the prefix key (default `ctrl-a`, configurable via `settings.prefixKey`
 |---|---|
 | `c` | `new-window` |
 | `%` | `split-window -h` (side-by-side) |
-| `"` | *Disabled* (Vertical/downward splits are no longer supported) |
+| `"` | `split-window -v` (top/bottom) |
 | `x` | `kill-pane` |
 | `z` | `zoom-pane` |
 | `&` | `kill-window` |

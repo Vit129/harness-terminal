@@ -23,6 +23,40 @@ final class HarnessSplitViewTests: XCTestCase {
         XCTAssertLessThan(first.frame.width, split.bounds.width)
         XCTAssertLessThan(second.frame.width, split.bounds.width)
     }
+
+    func testHorizontalSplitRatioPersistence() {
+        let split = HarnessSplitView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        split.isVertical = true
+        split.direction = .horizontal
+        split.ratio = 0.4
+
+        let first = LayoutProbeView()
+        let second = LayoutProbeView()
+        split.addSubview(first)
+        split.addSubview(second)
+
+        split.needsLayout = true
+        split.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(first.frame.width, 240, accuracy: 5.0)
+    }
+
+    func testVerticalSplitRatioPersistence() {
+        let split = HarnessSplitView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        split.isVertical = false
+        split.direction = .vertical
+        split.ratio = 0.6
+
+        let first = LayoutProbeView()
+        let second = LayoutProbeView()
+        split.addSubview(first)
+        split.addSubview(second)
+
+        split.needsLayout = true
+        split.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(first.frame.height, 180, accuracy: 5.0)
+    }
 }
 
 @MainActor

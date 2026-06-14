@@ -39,6 +39,12 @@ extension HarnessSidebarPanelViewController {
         splitRight.toolTip = SplitDirection.horizontal.rawValue
         menu.addItem(splitRight)
 
+        let splitDown = NSMenuItem(title: "Split session down", action: #selector(splitSessionFromMenu(_:)), keyEquivalent: "")
+        splitDown.target = self
+        splitDown.representedObject = session.id
+        splitDown.toolTip = SplitDirection.vertical.rawValue
+        menu.addItem(splitDown)
+
         menu.addItem(.separator())
 
         let right = SessionCoordinator.shared.settings.sidebarOnRight

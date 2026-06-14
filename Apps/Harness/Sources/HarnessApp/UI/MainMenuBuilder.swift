@@ -99,9 +99,14 @@ enum MainMenuBuilder {
 
         let view = NSMenuItem()
         view.submenu = NSMenu(title: "View")
-        let splitHItem = NSMenuItem(title: "Split Horizontal", action: #selector(MenuTarget.splitH), keyEquivalent: "d")
+        let splitHItem = NSMenuItem(title: "Split Right", action: #selector(MenuTarget.splitH), keyEquivalent: "d")
         splitHItem.target = MenuTarget.shared
         view.submenu?.addItem(splitHItem)
+
+        let splitVItem = NSMenuItem(title: "Split Down", action: #selector(MenuTarget.splitV), keyEquivalent: "d")
+        splitVItem.keyEquivalentModifierMask = [.command, .shift]
+        splitVItem.target = MenuTarget.shared
+        view.submenu?.addItem(splitVItem)
         view.submenu?.addItem(.separator())
 
         let focusLeft = NSMenuItem(title: "Focus Pane Left", action: #selector(MenuTarget.focusPaneLeft), keyEquivalent: "\u{F702}")
@@ -383,6 +388,10 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
 
     @objc func splitH() {
         SessionCoordinator.shared.splitActivePane(direction: .horizontal)
+    }
+
+    @objc func splitV() {
+        SessionCoordinator.shared.splitActivePane(direction: .vertical)
     }
 
     @objc func focusPaneLeft() { SessionCoordinator.shared.focusPaneDirectional(.left) }
