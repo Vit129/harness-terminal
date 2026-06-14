@@ -726,7 +726,7 @@ final class PaneContainerView: NSView {
                     splitButtons.topAnchor.constraint(equalTo: paneShell.topAnchor, constant: 8),
                 ])
             }
-        case let .branch(direction, _, _, _):
+        case let .branch(direction, ratio, first, second):
             // Flatten same-direction chain into a single NSSplitView with N children
             let flatChildren = flattenSameDirection(node, direction: direction)
             let split = HarnessSplitView()
@@ -734,7 +734,13 @@ final class PaneContainerView: NSView {
             split.isVertical = direction == .horizontal
             split.tabID = tabID
             split.direction = direction
-            split.ratio = nil  // signal: distribute equally among N children
+            if flatChildren.count == 2 {
+                split.firstPaneID = firstLeafID(first)
+                split.secondPaneID = firstLeafID(second)
+                split.ratio = ratio
+            } else {
+                split.ratio = nil  // signal: distribute equally among N children
+            }
             split.delegate = split
             split.translatesAutoresizingMaskIntoConstraints = false
 
@@ -818,8 +824,10 @@ private final class PaneSplitButtonsView: NSView {
         addSubview(stack)
 
         let splitRight = makeButton("square.split.2x1", tooltip: "Split Right (⌘D)", action: #selector(splitH))
+        let splitDown = makeButton("square.split.1x2", tooltip: "Split Down (⌘⇧D)", action: #selector(splitV))
         let closeBtn = makeButton("xmark", tooltip: "Close Pane (⌥⇧⌘W)", action: #selector(closePane))
         stack.addArrangedSubview(splitRight)
+        stack.addArrangedSubview(splitDown)
         stack.addArrangedSubview(closeBtn)
 
         NSLayoutConstraint.activate([
@@ -851,6 +859,10 @@ private final class PaneSplitButtonsView: NSView {
 
     @objc private func splitH() {
         SessionCoordinator.shared.splitActivePane(direction: .horizontal)
+    }
+
+    @objc private func splitV() {
+        SessionCoordinator.shared.splitActivePane(direction: .vertical)
     }
 
     @objc private func closePane() {

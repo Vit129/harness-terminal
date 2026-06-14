@@ -670,6 +670,7 @@ private final class TabPillView: NSView {
         menu.addItem(pin)
         menu.addItem(.separator())
         menu.addItem(menuItem("Split Right", #selector(ctxSplitHorizontal)))
+        menu.addItem(menuItem("Split Down", #selector(ctxSplitVertical)))
         return menu
     }
 

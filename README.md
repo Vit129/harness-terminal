@@ -10,7 +10,7 @@ Everything is first-party Swift — GPU terminal engine, session daemon, CLI. On
 
 ## Why Harness
 
-**Terminal first.** Metal GPU renderer, 490 themes, inline images, ligatures. Sessions live in a background daemon — quit and reopen and everything is exactly where you left it. Attach from a second window or remote machine over SSH.
+**Terminal first.** Metal GPU renderer, 490 themes, inline images, ligatures. Split panes side-by-side or stacked (`Cmd+D` / `Cmd+Shift+D`). Sessions live in a background daemon — quit and reopen and everything is exactly where you left it. Attach from a second window or remote machine over SSH.
 
 **vi power user.** Full vi normal mode in the file editor — motions, operators, text objects, marks, registers, macros, jump list, `:` ex commands (`:w` `:q` `:s/old/new/g` `:%s` `:set relativenumber` `:e file` `:bn`). Inline `*` search highlight, LSP hover + go-to-definition + diagnostics.
 

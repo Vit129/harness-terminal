@@ -135,13 +135,23 @@ enum CommandPaletteController {
             },
             PaletteAction(
                 id: "action.splitH",
-                title: "Split Horizontal",
+                title: "Split Right",
                 subtitle: "Split the active pane to the right",
-                symbol: "rectangle.split.2x1",
+                symbol: "square.split.2x1",
                 shortcut: "⌘D",
                 section: .actions
             ) {
                 coordinator.splitActivePane(direction: .horizontal)
+            },
+            PaletteAction(
+                id: "action.splitV",
+                title: "Split Down",
+                subtitle: "Split the active pane down",
+                symbol: "square.split.1x2",
+                shortcut: "⌘⇧D",
+                section: .actions
+            ) {
+                coordinator.splitActivePane(direction: .vertical)
             },
             PaletteAction(
                 id: "action.zoomPane",

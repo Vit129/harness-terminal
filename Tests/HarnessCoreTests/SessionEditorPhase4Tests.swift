@@ -120,6 +120,16 @@ final class SessionEditorPhase4Tests: XCTestCase {
         XCTAssertEqual(sourceTab.rootPane.allPaneIDs(), [movedPane], "source tab keeps only the remaining pane")
     }
 
+    func testDirectionalSelectFindsLeftRightNeighbor() throws {
+        var editor = SessionEditor()
+        let (ws, tabID, original) = try defaultTab(editor)
+        let newPane = try XCTUnwrap(editor.splitPane(
+            in: ws, tabID: tabID, paneID: original, direction: .vertical
+        ))
+        XCTAssertEqual(editor.directionalNeighbor(of: newPane, direction: .left), original)
+        XCTAssertEqual(editor.directionalNeighbor(of: original, direction: .right), newPane)
+    }
+
     func testLayoutTemplateCycleIsRoundTrip() {
         XCTAssertEqual(LayoutTemplate.evenHorizontal.next(), .evenVertical)
         XCTAssertEqual(LayoutTemplate.evenVertical.previous(), .evenHorizontal)
@@ -128,3 +138,4 @@ final class SessionEditorPhase4Tests: XCTestCase {
         XCTAssertEqual(current, .evenHorizontal)
     }
 }
+
