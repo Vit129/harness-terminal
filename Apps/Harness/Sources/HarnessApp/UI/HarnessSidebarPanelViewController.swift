@@ -190,6 +190,12 @@ final class HarnessSidebarPanelViewController: NSViewController {
             name: Notification.Name("HarnessActiveTabGitBranchDidChange"),
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(viViewFileCommand(_:)),
+            name: .viViewFileCommand,
+            object: nil
+        )
     }
 
     override func viewDidLayout() {
@@ -721,6 +727,36 @@ final class HarnessSidebarPanelViewController: NSViewController {
     func selectGitTab() {
         sidebarTabs.selectedSegment = 2
         selectSidebarTab(index: 2)
+    }
+
+    func previewFile(path: String) {
+        sidebarTabs.selectedSegment = 1
+        selectSidebarTab(index: 1)
+        fileTreeView.isHidden = true
+        fileViewerVC.view.isHidden = false
+        fileViewerVC.load(path: path)
+    }
+
+    @objc private func viViewFileCommand(_ note: Notification) {
+        guard let path = note.userInfo?["path"] as? String else { return }
+        var expanded = (path as NSString).expandingTildeInPath
+        if !expanded.hasPrefix("/"), let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
+            expanded = (cwd as NSString).appendingPathComponent(expanded)
+        }
+        if !FileManager.default.fileExists(atPath: expanded) {
+            let root = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd ?? FileManager.default.currentDirectoryPath
+            switch FuzzyPathResolver.resolve(query: path, root: root, limit: 5) {
+            case .none:
+                DisplayMessage.show("view: no match")
+                return
+            case .unique(let match):
+                expanded = match
+            case .ambiguous(let matches):
+                DisplayMessage.show(matches.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n"))
+                return
+            }
+        }
+        previewFile(path: expanded)
     }
 
     private func selectSidebarTab(index: Int) {

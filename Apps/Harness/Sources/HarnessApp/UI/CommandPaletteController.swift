@@ -371,60 +371,6 @@ enum CommandPaletteController {
 
 }
 
-// MARK: - Fuzzy match
-
-@MainActor
-private enum FuzzyMatcher {
-    /// Score `string` against `query`. Returns nil when no subsequence match.
-    /// Higher scores rank earlier:
-    ///   • +60 prefix match
-    ///   • +20 word-start match per char (after space / `.`/`-`/`_`)
-    ///   • +6  consecutive match
-    ///   • +3  base per matched character
-    ///   • +1  exact-case match per char
-    ///   • -1  per char skipped between matches (gap penalty)
-    static func score(query: String, in string: String) -> Int? {
-        guard !query.isEmpty else { return 0 }
-        let lowerQ = Array(query.lowercased())
-        let lowerS = Array(string.lowercased())
-        let originalS = Array(string)
-        let originalQ = Array(query)
-
-        var score = 0
-        var sIdx = 0
-        var lastMatch = -1
-        for (qIdx, q) in lowerQ.enumerated() {
-            var matched = false
-            while sIdx < lowerS.count {
-                if lowerS[sIdx] == q {
-                    score += 3
-                    if originalS[sIdx] == originalQ[qIdx] { score += 1 }
-                    if sIdx == 0 || isWordStart(lowerS, at: sIdx) { score += 20 }
-                    if lastMatch >= 0 && sIdx == lastMatch + 1 { score += 6 }
-                    let gap = sIdx - (lastMatch + 1)
-                    if gap > 0 { score -= gap }
-                    lastMatch = sIdx
-                    sIdx += 1
-                    matched = true
-                    break
-                }
-                sIdx += 1
-            }
-            if !matched { return nil }
-        }
-        if lowerS.starts(with: lowerQ) { score += 60 }
-        return score
-    }
-
-    private static func isWordStart(_ chars: [Character], at idx: Int) -> Bool {
-        guard idx > 0 else { return true }
-        switch chars[idx - 1] {
-        case " ", ".", "-", "_", "/", ":": return true
-        default: return false
-        }
-    }
-}
-
 // MARK: - View controller
 
 @MainActor
@@ -711,8 +657,8 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
             }
         } else {
             for action in allActions {
-                let titleScore = FuzzyMatcher.score(query: query, in: action.title) ?? -1
-                let subtitleScore = FuzzyMatcher.score(query: query, in: action.subtitle) ?? -1
+                let titleScore = FileFuzzyMatcher.score(query: query, in: action.title) ?? -1
+                let subtitleScore = FileFuzzyMatcher.score(query: query, in: action.subtitle) ?? -1
                 let best = max(titleScore, subtitleScore >= 0 ? subtitleScore - 5 : -1)
                 if best >= 0 {
                     // Boost recents so a query that matches multiple things prefers a
@@ -771,8 +717,8 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
         guard !cachedFileEntries.rootPath.isEmpty else { return [] }
         var matches: [(action: PaletteAction, score: Int)] = []
         for entry in cachedFileEntries.entries {
-            let titleScore = FuzzyMatcher.score(query: query, in: entry.fileName) ?? -1
-            let pathScore = FuzzyMatcher.score(query: query, in: entry.relativePath) ?? -1
+            let titleScore = FileFuzzyMatcher.score(query: query, in: entry.fileName) ?? -1
+            let pathScore = FileFuzzyMatcher.score(query: query, in: entry.relativePath) ?? -1
             let best = max(titleScore, pathScore >= 0 ? pathScore - 4 : -1)
             guard best >= 0 else { continue }
             let path = entry.path
@@ -814,7 +760,7 @@ final class PaletteViewController: NSViewController, NSTableViewDataSource, NSTa
                 let coordinator = SessionCoordinator.shared
                 guard let surfaceID = coordinator.activeSurfaceID else { return }
                 coordinator.requestDaemon(.sendKeys(surfaceID: surfaceID.uuidString, keys: [symbol]))
-            }, score: FuzzyMatcher.score(query: query, in: symbol) ?? 0)
+            }, score: FileFuzzyMatcher.score(query: query, in: symbol) ?? 0)
         }
     }
 

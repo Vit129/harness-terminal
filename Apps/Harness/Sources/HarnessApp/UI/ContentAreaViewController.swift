@@ -131,6 +131,8 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
             object: nil
         )
         NotificationCenter.default.addObserver(self, selector: #selector(viOpenFileCommand(_:)), name: .viOpenFileCommand, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(viSplitFileCommand(_:)), name: .viSplitFileCommand, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(viFindFileCommand(_:)), name: .viFindFileCommand, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(viNextBufferCommand(_:)), name: .viNextBufferCommand, object: nil)
         installCopySelectionToast()
         reloadTabBar()
@@ -176,12 +178,33 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
 
     @objc private func viOpenFileCommand(_ note: Notification) {
         guard let path = note.userInfo?["path"] as? String else { return }
-        // Expand ~ and resolve relative paths against active tab's CWD
-        var expanded = (path as NSString).expandingTildeInPath
-        if !expanded.hasPrefix("/"), let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
-            expanded = (cwd as NSString).appendingPathComponent(expanded)
+        guard let resolved = resolveViPath(path, command: "edit") else { return }
+        openFileTab(path: resolved)
+    }
+
+    @objc private func viSplitFileCommand(_ note: Notification) {
+        guard let path = note.userInfo?["path"] as? String, !path.isEmpty else { return }
+        let direction = (note.userInfo?["direction"] as? String) == "vertical"
+            ? SplitDirection.vertical
+            : SplitDirection.horizontal
+        guard let expanded = resolveViPath(path, command: "split") else { return }
+        SessionCoordinator.shared.splitActivePaneAndRun(
+            direction: direction,
+            command: "${EDITOR:-vi} \(Self.shellQuote(expanded))"
+        )
+    }
+
+    @objc private func viFindFileCommand(_ note: Notification) {
+        guard let query = note.userInfo?["query"] as? String, !query.isEmpty else { return }
+        let root = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd ?? FileManager.default.currentDirectoryPath
+        switch FuzzyPathResolver.resolve(query: query, root: root, limit: 5) {
+        case .none:
+            DisplayMessage.show("find: no match")
+        case .unique(let path):
+            openFileTab(path: path)
+        case .ambiguous(let matches):
+            DisplayMessage.show(matches.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n"))
         }
-        openFileTab(path: expanded)
     }
 
     @objc private func viNextBufferCommand(_ note: Notification) {
@@ -428,6 +451,31 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         showFileEditorSplit()
         loadActiveFileTab()
         persistEditorState()
+    }
+
+    private func resolveViPath(_ path: String, command: String) -> String? {
+        var expanded = (path as NSString).expandingTildeInPath
+        if !expanded.hasPrefix("/"), let cwd = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd {
+            expanded = (cwd as NSString).appendingPathComponent(expanded)
+        }
+        if !FileManager.default.fileExists(atPath: expanded) {
+            let root = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.cwd ?? FileManager.default.currentDirectoryPath
+            switch FuzzyPathResolver.resolve(query: path, root: root, limit: 5) {
+            case .none:
+                DisplayMessage.show("\(command): no match")
+                return nil
+            case .unique(let match):
+                return match
+            case .ambiguous(let matches):
+                DisplayMessage.show(matches.enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n"))
+                return nil
+            }
+        }
+        return expanded
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     func closeFileTab(id: FileTabID) {

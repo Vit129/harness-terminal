@@ -767,6 +767,32 @@ final class SessionCoordinator: NSObject {
         }
     }
 
+    func splitActivePaneAndRun(direction: SplitDirection, command: String) {
+        guard let workspace = snapshot.activeWorkspace,
+              let tab = workspace.activeTab,
+              let paneID = activeSurfaceID.flatMap({ paneID(for: $0, in: tab.rootPane) })
+                ?? tab.rootPane.allPaneIDs().last
+        else { return }
+        Task {
+            guard case let .paneID(newPaneID)? = await requestDaemon(.newSplit(
+                tabID: tab.id,
+                paneID: paneID,
+                direction: direction,
+                shell: settings.defaultShell
+            )) else {
+                await syncFromDaemon()
+                return
+            }
+            await syncFromDaemon()
+            guard let activeTab = snapshot.activeWorkspace?.activeTab,
+                  let surfaceID = surfaceID(forPaneID: newPaneID, in: activeTab.rootPane)
+            else { return }
+            setActiveSurface(surfaceID)
+            terminalHosts.host(for: surfaceID)?.focusTerminal()
+            await requestDaemon(.sendData(surfaceID: surfaceID.uuidString, data: Data((command + "\r").utf8)))
+        }
+    }
+
     func focusPaneDirectional(_ direction: DirectionalAxis) {
         guard let workspace = snapshot.activeWorkspace,
               let tab = workspace.activeTab,

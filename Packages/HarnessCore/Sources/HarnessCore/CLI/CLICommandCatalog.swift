@@ -29,6 +29,8 @@ public enum CLICommandCatalog {
         .init("version", "Print CLI and daemon versions", aliases: ["--version", "-v"], json: true),
         .init("color-check", "Print ANSI/256/truecolor diagnostic swatches"),
         .init("theme-preview", "Print deterministic themed sample output"),
+        .init("view", "Print a text file with preview size/binary guards"),
+        .init("lsp", "Run process-local LSP commands", json: true),
         .init("ping", "Check the daemon is reachable"),
         .init("daemon-stats", "Daemon pid, uptime, surface/client counts", json: true),
         .init("list-workspaces", "List workspaces", json: true),

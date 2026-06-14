@@ -23,6 +23,10 @@ struct HarnessCLI {
             case "theme-preview":
                 printThemePreview(args)
                 return
+            case "view":
+                exit(Int32(handleView(args)))
+            case "lsp":
+                exit(Int32(handleLSP(args)))
             case "remote":
                 exit(try handleRemote(args))
             case "daemon":

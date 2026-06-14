@@ -86,6 +86,7 @@ final class FileEditorView: NSView {
         syntaxView.onDefinition = { [weak self] position in await self?.lspSession.definition(position: position) }
         syntaxView.onNavigateToDefinition = { [weak self] target in
             self?.load(path: target.url.path)
+            self?.syntaxView.navigateTo(line: target.line, column: target.column)
         }
         addSubview(syntaxView)
 

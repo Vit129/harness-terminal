@@ -1,6 +1,7 @@
 import XCTest
 @testable import HarnessCLI
 import HarnessCore
+import HarnessLSP
 
 /// Coverage for the CLI's pure argument-parsing helpers. `harness-cli` previously had no test
 /// target at all, so a refactor could silently break flag parsing. `flagValue` is the shared
@@ -33,12 +34,60 @@ final class HarnessCLITests: XCTestCase {
         XCTAssertEqual(HarnessCLI.flagValue(["--tab", "--oops"], flag: "--tab"), "--oops")
     }
 
+    func testLSPTextLocationParserUsesTrailingLineAndColumn() {
+        let base = URL(fileURLWithPath: "/tmp/project")
+        let parsed = LSPTextLocationParser.parse("Sources/App.swift:42:10", relativeTo: base)
+        XCTAssertEqual(parsed?.fileURL.path, "/tmp/project/Sources/App.swift")
+        XCTAssertEqual(parsed?.line, 42)
+        XCTAssertEqual(parsed?.column, 10)
+        XCTAssertEqual(parsed?.position, LSPPosition(line: 41, character: 9))
+    }
+
+    func testLSPTextLocationParserAllowsColonInPath() {
+        let parsed = LSPTextLocationParser.parse("/tmp/has:colon/App.swift:3:4")
+        XCTAssertEqual(parsed?.fileURL.path, "/tmp/has:colon/App.swift")
+        XCTAssertEqual(parsed?.line, 3)
+        XCTAssertEqual(parsed?.column, 4)
+    }
+
+    func testHarnessViewLoadsPlainUTF8() throws {
+        let dir = try makeTemporaryDirectory()
+        let file = dir.appendingPathComponent("sample.txt")
+        try "hello\nworld\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try HarnessFilePreviewLoader.load(path: file.path), "hello\nworld\n")
+    }
+
+    func testHarnessViewRejectsOversizedFiles() throws {
+        let dir = try makeTemporaryDirectory()
+        let file = dir.appendingPathComponent("large.txt")
+        try Data(repeating: 0x61, count: HarnessFilePreviewLoader.maxPreviewBytes + 1).write(to: file)
+        XCTAssertThrowsError(try HarnessFilePreviewLoader.load(path: file.path)) { error in
+            XCTAssertEqual(error as? HarnessViewError, .tooLarge(HarnessFilePreviewLoader.maxPreviewBytes + 1))
+        }
+    }
+
+    func testHarnessViewRejectsBinaryFiles() throws {
+        let dir = try makeTemporaryDirectory()
+        let file = dir.appendingPathComponent("binary.bin")
+        try Data([0xff, 0xfe, 0x00]).write(to: file)
+        XCTAssertThrowsError(try HarnessFilePreviewLoader.load(path: file.path)) { error in
+            XCTAssertEqual(error as? HarnessViewError, .binaryOrUnsupportedEncoding)
+        }
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("HarnessCLITests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     /// The hand-maintained mirror of the `HarnessCLI.main` dispatch `switch`: the canonical verb of
     /// each `case` (the first label, excluding pure aliases like `--version`/`setw`). Whenever a
     /// `case` is added to or removed from the dispatch in `HarnessCLI.swift`, update this set; the
     /// bidirectional drift guard below then fails until the catalog matches.
     static let dispatchVerbs: Set<String> = [
-        "color-check", "theme-preview", "remote", "daemon", "version",
+        "color-check", "theme-preview", "view", "lsp", "remote", "daemon", "version",
         "list-workspaces", "list-surfaces", "list-sessions", "list-agents", "doctor",
         "completions", "list-windows", "list-panes", "has-session", "list-commands",
         "get-snapshot", "new-workspace", "new-session", "new-tab", "new-split",

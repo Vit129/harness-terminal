@@ -203,6 +203,12 @@ extension HarnessCLI {
           version [--json]                            (print CLI and daemon versions; flags build mismatch)
           color-check                                  (print ANSI/256/truecolor diagnostic swatches)
           theme-preview [--theme <name>] [--all]       (print deterministic themed sample output)
+          view <file>                                  (print a text file with preview size/binary guards)
+          lsp start [--lang <id>] [path] [--json]      (start one process-local language server probe)
+          lsp status [--json]                          (report process-local LSP lifecycle status)
+          lsp hover <file>:<line>:<col> [--json]
+          lsp definition <file>:<line>:<col> [--json]
+          lsp diagnostics <file> [--json]
           completions <zsh|fish|bash>                 (print a shell completion script to stdout)
           list-workspaces [--json] [--pretty]
           list-surfaces [--json] [--pretty]

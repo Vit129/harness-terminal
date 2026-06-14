@@ -36,7 +36,7 @@ let platformProducts: [Product] = [
 // single-pane `attach` — is headless.
 let cliDependencies: [Target.Dependency] = [
     "HarnessCore", "HarnessTerminalEngine", "HarnessCopyMode", "HarnessTerminalKit", "HarnessTheme",
-    "CHarnessSys",
+    "HarnessLSP", "CHarnessSys",
 ]
 let cliExclude: [String] = []
 let platformTargets: [Target] = [
@@ -140,7 +140,7 @@ let platformTestTargets: [Target] = [
 let platformDependencies: [Package.Dependency] = []
 let platformProducts: [Product] = []
 let cliDependencies: [Target.Dependency] = [
-    "HarnessCore", "HarnessTerminalEngine", "HarnessCopyMode", "HarnessTheme", "CHarnessSys",
+    "HarnessCore", "HarnessTerminalEngine", "HarnessCopyMode", "HarnessTheme", "HarnessLSP", "CHarnessSys",
 ]
 let cliExclude: [String] = ["WindowAttachClient.swift"]
 let platformTargets: [Target] = []
@@ -267,7 +267,7 @@ let package = Package(
         // without splitting out a library, so daemon-free helpers like `flagValue` are covered.
         .testTarget(
             name: "HarnessCLITests",
-            dependencies: ["HarnessCLI"],
+            dependencies: ["HarnessCLI", "HarnessLSP"],
             path: "Tests/HarnessCLITests"
         ),
         .testTarget(

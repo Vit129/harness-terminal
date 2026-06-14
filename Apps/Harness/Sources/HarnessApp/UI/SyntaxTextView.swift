@@ -85,6 +85,14 @@ final class SyntaxTextView: NSView {
         gutterView.needsDisplay = true
     }
 
+    func navigateTo(line: Int, column: Int) {
+        let ns = textView.string as NSString
+        let target = offset(line: max(0, line - 1), character: max(0, column - 1), in: ns)
+        guard target != NSNotFound else { return }
+        textView.setSelectedRange(NSRange(location: target, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: target, length: 0))
+    }
+
     func setDiffLines(_ diffLines: [Int: DiffLineType]) {
         gutterView.diffLines = diffLines
         gutterView.needsDisplay = true
@@ -335,6 +343,14 @@ final class SyntaxTextView: NSView {
         vi.onSearchHighlight = { [weak self] pattern in
             guard let self else { return }
             if pattern.isEmpty { self.clearSearchHighlight() } else { self.highlightSearchPattern(pattern) }
+        }
+        vi.onHover = { [weak self] position in await self?.onHover?(position) }
+        vi.onDefinition = { [weak self] position in await self?.onDefinition?(position) }
+        vi.onNavigateToDefinition = { [weak self] target in
+            self?.onNavigateToDefinition?(target)
+        }
+        vi.onDiagnostics = { [weak self] in
+            self?.diagnostics ?? []
         }
     }
 
@@ -724,6 +740,9 @@ extension SyntaxTextView: NSTextViewDelegate {
 extension Notification.Name {
     static let viQuitCommand = Notification.Name("HarnessViQuitCommand")
     static let viOpenFileCommand = Notification.Name("HarnessViOpenFileCommand")
+    static let viViewFileCommand = Notification.Name("HarnessViViewFileCommand")
+    static let viSplitFileCommand = Notification.Name("HarnessViSplitFileCommand")
+    static let viFindFileCommand = Notification.Name("HarnessViFindFileCommand")
     static let viNextBufferCommand = Notification.Name("HarnessViNextBufferCommand")
     static let viListBuffersCommand = Notification.Name("HarnessViListBuffersCommand")
 }
