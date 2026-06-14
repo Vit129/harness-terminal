@@ -14,16 +14,32 @@ struct HarnessDaemonTools: Sendable {
 
     private let client: DaemonClientActor
     private let subscriptionClient: DaemonClient
-    private let controlEnabled: @Sendable () -> Bool
+    private let isToolAllowed: @Sendable (String) -> Bool
+    private let disabledError: @Sendable (String) -> JSONRPCError
 
     init(
         client: DaemonClientActor = DaemonClientActor(),
         subscriptionClient: DaemonClient = DaemonClient(),
-        controlEnabled: @escaping @Sendable () -> Bool = { HarnessDaemonTools.isControlEnabled() }
+        isToolAllowed: @escaping @Sendable (String) -> Bool = { ToolPolicy.load().isToolAllowed($0) },
+        disabledError: @escaping @Sendable (String) -> JSONRPCError = { ToolPolicy.load().disabledError(for: $0) }
     ) {
         self.client = client
         self.subscriptionClient = subscriptionClient
-        self.controlEnabled = controlEnabled
+        self.isToolAllowed = isToolAllowed
+        self.disabledError = disabledError
+    }
+
+    init(
+        client: DaemonClientActor = DaemonClientActor(),
+        subscriptionClient: DaemonClient = DaemonClient(),
+        controlEnabled: @escaping @Sendable () -> Bool
+    ) {
+        self.init(
+            client: client,
+            subscriptionClient: subscriptionClient,
+            isToolAllowed: { _ in controlEnabled() },
+            disabledError: { _ in Self.controlDisabledError }
+        )
     }
 
     // MARK: - harnessList
@@ -122,12 +138,12 @@ struct HarnessDaemonTools: Sendable {
     // MARK: - Mutating daemon tools
 
     func sendPaneText(surfaceId: String, text: String, bracketed _: Bool) async -> (AnyCodable?, JSONRPCError?) {
-        guard controlEnabled() else { return (nil, Self.controlDisabledError) }
+        guard isToolAllowed("sendPaneText") else { return (nil, disabledError("sendPaneText")) }
         return await okResponse(for: .send(surfaceID: surfaceId, text: text), expected: "send")
     }
 
     func sendPaneKeys(surfaceId: String, keys: [String]) async -> (AnyCodable?, JSONRPCError?) {
-        guard controlEnabled() else { return (nil, Self.controlDisabledError) }
+        guard isToolAllowed("sendPaneKeys") else { return (nil, disabledError("sendPaneKeys")) }
         return await okResponse(for: .sendKeys(surfaceID: surfaceId, keys: keys), expected: "sendKeys")
     }
 
@@ -137,7 +153,7 @@ struct HarnessDaemonTools: Sendable {
         name: String?,
         shell: String?
     ) async -> (AnyCodable?, JSONRPCError?) {
-        guard controlEnabled() else { return (nil, Self.controlDisabledError) }
+        guard isToolAllowed("spawnSession") else { return (nil, disabledError("spawnSession")) }
         guard let workspaceID = UUID(uuidString: workspaceId) else {
             return (nil, JSONRPCError(code: -32602, message: "Invalid 'workspaceId' UUID"))
         }
@@ -160,7 +176,7 @@ struct HarnessDaemonTools: Sendable {
         direction: String,
         shell: String?
     ) async -> (AnyCodable?, JSONRPCError?) {
-        guard controlEnabled() else { return (nil, Self.controlDisabledError) }
+        guard isToolAllowed("splitPane") else { return (nil, disabledError("splitPane")) }
         guard let tabID = UUID(uuidString: tabId) else {
             return (nil, JSONRPCError(code: -32602, message: "Invalid 'tabId' UUID"))
         }
@@ -184,7 +200,7 @@ struct HarnessDaemonTools: Sendable {
     }
 
     func closePane(paneId: String) async -> (AnyCodable?, JSONRPCError?) {
-        guard controlEnabled() else { return (nil, Self.controlDisabledError) }
+        guard isToolAllowed("closePane") else { return (nil, disabledError("closePane")) }
         guard let paneID = UUID(uuidString: paneId) else {
             return (nil, JSONRPCError(code: -32602, message: "Invalid 'paneId' UUID"))
         }

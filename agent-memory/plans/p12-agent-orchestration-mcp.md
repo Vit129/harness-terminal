@@ -1,6 +1,6 @@
 # P12 — Agent Orchestration via MCP (cmux parity)
 
-Status: **in progress — PBI-ORCH-001 done; PBI-ORCH-002 done; PBI-ORCH-003 done**
+Status: **in progress — PBI-ORCH-001 done; PBI-ORCH-002 done; PBI-ORCH-003 done; PBI-ORCH-004 done; PBI-ORCH-005 scoped only (design note below, no UI implemented)**
 Priority: **P2** — implement before P11 mutating pane APIs
 Owner surface: **harness-mcp + existing daemon IPC**
 Created from gap review: 2026-06-13 WezTerm/tmux/cmux comparison
@@ -387,6 +387,8 @@ Tests:
 - Policy deny blocks control tools.
 - Policy allow enables named tool.
 
+Status: DONE. `ToolPolicy` loads `mcp-policy.json` from `HarnessPaths.applicationSupport` at `ToolRegistry` initialization. Read-only tools remain enabled by default; `writeFile`, `runCommand`, `sendPaneText`, `sendPaneKeys`, `spawnSession`, `splitPane`, and `closePane` fail closed unless explicitly allowed by policy or `HARNESS_MCP_ALLOW_CONTROL=1`.
+
 ### PBI-ORCH-005: Visibility in Harness UI
 
 Files:
@@ -397,6 +399,10 @@ Tasks:
 
 - Add a lightweight "MCP-controlled" indicator only after MCP control is real.
 - Avoid persisting this in `HarnessSettings`; this is runtime/session state.
+
+Design note (scoping only, no implementation in this PBI): the least intrusive option is a per-tab/pane indicator in `Apps/Harness/Sources/HarnessApp/UI/TerminalTabBarView.swift`, near the existing agent icon / working dot in `TabPillView`. That location already refreshes from live tab metadata via `TerminalTabBarView.refreshMetadata(tabs:activeTabID:)`, so a future daemon snapshot field such as `mcpControlledSurfaceIDs` or `lastMCPControlAt` could tint a small symbol on the active tab without adding user settings or persisted state.
+
+A lower-risk first implementation could instead use `StatusLineView` as a transient runtime banner, for example showing `MCP` on the right side for a few seconds after a mutating MCP request. Runtime state should come from daemon-owned ephemeral activity, delivered through the normal `NotificationBus.snapshotChanged` path or a narrow new notification emitted when the daemon accepts MCP-originated control. It should not be stored in `HarnessSettings`; at most, the UI should cache an in-memory timestamp for fade-out.
 
 ## Target Ordering With P11
 

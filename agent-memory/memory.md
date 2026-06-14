@@ -67,6 +67,7 @@
 | 51 | Investigate terminal panel black-flash when opening file preview from Git Changes/History/file-tree (even fresh tabs); not last-line scroll after preview open | 🔍 In progress |
 | 52 | P12 PBI-ORCH-001: harness-mcp `harnessList` + `readPaneOutput` read-only tools (HarnessDaemonTools.swift) | ✅ Done |
 | 53 | P12 PBI-ORCH-002/003: harness-mcp env-gated pane/session control tools plus waitForPaneOutput | ✅ Done |
+| 54 | P12 PBI-ORCH-004/005: persisted MCP tool policy for mutating tools; scoped UI visibility design note only | ✅ Done |
 
 ### Removed / Reverted Features
 - **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.

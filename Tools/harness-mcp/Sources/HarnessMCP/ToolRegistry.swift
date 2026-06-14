@@ -3,7 +3,16 @@ import HarnessCore
 
 /// Registry of MCP tools exposed to agents.
 struct ToolRegistry: Sendable {
-    private let daemonTools = HarnessDaemonTools()
+    private let policy: ToolPolicy
+    private let daemonTools: HarnessDaemonTools
+
+    init(policy: ToolPolicy = ToolPolicy.load()) {
+        self.policy = policy
+        self.daemonTools = HarnessDaemonTools(
+            isToolAllowed: { policy.isToolAllowed($0) },
+            disabledError: { policy.disabledError(for: $0) }
+        )
+    }
 
     func listTools() -> AnyCodable {
         .object(["tools": .array([
@@ -17,28 +26,28 @@ struct ToolRegistry: Sendable {
                 param("escapeSequences", "boolean", "Return raw output including escape sequences (optional)"),
                 param("joinWrapped", "boolean", "Join soft-wrapped lines into their logical line (optional)"),
             ]),
-            toolDef("sendPaneText", "Send text to a Harness pane (requires HARNESS_MCP_ALLOW_CONTROL=1)", [
+            toolDef("sendPaneText", "Send text to a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
                 param("surfaceId", "string", "Surface id from harnessList"),
                 param("text", "string", "Text to send"),
                 param("bracketed", "boolean", "Whether text was requested as bracketed paste (optional, currently sent as text)"),
             ]),
-            toolDef("sendPaneKeys", "Send key tokens to a Harness pane (requires HARNESS_MCP_ALLOW_CONTROL=1)", [
+            toolDef("sendPaneKeys", "Send key tokens to a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
                 param("surfaceId", "string", "Surface id from harnessList"),
                 param("keys", "array", "Key tokens to send"),
             ]),
-            toolDef("spawnSession", "Create a new Harness session (requires HARNESS_MCP_ALLOW_CONTROL=1)", [
+            toolDef("spawnSession", "Create a new Harness session (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
                 param("workspaceId", "string", "Workspace UUID"),
                 param("cwd", "string", "Working directory (optional)"),
                 param("name", "string", "Session name (optional)"),
                 param("shell", "string", "Shell path (optional)"),
             ]),
-            toolDef("splitPane", "Split an existing Harness pane (requires HARNESS_MCP_ALLOW_CONTROL=1)", [
+            toolDef("splitPane", "Split an existing Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
                 param("tabId", "string", "Tab UUID"),
                 param("paneId", "string", "Pane UUID"),
                 param("direction", "string", "Split direction: right, left, up, or down"),
                 param("shell", "string", "Shell path (optional)"),
             ]),
-            toolDef("closePane", "Close a Harness pane (requires HARNESS_MCP_ALLOW_CONTROL=1)", [
+            toolDef("closePane", "Close a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
                 param("paneId", "string", "Pane UUID"),
             ]),
             toolDef("waitForPaneOutput", "Wait until a Harness pane emits a target string", [
@@ -120,8 +129,8 @@ struct ToolRegistry: Sendable {
     }
 
     private func writeFile(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
-        guard HarnessDaemonTools.isControlEnabled() else {
-            return (nil, HarnessDaemonTools.controlDisabledError)
+        guard policy.isToolAllowed("writeFile") else {
+            return (nil, policy.disabledError(for: "writeFile"))
         }
         guard case let .string(path)? = args["path"],
               case let .string(content)? = args["content"] else {
@@ -246,8 +255,8 @@ struct ToolRegistry: Sendable {
     // MARK: - Terminal tools
 
     private func runCommand(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
-        guard HarnessDaemonTools.isControlEnabled() else {
-            return (nil, HarnessDaemonTools.controlDisabledError)
+        guard policy.isToolAllowed("runCommand") else {
+            return (nil, policy.disabledError(for: "runCommand"))
         }
         guard case let .string(command)? = args["command"] else {
             return (nil, JSONRPCError(code: -32602, message: "Missing 'command' parameter"))
