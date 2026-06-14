@@ -18,7 +18,7 @@ Everything is first-party Swift — GPU terminal engine, session daemon, CLI. On
 
 **IDE convenient.** Sidebar (`Cmd+\`): file tree with keyboard nav (j/k/h/l/Enter), real-time Git panel (stage, commit, push, history, worktrees), LSP-powered file editor. `Cmd+K` command palette with file quick-open, Switch Project (+ zoxide), symbol search.
 
-**Agent aware.** Detects Claude Code, Codex, Cursor, and 10+ more. Desktop alerts + `Cmd+Shift+U` jump to whoever's waiting.
+**Agent aware.** Detects Claude Code, Codex, Cursor, and 10+ more. Desktop alerts + `Cmd+Shift+U` jump to whoever's waiting. Kanban-style Board sidebar tab and `harness board` CLI command organize live terminal sessions and agent runs by status.
 
 ---
 

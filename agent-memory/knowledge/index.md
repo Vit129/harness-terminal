@@ -11,6 +11,7 @@
 | git-panel.md | AppKit/Git | DispatchSource, worktrees, real-time | 1/0 | Git panel with real-time refresh, history click→editor, worktree support |
 | project-history.md | Meta | sprints, releases, architecture | 0/0 | Sprint timeline and architecture decisions from v1.3→v2.1 |
 | session-tab-hierarchy.md | AppKit/UI | session, tab, pane, top-bar, keybinding, ⌘1-9, ⌘[, ⌘] | 1/0 | Workspace/Session/Tab/Pane hierarchy; top bar = 1 pill per Session, not per-Tab; ⌘1-9 and ⌘[/⌘] both target Session level, Tab-level shortcuts removed |
+| agent-session-board.md | AppKit/UI | BoardModel, Kanban, classify, BoardViewController, harness board, ScriptAPI, harnessBoard, MCP | 1/0 | Kanban-style Board view over live sessions/tabs/panes (cards), classified into columns by status, accessible via AppKit GUI sidebar, terminal CLI, scripting API, and read-only MCP tool |
 
 ## Source Map
 
@@ -22,6 +23,7 @@
 | acp-client.md | `HarnessCore/ACP/ACPClient.swift`, `HarnessCore/ACP/ACPSession.swift`, `HarnessApp/UI/AgentChatPanelView.swift` |
 | git-panel.md | `HarnessApp/UI/GitPanelView.swift` |
 | session-tab-hierarchy.md | `HarnessApp/UI/ContentAreaViewController.swift`, `HarnessApp/UI/MainMenuBuilder.swift`, `HarnessApp/Services/SessionCoordinator.swift`, `HarnessCore/Session/SessionEditor.swift` |
+| agent-session-board.md | `HarnessCore/Board/BoardModel.swift`, `HarnessCLI/HarnessCLI+Board.swift`, `HarnessApp/UI/BoardViewController.swift`, `HarnessApp/Scripting/ScriptAPI.swift`, `HarnessMCP/HarnessDaemonTools.swift`, `HarnessMCP/ToolRegistry.swift` |
 
 ## Edges
 
@@ -31,6 +33,7 @@
 | ipc-architecture.md | acp-client.md | framing, protocol, stdio |
 | git-panel.md | split-panes.md | DispatchSource, real-time refresh |
 | session-tab-hierarchy.md | appkit-metal.md | ContentAreaViewController, top bar |
+| agent-session-board.md | session-tab-hierarchy.md | SessionSnapshot, Tab, PaneLeaf, status classification |
 
 ## Search Instructions
 
