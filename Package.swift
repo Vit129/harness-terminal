@@ -271,6 +271,11 @@ let package = Package(
             path: "Tests/HarnessCLITests"
         ),
         .testTarget(
+            name: "HarnessMCPTests",
+            dependencies: ["HarnessMCP"],
+            path: "Tests/HarnessMCPTests"
+        ),
+        .testTarget(
             name: "HarnessDaemonTests",
             dependencies: ["HarnessDaemonCore", "HarnessCore", "HarnessTerminalEngine"],
             path: "Tests/HarnessDaemonTests"
