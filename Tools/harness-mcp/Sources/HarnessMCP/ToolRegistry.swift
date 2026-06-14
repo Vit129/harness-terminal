@@ -3,8 +3,59 @@ import HarnessCore
 
 /// Registry of MCP tools exposed to agents.
 struct ToolRegistry: Sendable {
+    private let policy: ToolPolicy
+    private let daemonTools: HarnessDaemonTools
+
+    init(policy: ToolPolicy = ToolPolicy.load()) {
+        self.policy = policy
+        self.daemonTools = HarnessDaemonTools(
+            isToolAllowed: { policy.isToolAllowed($0) },
+            disabledError: { policy.disabledError(for: $0) }
+        )
+    }
+
     func listTools() -> AnyCodable {
         .object(["tools": .array([
+            toolDef("harnessList", "List Harness workspaces, sessions, tabs, and panes", [
+                param("includePanes", "boolean", "Include per-tab pane details (optional, default true)"),
+                param("includeAgents", "boolean", "Include detected agent info per tab (optional, default true)"),
+            ]),
+            toolDef("readPaneOutput", "Read recent output from a Harness pane", [
+                param("surfaceId", "string", "Surface id from harnessList"),
+                param("lines", "number", "Number of lines to read from the bottom (optional, default 200, max 2000)"),
+                param("escapeSequences", "boolean", "Return raw output including escape sequences (optional)"),
+                param("joinWrapped", "boolean", "Join soft-wrapped lines into their logical line (optional)"),
+            ]),
+            toolDef("sendPaneText", "Send text to a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
+                param("surfaceId", "string", "Surface id from harnessList"),
+                param("text", "string", "Text to send"),
+                param("bracketed", "boolean", "Whether text was requested as bracketed paste (optional, currently sent as text)"),
+            ]),
+            toolDef("sendPaneKeys", "Send key tokens to a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
+                param("surfaceId", "string", "Surface id from harnessList"),
+                param("keys", "array", "Key tokens to send"),
+            ]),
+            toolDef("spawnSession", "Create a new Harness session (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
+                param("workspaceId", "string", "Workspace UUID"),
+                param("cwd", "string", "Working directory (optional)"),
+                param("name", "string", "Session name (optional)"),
+                param("shell", "string", "Shell path (optional)"),
+            ]),
+            toolDef("splitPane", "Split an existing Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
+                param("tabId", "string", "Tab UUID"),
+                param("paneId", "string", "Pane UUID"),
+                param("direction", "string", "Split direction: right, left, up, or down"),
+                param("shell", "string", "Shell path (optional)"),
+            ]),
+            toolDef("closePane", "Close a Harness pane (requires MCP policy allowlist or HARNESS_MCP_ALLOW_CONTROL=1)", [
+                param("paneId", "string", "Pane UUID"),
+            ]),
+            toolDef("waitForPaneOutput", "Wait until a Harness pane emits a target string", [
+                param("surfaceId", "string", "Surface id from harnessList"),
+                param("pattern", "string", "Target string to match"),
+                param("timeoutMs", "number", "Timeout in milliseconds (optional, default 30000)"),
+                param("fromNow", "boolean", "Ignore existing scrollback when true (optional, default true)"),
+            ]),
             toolDef("readFile", "Read the contents of a file", [
                 param("path", "string", "Absolute path to the file"),
             ]),
@@ -44,6 +95,14 @@ struct ToolRegistry: Sendable {
         if case let .object(a) = arguments { args = a } else { args = [:] }
 
         switch name {
+        case "harnessList": return await harnessList(args)
+        case "readPaneOutput": return await readPaneOutput(args)
+        case "sendPaneText": return await sendPaneText(args)
+        case "sendPaneKeys": return await sendPaneKeys(args)
+        case "spawnSession": return await spawnSession(args)
+        case "splitPane": return await splitPane(args)
+        case "closePane": return await closePane(args)
+        case "waitForPaneOutput": return await waitForPaneOutput(args)
         case "readFile": return await readFile(args)
         case "writeFile": return await writeFile(args)
         case "listDirectory": return await listDirectory(args)
@@ -70,6 +129,9 @@ struct ToolRegistry: Sendable {
     }
 
     private func writeFile(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard policy.isToolAllowed("writeFile") else {
+            return (nil, policy.disabledError(for: "writeFile"))
+        }
         guard case let .string(path)? = args["path"],
               case let .string(content)? = args["content"] else {
             return (nil, JSONRPCError(code: -32602, message: "Missing 'path' or 'content' parameter"))
@@ -93,9 +155,109 @@ struct ToolRegistry: Sendable {
         return (toolResult(listing), nil)
     }
 
+    // MARK: - Harness daemon tools
+
+    private func harnessList(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        let includePanes = boolArg(args["includePanes"], default: true)
+        let includeAgents = boolArg(args["includeAgents"], default: true)
+        return await daemonTools.harnessList(includePanes: includePanes, includeAgents: includeAgents)
+    }
+
+    private func readPaneOutput(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(surfaceId)? = args["surfaceId"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'surfaceId' parameter"))
+        }
+        let lines: Int?
+        if case let .int(n)? = args["lines"] { lines = n } else { lines = nil }
+        let escapeSequences = boolArg(args["escapeSequences"], default: false)
+        let joinWrapped = boolArg(args["joinWrapped"], default: false)
+        return await daemonTools.readPaneOutput(
+            surfaceId: surfaceId,
+            lines: lines,
+            escapeSequences: escapeSequences,
+            joinWrapped: joinWrapped
+        )
+    }
+
+    private func sendPaneText(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(surfaceId)? = args["surfaceId"],
+              case let .string(text)? = args["text"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'surfaceId' or 'text' parameter"))
+        }
+        let bracketed = boolArg(args["bracketed"], default: false)
+        return await daemonTools.sendPaneText(surfaceId: surfaceId, text: text, bracketed: bracketed)
+    }
+
+    private func sendPaneKeys(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(surfaceId)? = args["surfaceId"],
+              case let .array(keysValue)? = args["keys"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'surfaceId' or 'keys' parameter"))
+        }
+        let keys = keysValue.compactMap { value -> String? in
+            if case let .string(key) = value { return key }
+            return nil
+        }
+        guard keys.count == keysValue.count else {
+            return (nil, JSONRPCError(code: -32602, message: "'keys' must be an array of strings"))
+        }
+        return await daemonTools.sendPaneKeys(surfaceId: surfaceId, keys: keys)
+    }
+
+    private func spawnSession(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(workspaceId)? = args["workspaceId"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'workspaceId' parameter"))
+        }
+        return await daemonTools.spawnSession(
+            workspaceId: workspaceId,
+            cwd: optionalStringArg(args["cwd"]),
+            name: optionalStringArg(args["name"]),
+            shell: optionalStringArg(args["shell"])
+        )
+    }
+
+    private func splitPane(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(tabId)? = args["tabId"],
+              case let .string(paneId)? = args["paneId"],
+              case let .string(direction)? = args["direction"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'tabId', 'paneId', or 'direction' parameter"))
+        }
+        return await daemonTools.splitPane(
+            tabId: tabId,
+            paneId: paneId,
+            direction: direction,
+            shell: optionalStringArg(args["shell"])
+        )
+    }
+
+    private func closePane(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(paneId)? = args["paneId"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'paneId' parameter"))
+        }
+        return await daemonTools.closePane(paneId: paneId)
+    }
+
+    private func waitForPaneOutput(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(surfaceId)? = args["surfaceId"],
+              case let .string(pattern)? = args["pattern"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'surfaceId' or 'pattern' parameter"))
+        }
+        let timeoutMs: Int?
+        if case let .int(n)? = args["timeoutMs"] { timeoutMs = n } else { timeoutMs = nil }
+        let fromNow = boolArg(args["fromNow"], default: true)
+        return await daemonTools.waitForPaneOutput(
+            surfaceId: surfaceId,
+            pattern: pattern,
+            timeoutMs: timeoutMs,
+            fromNow: fromNow
+        )
+    }
+
     // MARK: - Terminal tools
 
     private func runCommand(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard policy.isToolAllowed("runCommand") else {
+            return (nil, policy.disabledError(for: "runCommand"))
+        }
         guard case let .string(command)? = args["command"] else {
             return (nil, JSONRPCError(code: -32602, message: "Missing 'command' parameter"))
         }
@@ -207,5 +369,15 @@ struct ToolRegistry: Sendable {
     private func isOptionalParam(_ value: AnyCodable?) -> Bool {
         guard case let .string(desc)? = value else { return false }
         return desc.contains("optional")
+    }
+
+    private func boolArg(_ value: AnyCodable?, default defaultValue: Bool) -> Bool {
+        guard case let .bool(b)? = value else { return defaultValue }
+        return b
+    }
+
+    private func optionalStringArg(_ value: AnyCodable?) -> String? {
+        guard case let .string(s)? = value else { return nil }
+        return s
     }
 }
