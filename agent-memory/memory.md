@@ -66,6 +66,8 @@
 | 50 | Fix git history card click not opening file preview (GitPanelView: replaced dead NSClickGestureRecognizer with HistoryCardView.onTap closure) | ✅ Done |
 | 51 | Investigate terminal panel black-flash when opening file preview from Git Changes/History/file-tree (even fresh tabs); not last-line scroll after preview open | 🔍 In progress |
 | 52 | P13 Split Pane Parity (PBI-SPLIT-001..005): removed SessionCoordinator vertical-split gate, added "Split Down" UI affordances (hover, tab/sidebar menus, main menu, command palette), wired ratio/firstPaneID/secondPaneID for stacked NSSplitView, axis-aware adjustRatio fix in SessionEditor, docs updated for split-window/join-pane/move-pane -v. Build + 560/560 HarnessCoreTests + 63/63 HarnessAppTests pass. Uncommitted in worktree-p13-split-pane | ✅ Done |
+| 53 | P4 Track 1 Syntax Highlighting: verified and structured. Integrated SyntaxTextView highlighting (regex-based heuristics supporting 30+ languages) in FileViewerViewController; preserved size guards, binary/non-UTF8 placeholders, copy/select and scroll behaviors; added SyntaxHighlighterTests.swift verifying correctness; noted CLI cat/view commands absence. | ✅ Done |
+
 
 ### Removed / Reverted Features
 - **Task Board sidebar** — was added in sprint #32 but has since been **removed**. Not present in current codebase.

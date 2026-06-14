@@ -1,6 +1,6 @@
 # P4 — LSP + File View (Code Preview in Sidebar)
 
-Status: **Track 1 MVP shipped (plain-text preview)** — see "Implementation Notes" below  
+Status: **Track 1 DONE (Syntax Highlighting)** — see "Implementation Notes" below  
 Priority: **P1** — new feature  
 Depends on: none (sidebar infrastructure exists)  
 Branch: `worktree-p4-file-view`
@@ -67,6 +67,13 @@ Sidebar File Tree (existing WorkspaceFileTreeView)
 ```
 
 ## Track 1 — Syntax-Highlighted File Viewer (MVP)
+
+> [!NOTE]
+> **Track 1 — Syntax Highlighting: DONE**
+> - Integrated `SyntaxTextView` with syntax highlighting (regex-based heuristics for 30+ languages including Swift, Python, JS/TS, Rust, Go, JSON, YAML, Markdown, Shell) into `FileViewerViewController`.
+> - Preserved existing size guards (1MB), binary / unsupported encoding placeholders, scroll state, and copy/selection behaviors.
+> - Created unit tests in `SyntaxHighlighterTests.swift` to verify syntax coloring on multiple fixtures.
+> - Note: A dedicated CLI command like `harness cat` does not yet exist in the CLI target. Therefore, the CLI `--highlight` flag was skipped as outlined in the implementation guidelines.
 
 ### Components
 - `FileViewerViewController` — replaces file tree when file is selected, back button returns to tree
