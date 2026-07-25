@@ -8,7 +8,23 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.8.0] - 2026-07-25
 
 ### Added
-- Release version bump to v4.8.0.
+- Adopt macOS 27 plan additions and window quick wins ([`2ef888d`](https://github.com/Vit129/kouen-terminal/commit/2ef888d63b99b586e248ce154cc8f4d22c1a15d0))
+- Add actionable notification category with Focus Pane, Rerun Command, and Copy Output ([`cf042ed`](https://github.com/Vit129/kouen-terminal/commit/cf042ed15488896c926e367c0a488a40ae1ec859))
+- Make session row title semi-bold only when selected ([`1fbdacf`](https://github.com/Vit129/kouen-terminal/commit/1fbdacf82f54bdaacf5c50abaa0ffc72da7fd10e))
+- Add ActivityAssertionManager to prevent App Nap during builds/agent runs ([`bfd5e09`](https://github.com/Vit129/kouen-terminal/commit/bfd5e09039f7e14ffd1b697f82548eec63650f30))
+- Adopt NSViewCornerConfiguration and .containerConcentric on overlays ([`ea4b348`](https://github.com/Vit129/kouen-terminal/commit/ea4b34816b4ffd7d11f68591f756748f8a38980f))
+- Support macOS27 beta 4 first version ([`4d2498b`](https://github.com/Vit129/kouen-terminal/commit/4d2498b8a52d40b5557fca26df1ca3924a287187))
+
+### Documentation
+- Add Scheduled Memory Maintenance Job term to LANGUAGE.md ([`42a2426`](https://github.com/Vit129/kouen-terminal/commit/42a242646c7a5593af175c1de21212f3acc1fa96))
+- Rename LANGUAGE.md to GLOSSARY.md ([`4d3dc08`](https://github.com/Vit129/kouen-terminal/commit/4d3dc08e70823c9c9f275ac2ff6b1aeca44f791f))
+- Record Xcode 27 beta compatibility findings for Phase 1 ([`edda070`](https://github.com/Vit129/kouen-terminal/commit/edda070866dd8dfd59cfe0a647b7e5bfa28422d7))
+
+### Fixed
+- Guard UNUserNotificationCenter calls when bundle identifier is nil ([`c6feec1`](https://github.com/Vit129/kouen-terminal/commit/c6feec186067b923027da0438fdc1d58a4127a7b))
+- Safely handle UNUserNotificationCenter in xctest runner environment ([`861e959`](https://github.com/Vit129/kouen-terminal/commit/861e9592c7610dbf5f39f233f4672c736b41f3b7))
+- Guard updateTrackingAreas against window==nil in TabOverviewController/ContentAreaViewController ([`9b5d2c2`](https://github.com/Vit129/kouen-terminal/commit/9b5d2c2ca81c85352f2b12c15815745bb5fe8b03))
+- Replace unsafe MainActor.assumeIsolated with Task { @MainActor in } ([`82816f9`](https://github.com/Vit129/kouen-terminal/commit/82816f99abea3adf7a411056813f21ac2845fc73))
 
 ## [4.7.4] - 2026-07-23
 
