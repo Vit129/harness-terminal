@@ -54,17 +54,21 @@ These MUST be maintained on any macOS 27 SDK upgrade.
 
 ### Verification checklist for macOS 27 beta
 
-- [ ] Run `grep -rn "nonisolated override" Apps/ Packages/` — allowed only in RL-040 sites
+- [x] Run `grep -rn "nonisolated override" Apps/ Packages/` — allowed only in RL-040 sites
       (KouenWindow: sendEvent/close, WindowBorderOverlayView: layout/hitTest); any new site needs a RL-040 comment
-      **FINDING (2026-07-25):** 3 undocumented sites beyond the allow-list — `BoardViewController.swift:9`,
-      `GitPanelView.swift:2487` (both `nonisolated override var isFlipped`), `KouenTerminalSurfaceView.swift:1282`
-      (`resetCursorRects`). Need review + RL-040 comment or removal — not yet audited.
-- [ ] Run `grep -rn "MainActor.assumeIsolated" Apps/` — allowed only in MainExecutor.execute()
+      **RESOLVED (2026-07-25):** 3 undocumented sites found — `BoardViewController.swift:9`,
+      `GitPanelView.swift:2487` (both `nonisolated override var isFlipped`), correctly `nonisolated`,
+      now carry RL-040 comments. `KouenTerminalSurfaceView.swift:1282` (`resetCursorRects`) already had one.
+- [x] Run `grep -rn "MainActor.assumeIsolated" Apps/` — allowed only in MainExecutor.execute()
       (synchronous bridge with Thread.isMainThread guard) and TerminalHostView hot path ([weak self]+guard)
-      **FINDING (2026-07-25):** allow-list is stale — real usage spans `BrowserPaneView.swift`,
-      `SettingsModel.swift`, `SessionCoordinator.swift`, `WorktreeAutoIsolateService.swift`, and most of
-      `KouenTerminalSurfaceView.swift`/`+Input.swift` (~20+ sites total). Needs a real audit pass, not a
-      2-exception allow-list.
+      **RESOLVED (2026-07-25):** stale 2-exception allow-list replaced with a full 29-site audit
+      (agy classification, then hand-reviewed before any edit — see commit history). 18 sites confirmed
+      safe (AppKit lifecycle overrides paired with `nonisolated` per RL-040, or `DispatchQueue.main.async`
+      hot paths preserving FIFO output order). 10 sites in `BrowserPaneView.swift`, `SettingsModel.swift`,
+      `SessionCoordinator.swift`, `WorktreeAutoIsolateService.swift`, `KouenTerminalSurfaceView.swift`,
+      `ImmersiveOnboardingWindowController.swift` were genuinely unsafe (Timer/NotificationCenter/
+      NSAnimationContext-completion/DispatchSource callbacks with no Task context) — converted to
+      `Task { @MainActor in }`. Build + full test suite (swift test, Tests/robot/run.sh) verified after.
 - [ ] Run app for 2+ hours without crash
 - [ ] Check `heap <PID> | grep NSTextField` — count should be stable (no growth)
 - [x] Confirm `updateTrackingAreas` all have `guard window != nil` — fixed 3 missing sites

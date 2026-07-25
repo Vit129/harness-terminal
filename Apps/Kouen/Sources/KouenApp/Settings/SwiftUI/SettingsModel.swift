@@ -23,7 +23,7 @@ final class SettingsModel {
             queue: .main
         ) { [weak self] note in
             let hasPayload = note.userInfo?["payload"] is SnapshotChangedPayload
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 guard let self, hasPayload else { return }
                 self.settings = SessionCoordinator.shared.settings
                 self.keepSessions = SessionCoordinator.shared.snapshot.keepSessionsOnQuit

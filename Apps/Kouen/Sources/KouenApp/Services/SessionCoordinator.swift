@@ -70,7 +70,7 @@ final class SessionCoordinator: NSObject {
     private func startMemoryPressureMonitor() {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 guard let self else { return }
                 let isCritical = source.data.contains(.critical)
                 // Inactive sessions: trim to 1 000 lines (warning) or 0 (critical).

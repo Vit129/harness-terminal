@@ -778,7 +778,7 @@ public final class BrowserPaneView: NSView {
         retryCount = 0
         showErrorBanner(message: "Server disconnected — reconnecting…")
         retryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.attemptRetry()
             }
         }
@@ -1196,7 +1196,7 @@ private final class BrowserProgressLine: NSView {
                 ctx.duration = 0.2
                 fillWidth?.animator().constant = w
             }, completionHandler: {
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     NSAnimationContext.runAnimationGroup { ctx in
                         ctx.duration = 0.25
                         self.animator().alphaValue = 0
