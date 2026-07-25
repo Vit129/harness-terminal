@@ -98,8 +98,11 @@ Low-effort adoptions that improve quality immediately.
   - `DisplayPanesOverlay` chips
   - `ResizeHUDView`
   - `NotificationDropdownPanelView`
-- [ ] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
-      due to custom sidebar)
+- [x] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
+      due to custom sidebar) — `WorktreeRowView.titleLabel` was hardcoded `.semibold`
+      unconditionally; now `.semibold` only when `isSelected`, `.regular` otherwise,
+      toggled in `refresh()`. `SessionWorktreeRowView` (leaf worktree rows) has no
+      selection concept, left untouched.
 
 ## Phase 3 — NSTextSelectionManager (P1)
 
