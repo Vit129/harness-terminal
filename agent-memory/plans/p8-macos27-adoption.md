@@ -177,9 +177,16 @@ Enhance long-running process notifications with interactive action buttons.
 
 Prevent App Nap / macOS 27 sleep from interrupting active builds and agent tasks.
 
-- [ ] Wrap active PTY build sessions in `ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason:)`
-- [ ] Add `ActivityAssertionManager` to track active daemon tasks & subagent runs
-- [ ] Ensure process assertions release cleanly on task completion or process termination
+- [x] Wrap active PTY build sessions in `ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason:)`
+- [x] Add `ActivityAssertionManager` to track active agent/subagent runs
+      *(Note: "daemon tasks" was originally wired to `TaskStore`/`KouenTask` — turned out to be the
+      unrelated Task Dashboard TODO checklist, which deliberately persists after its owning session
+      closes. Using it would have kept the Mac awake forever whenever any unchecked TODO item existed
+      anywhere. Removed that block rather than keep a wrong signal; "active daemon tasks" in the
+      Process-management sense has no existing equivalent in this codebase to wire up yet.)*
+- [x] Ensure process assertions release cleanly on task completion or process termination —
+      released via `terminalHosts.onRetire` (same real pane-teardown hook as `SecureInputMonitor.release`),
+      plus `releaseAll()` on `applicationWillTerminate`
 
 ## Phase 10 — WidgetKit & Desktop Status Panel (P2)
 

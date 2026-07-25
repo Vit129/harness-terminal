@@ -49,6 +49,7 @@ final class SessionCoordinator: NSObject {
         terminalHosts.onRetire = { [weak self] surfaceID in
             self?.inlineAIControllers.removeValue(forKey: surfaceID.uuidString)
             SecureInputMonitor.shared.release(surfaceID)
+            ActivityAssertionManager.shared.releaseAssertions(forSurface: surfaceID)
             if self?.runSurfaceID == surfaceID { self?.runSurfaceID = nil }
         }
         // Update the floating queue bar whenever a surface's queue changes.
