@@ -165,9 +165,10 @@ Expose Kouen CLI/Daemon control to system-wide AppIntents and Shortcuts app.
 
 Enhance long-running process notifications with interactive action buttons.
 
-- [ ] Extend `NotificationCoordinator` to register `UNNotificationCategory` for terminal jobs
-- [ ] Add notification actions: `Focus Pane`, `Rerun Command`, `Copy Output`
-- [ ] Handle action callbacks via `UNUserNotificationCenterDelegate` and route to `SessionCoordinator`
+- [x] Extend `NotificationCoordinator` to register `UNNotificationCategory` for terminal jobs
+- [x] Add notification actions: `Focus Pane`, `Rerun Command`, `Copy Output`
+- [x] Handle action callbacks via `UNUserNotificationCenterDelegate` and route to `SessionCoordinator`
+  *(Note: Rerun Command reuses the command recorded in `TerminalBlock` via OSC 133 boundaries when available for the surface and resends it via daemon input IPC `.send`. For panes without OSC 133 integration or captured blocks, no hidden state was invented.)*
 
 ## Phase 9 — Background Power & Activity Management (P1)
 
