@@ -31,7 +31,7 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, @
         completionHandler(options)
     }
 
-    /// Clicking the banner routes to the same place as clicking its notch/inbox entry.
+    /// Clicking the banner or an action button routes to SessionCoordinator.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -39,8 +39,18 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, @
     ) {
         if let idString = response.notification.request.content.userInfo["surfaceID"] as? String,
            let surfaceID = UUID(uuidString: idString) {
+            let actionID = response.actionIdentifier
             Task { @MainActor in
-                SessionCoordinator.shared.notificationCoordinator.openSurface(surfaceID)
+                switch actionID {
+                case DesktopNotifier.Action.focusPane, UNNotificationDefaultActionIdentifier:
+                    SessionCoordinator.shared.notificationCoordinator.openSurface(surfaceID)
+                case DesktopNotifier.Action.rerunCommand:
+                    SessionCoordinator.shared.notificationCoordinator.rerunCommand(for: surfaceID)
+                case DesktopNotifier.Action.copyOutput:
+                    SessionCoordinator.shared.notificationCoordinator.copyOutput(for: surfaceID)
+                default:
+                    SessionCoordinator.shared.notificationCoordinator.openSurface(surfaceID)
+                }
             }
         }
         completionHandler()
@@ -48,6 +58,14 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, @
 }
 
 enum DesktopNotifier {
+    static let categoryIdentifier = "terminal-job"
+
+    enum Action {
+        static let focusPane = "focus-pane"
+        static let rerunCommand = "rerun-command"
+        static let copyOutput = "copy-output"
+    }
+
     // UNUserNotificationCenter.current() crashes on some macOS 26 installs due to a corrupted
     // NSCalendarDate in the notification database (NotificationCenterProbe guards against this —
     // see its doc comment). When the probe hasn't run yet or has marked the center bad, every
@@ -66,8 +84,33 @@ enum DesktopNotifier {
         guard isUNNotificationCenterAvailable else { return }
         NotificationCenterProbe.runAtLaunch()
         guard !NotificationCenterProbe.isKnownBad else { return }
-        UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
+
+        let focusAction = UNNotificationAction(
+            identifier: Action.focusPane,
+            title: "Focus Pane",
+            options: [.foreground]
+        )
+        let rerunAction = UNNotificationAction(
+            identifier: Action.rerunCommand,
+            title: "Rerun Command",
+            options: [.foreground]
+        )
+        let copyAction = UNNotificationAction(
+            identifier: Action.copyOutput,
+            title: "Copy Output",
+            options: []
+        )
+        let category = UNNotificationCategory(
+            identifier: categoryIdentifier,
+            actions: [focusAction, rerunAction, copyAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        let center = UNUserNotificationCenter.current()
+        center.delegate = NotificationPresenter.shared
+        center.setNotificationCategories([category])
+        center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error {
                 NSLog("DesktopNotifier: requestAuthorization failed: %@", error.localizedDescription)
             }
@@ -105,6 +148,7 @@ enum DesktopNotifier {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        content.categoryIdentifier = categoryIdentifier
         if withSound { content.sound = .default }
         if let surfaceID { content.userInfo = ["surfaceID": surfaceID] }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

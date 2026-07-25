@@ -227,6 +227,33 @@ final class NotificationCoordinator {
         clearNotification(surfaceID: surfaceID)
     }
 
+    /// Copies the latest command output (or visible lines fallback) for a surface to the pasteboard.
+    func copyOutput(for surfaceID: SurfaceID) {
+        guard let host = coord.terminalHosts.host(for: surfaceID) else { return }
+        let surfaceView = host.surfaceView
+        let textToCopy: String
+        if let lastBlock = surfaceView.blocks.last(where: { $0.outputEndLine != nil }),
+           let end = lastBlock.outputEndLine {
+            textToCopy = surfaceView.text(fromLine: lastBlock.outputStartLine, toLine: end)
+        } else if let lastBlock = surfaceView.blocks.last, let end = lastBlock.outputEndLine {
+            textToCopy = surfaceView.text(fromLine: lastBlock.outputStartLine, toLine: end)
+        } else {
+            textToCopy = host.captureVisibleLines(maxLines: 200)
+        }
+        guard !textToCopy.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(textToCopy, forType: .string)
+    }
+
+    /// Resends the last recorded command for a surface back to the PTY via daemon input IPC.
+    func rerunCommand(for surfaceID: SurfaceID) {
+        guard let host = coord.terminalHosts.host(for: surfaceID) else { return }
+        if let lastCommand = host.surfaceView.blocks.last?.command, !lastCommand.isEmpty {
+            coord.requestDaemon(.send(surfaceID: surfaceID.uuidString, text: lastCommand + "\n"))
+        }
+    }
+
     // MARK: - Private helpers
 
     private func firstWaitingTab() -> (workspaceID: WorkspaceID, tabID: TabID)? {
