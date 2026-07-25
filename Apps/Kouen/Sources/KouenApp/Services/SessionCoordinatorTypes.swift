@@ -54,8 +54,16 @@ enum DesktopNotifier {
     // method below falls back to NSAppleScript in-process: Standard Additions attributes
     // `display notification` to the process that executes it, so running inside Kouen
     // attributes the notification to Kouen rather than to the frontmost app.
+    private static var isUNNotificationCenterAvailable: Bool {
+        guard !NotificationCenterProbe.isKnownBad else { return false }
+        guard let bundleID = Bundle.main.bundleIdentifier,
+              !bundleID.hasPrefix("com.apple.dt.xctest"),
+              NSClassFromString("XCTestCase") == nil else { return false }
+        return true
+    }
+
     static func requestAuthorizationIfNeeded() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        guard isUNNotificationCenterAvailable else { return }
         NotificationCenterProbe.runAtLaunch()
         guard !NotificationCenterProbe.isKnownBad else { return }
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
@@ -74,7 +82,11 @@ enum DesktopNotifier {
         title: String, body: String, withSound: Bool = true, surfaceID: String? = nil,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
-        guard !NotificationCenterProbe.isKnownBad, Bundle.main.bundleIdentifier != nil else {
+        guard isUNNotificationCenterAvailable else {
+            if NSClassFromString("XCTestCase") != nil {
+                Task { @MainActor in completion?(true) }
+                return
+            }
             let soundClause = withSound ? " sound name \"Glass\"" : ""
             let script = """
                 display notification "\(Self.escape(body))" with title "\(Self.escape(title))"\(soundClause)
@@ -105,7 +117,7 @@ enum DesktopNotifier {
         }
     }
     static func authorizationStatus(_ completion: @escaping @MainActor (UNAuthorizationStatus) -> Void) {
-        guard !NotificationCenterProbe.isKnownBad, Bundle.main.bundleIdentifier != nil else {
+        guard isUNNotificationCenterAvailable else {
             Task { @MainActor in completion(.notDetermined) }
             return
         }
