@@ -42,7 +42,7 @@ public final class FrecencyDirectoryStore: @unchecked Sendable {
             do {
                 try FileManager.default.createDirectory(
                     at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                var encoder = JSONEncoder()
+                let encoder = JSONEncoder()
                 encoder.outputFormatting = .prettyPrinted
                 try encoder.encode(list).write(to: url, options: .atomic)
             } catch {}

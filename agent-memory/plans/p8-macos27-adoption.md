@@ -82,13 +82,30 @@ See: `agent-memory/knowledge/bugs/zombie-crash-macos26.md` for full details.
 
 Ensure Kouen builds and runs correctly on macOS 27 beta without regressions.
 
-- [ ] Build with Xcode 27 beta, fix any deprecation warnings-as-errors
+- [x] Build with Xcode 27 beta, fix any deprecation warnings-as-errors
+      **RESOLVED (2026-07-25):** Xcode 27.0 (27A5228h) now installed at `/Applications/Xcode-beta.app`.
+      Clean build via `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift build --product Kouen`:
+      0 errors, 20 distinct warnings, **none in `KouenCore`/`KouenTerminalEngine`** (the only two
+      `-warnings-as-errors` targets) — the checklist item as literally written is satisfied.
+      Of the 20: 1 trivial (`FrecencyDirectoryStore.swift:45` var→let, fixed). 8 are in `KouenWindow.swift`
+      (RL-040's `nonisolated override sendEvent/close`) — Xcode 27's AppKit headers now annotate
+      `NSWindow.contentView`/`firstResponder`/`sendEvent`/`close` etc. as `@MainActor`-isolated, and the
+      compiler is correctly flagging that RL-040 *deliberately* violates that isolation to stay safe on
+      zombie views. **Do not silence these — every fix either reintroduces the executor check (the crash)
+      or is a no-op unsafe cast.** 2 more (`KouenTerminalSurfaceView.swift:2318,2556`) are weak/strong
+      capture-list warnings in the FIFO-preserving frame build/present pipeline — same reasoning, left as
+      warnings. Remaining ~9 are mechanical (unnecessary `nonisolated(unsafe)`, Sendable-closure captures,
+      weak-capture mismatches in non-critical files) — candidates for a follow-up pass, not blocking.
 - [ ] Verify Liquid Glass doesn't break custom sidebar chrome (`KouenDesign`,
-      `ChromeBackdrop`, `WindowBlur.apply()`)
-- [ ] Verify window corner radius change doesn't clip terminal content or overlays
-- [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API
-- [ ] Confirm Metal renderer still works (no display pipeline changes expected)
-- [ ] Run full test suite on macOS 27
+      `ChromeBackdrop`, `WindowBlur.apply()`) — needs the app actually running on 27, not compile-checkable
+- [ ] Verify window corner radius change doesn't clip terminal content or overlays — same, needs a live run
+- [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API — same, needs a live run
+- [ ] Confirm Metal renderer still works (no display pipeline changes expected) — same, needs a live run
+- [ ] Run full test suite on macOS 27 — **BLOCKED (2026-07-25):** `swift test` under the beta toolchain
+      fails at the XCTest-bundle-loading stage for every target (`dlopen: Library not loaded:
+      @rpath/Sparkle.framework/...`) — the vendored Sparkle binary artifact isn't resolving under Xcode 27's
+      test harness rpath search. Toolchain/environment issue, not a code defect (`swift build` compiles and
+      links the actual app fine). Not chased further — needs Sparkle SPM artifact or search-path fix.
 
 ## Phase 2 — Quick Wins (P1)
 
@@ -97,11 +114,14 @@ Low-effort adoptions that improve quality immediately.
 - [x] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
 - [x] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
       (about panel, settings, command palette)
-- [ ] Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
+- [ ] **UNBLOCKED (2026-07-25):** Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
   - `ToastLabel`
   - `DisplayPanesOverlay` chips
   - `ResizeHUDView`
   - `NotificationDropdownPanelView`
+  Was blocked on Xcode 26.6 (`error: cannot find 'NSViewCornerConfiguration' in scope`); re-verified
+  it now resolves under Xcode 27.0 beta. Real code work, dispatched to agy with
+  `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
 - [x] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
       due to custom sidebar) — `WorktreeRowView.titleLabel` was hardcoded `.semibold`
       unconditionally; now `.semibold` only when `isSelected`, `.regular` otherwise,
