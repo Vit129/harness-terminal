@@ -117,6 +117,7 @@ enum CommandPaletteController {
             defer: false
         )
         panel.isRestorable = false
+        panel.preventsApplicationTerminationWhenModal = false
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.backgroundColor = .clear

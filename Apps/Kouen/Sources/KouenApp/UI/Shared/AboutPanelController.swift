@@ -14,6 +14,7 @@ final class AboutPanelController: NSObject {
             win.titleVisibility = .hidden
             win.styleMask = [.titled, .closable, .fullSizeContentView]
             win.isRestorable = false
+            win.preventsApplicationTerminationWhenModal = false
             win.setContentSize(NSSize(width: 440, height: 360))
             window = win
             NotificationCenter.default.addObserver(

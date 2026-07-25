@@ -143,6 +143,58 @@ Verify:
 
 ---
 
+## Phase 7 — AppIntents & System Shortcuts Integration (P1)
+
+Expose Kouen CLI/Daemon control to system-wide AppIntents and Shortcuts app.
+
+- [ ] Create `KouenShortcutsProvider` conforming to `AppShortcutsProvider`
+- [ ] Define `RunCommandIntent` (execute command in active/specified pane)
+- [ ] Define `SplitPaneIntent` (split horizontally/vertically with target profile/command)
+- [ ] Define `SwitchWorkspaceIntent` & `GetTerminalOutputIntent`
+- [ ] Wire intents to `DaemonClient` / IPC bridge
+
+## Phase 8 — Actionable User Notifications (P1)
+
+Enhance long-running process notifications with interactive action buttons.
+
+- [ ] Extend `NotificationCoordinator` to register `UNNotificationCategory` for terminal jobs
+- [ ] Add notification actions: `Focus Pane`, `Rerun Command`, `Copy Output`
+- [ ] Handle action callbacks via `UNUserNotificationCenterDelegate` and route to `SessionCoordinator`
+
+## Phase 9 — Background Power & Activity Management (P1)
+
+Prevent App Nap / macOS 27 sleep from interrupting active builds and agent tasks.
+
+- [ ] Wrap active PTY build sessions in `ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason:)`
+- [ ] Add `ActivityAssertionManager` to track active daemon tasks & subagent runs
+- [ ] Ensure process assertions release cleanly on task completion or process termination
+
+## Phase 10 — WidgetKit & Desktop Status Panel (P2)
+
+Glanceable status widget for desktop and Notification Center.
+
+- [ ] Add WidgetKit extension target for macOS (`KouenWidget`)
+- [ ] Implement `TimelineProvider` rendering active pane count, running jobs, and daemon health
+- [ ] Share session state via App Group / daemon IPC status snapshot
+
+## Phase 11 — Metal Frame Pacing & DisplayLink Optimization (P2)
+
+Optimize Metal render loop for macOS 27 display pipeline and ProMotion.
+
+- [ ] Review `TerminalMetalRenderer` frame pacing against macOS 27 `CVDisplayLink` / `CAMetalLayer` callbacks
+- [ ] Pause display link when terminal surface is static / inactive tab to conserve GPU power
+- [ ] Benchmark 120Hz ProMotion vs 60Hz rendering frame latency
+
+## Phase 12 — Terminal Accessibility Tree (P2)
+
+Expose terminal buffer grid to VoiceOver and macOS 27 Accessibility APIs.
+
+- [ ] Implement `NSAccessibility` element provider over `KouenTerminalSurfaceView` grid
+- [ ] Expose line-by-line text and prompt location to `NSAccessibilityNavigableStaticText`
+- [ ] Test with VoiceOver navigation and macOS 27 system Accessibility inspector
+
+---
+
 ## Non-goals
 - Liquid Glass full redesign (keep custom chrome for brand identity)
 - 3D charts / spatial layout (not relevant for terminal)
@@ -155,8 +207,11 @@ Verify:
 - `NSTextSelectionManager` may not support our use case (syntax-highlighted
   attributed text with line numbers) — evaluate before committing
 - Gesture recognizer migration is large scope, defer if time-constrained
+- `AppIntents` and `WidgetKit` require App Group setup for shared IPC status with daemon
+- `NSAccessibility` virtual grid mapping can incur performance overhead if re-computed every frame; must diff dirty lines
 
 ## Timeline
-- **Beta 1–3 (Jun–Aug 2026):** Phase 1 + 2
-- **RC (Sep 2026):** Phase 3 evaluated, Phase 6 verified
-- **Post-release:** Phase 4 + 5 as time allows
+- **Beta 1–3 (Jun–Aug 2026):** Phase 1 + 2 + 7 + 8
+- **RC (Sep 2026):** Phase 3 evaluated, Phase 6 verified, Phase 9 + 11 verified
+- **Post-release:** Phase 4 + 5 + 10 + 12 as time allows
+
