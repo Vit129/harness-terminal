@@ -185,8 +185,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/SessionCoordinatorTypes.swift": {
-    "mtime": 1783306380.7357492,
-    "ast_hash": "e3026819369927b45deb7ef3ab778d60",
+    "mtime": 1784947311.1108947,
+    "ast_hash": "5e47941d9d63ab89988369d638311985",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/SessionLifecycleService.swift": {
@@ -290,8 +290,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Settings/SwiftUI/SettingsHostingController.swift": {
-    "mtime": 1783306380.739031,
-    "ast_hash": "d1370847dd308b76076e0ccd6ff8df56",
+    "mtime": 1784947214.0921042,
+    "ast_hash": "1a5a205dd69ff9ce7205d9b59136194c",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Settings/SwiftUI/SettingsKeysView.swift": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainWindowController.swift": {
-    "mtime": 1783306380.744431,
-    "ast_hash": "cc07692aee0ee781c1beabdb2d42234d",
+    "mtime": 1784947211.5290039,
+    "ast_hash": "ac73a821fc8c640b6a61994e57203297",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MenuBarController.swift": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/CommandPalette/CommandPaletteController.swift": {
-    "mtime": 1784778523.6172774,
-    "ast_hash": "54989005f0fc8884776f3c38c7d089f7",
+    "mtime": 1784947216.8117244,
+    "ast_hash": "acec3587ad76c63ec299b0e63c00df01",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/CommandPalette/CommandPromptController.swift": {
@@ -570,7 +570,7 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Notifications/NotificationDropdownPanel.swift": {
-    "mtime": 1783306380.7691479,
+    "mtime": 1784947232.8462844,
     "ast_hash": "b5ddaaad7f29a5b4f89fddeda9a0ce28",
     "semantic_hash": ""
   },
@@ -580,8 +580,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Shared/AboutPanelController.swift": {
-    "mtime": 1783306380.7693474,
-    "ast_hash": "4c8d166475150f83dd411de5164679a0",
+    "mtime": 1784947215.4653566,
+    "ast_hash": "59396e3a7a7fe34d40df59f36ddc283f",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Shared/AgentApprovalBar.swift": {
@@ -3409,23 +3409,18 @@
     "ast_hash": "82efb97a359f5c7290bf2513d14686be",
     "semantic_hash": ""
   },
-  "LANGUAGE.md": {
-    "mtime": 1783778350.0162284,
-    "ast_hash": "05c41d7468e2f2a57aa752321026bb0c",
-    "semantic_hash": ""
-  },
   "README.md": {
-    "mtime": 1784189624.0298564,
+    "mtime": 1784945193.114035,
     "ast_hash": "260f8ab99a03fd40449cd624fb95d7f9",
     "semantic_hash": ""
   },
   "REVIEW-architecture-2026-07-08.md": {
-    "mtime": 1783551915.0834851,
+    "mtime": 1784945193.11878,
     "ast_hash": "898dcc1359a93b1ed52ad61a84c10f15",
     "semantic_hash": ""
   },
   "REVIEW-graphify-harness-2026-07-03.md": {
-    "mtime": 1783044728.5628004,
+    "mtime": 1784945193.1195538,
     "ast_hash": "854ef15c47abd19c9da46af4e7c014dc",
     "semantic_hash": ""
   },
@@ -3455,17 +3450,17 @@
     "semantic_hash": ""
   },
   "agent-memory/COMPLETED-TASKS-ARCHIVE.md": {
-    "mtime": 1783545912.7519233,
+    "mtime": 1784945193.1212776,
     "ast_hash": "63bebddf31be4f65be7deac9e67e6b59",
     "semantic_hash": ""
   },
   "agent-memory/INDEX.md": {
-    "mtime": 1782015829.1599853,
+    "mtime": 1784945193.1224113,
     "ast_hash": "fffe0f336cc932c1fe6a5bacb6113fc5",
     "semantic_hash": ""
   },
   "agent-memory/PLAYBOOK.md": {
-    "mtime": 1784799403.9877312,
+    "mtime": 1784945193.123266,
     "ast_hash": "4105d8856a2e6ce9291a64f9189e6151",
     "semantic_hash": ""
   },
@@ -3475,7 +3470,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/INDEX.md": {
-    "mtime": 1783149539.3876991,
+    "mtime": 1784945193.1239765,
     "ast_hash": "5e98b61176ffc83dc25755246faabf54",
     "semantic_hash": ""
   },
@@ -3490,7 +3485,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/architecture/browser-devtools-api.md": {
-    "mtime": 1782052637.856252,
+    "mtime": 1784945193.1246011,
     "ast_hash": "3eb08649f6594dd991655b9f0c609c29",
     "semantic_hash": ""
   },
@@ -3500,12 +3495,12 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/architecture/decisions.md": {
-    "mtime": 1782179153.0506604,
+    "mtime": 1784945193.1247594,
     "ast_hash": "ea2700fd393ed04ef004dd6084a1e38f",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/architecture/feature-provenance.md": {
-    "mtime": 1782973050.7394302,
+    "mtime": 1784945193.1249344,
     "ast_hash": "776f1e189bc4d1a1f80eed5441af5df2",
     "semantic_hash": ""
   },
@@ -3515,7 +3510,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/architecture/mcp-server.md": {
-    "mtime": 1782012834.1583455,
+    "mtime": 1784945193.1251838,
     "ast_hash": "d8dc0697df48ddb532c1fac33ec74c2b",
     "semantic_hash": ""
   },
@@ -3535,7 +3530,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/bugs/notch-cpu-animation.md": {
-    "mtime": 1782738804.8373213,
+    "mtime": 1784945193.1257792,
     "ast_hash": "844ef31715c3db75de45ca05feb481e2",
     "semantic_hash": ""
   },
@@ -3575,7 +3570,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/cases/cwd-worktree-bleed.md": {
-    "mtime": 1782479783.243872,
+    "mtime": 1784945193.126466,
     "ast_hash": "bc6a10eb15cddf45a3346434f3a535f1",
     "semantic_hash": ""
   },
@@ -3605,7 +3600,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/cases/testing-infra.md": {
-    "mtime": 1783771728.8383749,
+    "mtime": 1784945193.126864,
     "ast_hash": "8fddd0cf64d960f6c9f1b44717c99aec",
     "semantic_hash": ""
   },
@@ -3630,7 +3625,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/patterns/build-self-kill-protection.md": {
-    "mtime": 1781862271.0485618,
+    "mtime": 1784945193.127239,
     "ast_hash": "dcfbe37d469a7c2bbbce41e39d47a0bc",
     "semantic_hash": ""
   },
@@ -3650,7 +3645,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/rl-lessons.md": {
-    "mtime": 1784799398.2541645,
+    "mtime": 1784945193.127793,
     "ast_hash": "9c3a5ad96dbc68266e732a0abdefb43f",
     "semantic_hash": ""
   },
@@ -3660,7 +3655,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/ui/agent-session-board.md": {
-    "mtime": 1781432384.6984093,
+    "mtime": 1784945193.128898,
     "ast_hash": "f589513755f92f4455227d49488f189d",
     "semantic_hash": ""
   },
@@ -3680,7 +3675,7 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/ui/split-panes.md": {
-    "mtime": 1782035825.25775,
+    "mtime": 1784945193.1291926,
     "ast_hash": "b0c6edb0b564e96ba0b1f16f6c320699",
     "semantic_hash": ""
   },
@@ -3700,8 +3695,8 @@
     "semantic_hash": ""
   },
   "agent-memory/plans/p25-ios-ipados-support.md": {
-    "mtime": 1784790726.4229474,
-    "ast_hash": "507bde222f3ca40008c5c4522cecbee0",
+    "mtime": 1784945288.4092903,
+    "ast_hash": "ca39d52173c48c647ef70972a7bf7713",
     "semantic_hash": ""
   },
   "agent-memory/plans/p37-mobile-connect-v1.md": {
@@ -3805,8 +3800,8 @@
     "semantic_hash": ""
   },
   "agent-memory/plans/p8-macos27-adoption.md": {
-    "mtime": 1783306380.940562,
-    "ast_hash": "03abd99d31b6c1b482f162a8955f3e12",
+    "mtime": 1784946851.817688,
+    "ast_hash": "a162e099e6027071df3c2726600f93d4",
     "semantic_hash": ""
   },
   "docs/AGENT-HANDBOOK.md": {
@@ -4100,7 +4095,7 @@
     "semantic_hash": ""
   },
   "PRODUCT.md": {
-    "mtime": 1784381607.8386939,
+    "mtime": 1784945193.1125023,
     "ast_hash": "a38bdca7991c070655346774edc0e444",
     "semantic_hash": ""
   },
@@ -4112,6 +4107,11 @@
   "agent-memory/knowledge/bugs/browser-pane-local-daemon-merge.md": {
     "mtime": 1784799383.019521,
     "ast_hash": "2e8a49e1726ed079fdab8f1f6a52ed13",
+    "semantic_hash": ""
+  },
+  "GLOSSARY.md": {
+    "mtime": 1784899059.544737,
+    "ast_hash": "bf5cfe81bd99f9a8ea7c362391f2750c",
     "semantic_hash": ""
   }
 }
