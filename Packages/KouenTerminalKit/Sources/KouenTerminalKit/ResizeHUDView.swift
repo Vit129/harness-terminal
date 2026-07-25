@@ -36,6 +36,13 @@ final class ResizeHUDView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+#if compiler(>=6.4)
+    @available(macOS 27.0, *)
+    override var cornerConfiguration: NSViewCornerConfiguration? {
+        .corners(radius: .containerConcentric)
+    }
+#endif
+
     /// Legibility trick (matches the pane-border label / copy-mode status): a translucent fill in
     /// the canvas foreground color with background-colored text, so it reads on any theme.
     func applyColors(text: NSColor, fill: NSColor) {

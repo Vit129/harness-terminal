@@ -114,14 +114,12 @@ Low-effort adoptions that improve quality immediately.
 - [x] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
 - [x] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
       (about panel, settings, command palette)
-- [ ] **UNBLOCKED (2026-07-25):** Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
-  - `ToastLabel`
-  - `DisplayPanesOverlay` chips
+- [x] Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
+  - `ToastLabel` (`ToastHostingView` in `Toast.swift`)
+  - `DisplayPanesOverlay` chips (`DisplayPanesChipView` in `DisplayPanesOverlay.swift`)
   - `ResizeHUDView`
   - `NotificationDropdownPanelView`
-  Was blocked on Xcode 26.6 (`error: cannot find 'NSViewCornerConfiguration' in scope`); re-verified
-  it now resolves under Xcode 27.0 beta. Real code work, dispatched to agy with
-  `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
+  **RESOLVED (2026-07-25):** Dual-gated with `#if compiler(>=6.4)` and `@available(macOS 27.0, *)` property overrides (`override var cornerConfiguration: NSViewCornerConfiguration? { .corners(radius: .containerConcentric) }`) to safely compile on Xcode 26.6 SDK and adopt container-concentric corners on macOS 27. Verified clean build under Xcode 27 beta and full pass on `Tests/robot/run.sh`.
 - [x] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
       due to custom sidebar) — `WorktreeRowView.titleLabel` was hardcoded `.semibold`
       unconditionally; now `.semibold` only when `isSelected`, `.regular` otherwise,
