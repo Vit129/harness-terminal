@@ -55,6 +55,7 @@ enum DesktopNotifier {
     // `display notification` to the process that executes it, so running inside Kouen
     // attributes the notification to Kouen rather than to the frontmost app.
     static func requestAuthorizationIfNeeded() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
         NotificationCenterProbe.runAtLaunch()
         guard !NotificationCenterProbe.isKnownBad else { return }
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
@@ -73,38 +74,38 @@ enum DesktopNotifier {
         title: String, body: String, withSound: Bool = true, surfaceID: String? = nil,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
-        guard NotificationCenterProbe.isKnownBad else {
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            if withSound { content.sound = .default }
-            if let surfaceID { content.userInfo = ["surfaceID": surfaceID] }
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request) { error in
+        guard !NotificationCenterProbe.isKnownBad, Bundle.main.bundleIdentifier != nil else {
+            let soundClause = withSound ? " sound name \"Glass\"" : ""
+            let script = """
+                display notification "\(Self.escape(body))" with title "\(Self.escape(title))"\(soundClause)
+                """
+            DispatchQueue.main.async {
+                var error: NSDictionary?
+                NSAppleScript(source: script)?.executeAndReturnError(&error)
                 if let error {
-                    NSLog("DesktopNotifier: add(request:) failed: %@", error.localizedDescription)
+                    NSLog("DesktopNotifier: display notification failed: %@", error)
                 }
                 let succeeded = error == nil
                 Task { @MainActor in completion?(succeeded) }
             }
             return
         }
-        let soundClause = withSound ? " sound name \"Glass\"" : ""
-        let script = """
-            display notification "\(Self.escape(body))" with title "\(Self.escape(title))"\(soundClause)
-            """
-        DispatchQueue.main.async {
-            var error: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&error)
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        if withSound { content.sound = .default }
+        if let surfaceID { content.userInfo = ["surfaceID": surfaceID] }
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                NSLog("DesktopNotifier: display notification failed: %@", error)
+                NSLog("DesktopNotifier: add(request:) failed: %@", error.localizedDescription)
             }
             let succeeded = error == nil
             Task { @MainActor in completion?(succeeded) }
         }
     }
     static func authorizationStatus(_ completion: @escaping @MainActor (UNAuthorizationStatus) -> Void) {
-        guard !NotificationCenterProbe.isKnownBad else {
+        guard !NotificationCenterProbe.isKnownBad, Bundle.main.bundleIdentifier != nil else {
             Task { @MainActor in completion(.notDetermined) }
             return
         }
