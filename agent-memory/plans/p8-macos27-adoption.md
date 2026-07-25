@@ -56,11 +56,19 @@ These MUST be maintained on any macOS 27 SDK upgrade.
 
 - [ ] Run `grep -rn "nonisolated override" Apps/ Packages/` — allowed only in RL-040 sites
       (KouenWindow: sendEvent/close, WindowBorderOverlayView: layout/hitTest); any new site needs a RL-040 comment
+      **FINDING (2026-07-25):** 3 undocumented sites beyond the allow-list — `BoardViewController.swift:9`,
+      `GitPanelView.swift:2487` (both `nonisolated override var isFlipped`), `KouenTerminalSurfaceView.swift:1282`
+      (`resetCursorRects`). Need review + RL-040 comment or removal — not yet audited.
 - [ ] Run `grep -rn "MainActor.assumeIsolated" Apps/` — allowed only in MainExecutor.execute()
       (synchronous bridge with Thread.isMainThread guard) and TerminalHostView hot path ([weak self]+guard)
+      **FINDING (2026-07-25):** allow-list is stale — real usage spans `BrowserPaneView.swift`,
+      `SettingsModel.swift`, `SessionCoordinator.swift`, `WorktreeAutoIsolateService.swift`, and most of
+      `KouenTerminalSurfaceView.swift`/`+Input.swift` (~20+ sites total). Needs a real audit pass, not a
+      2-exception allow-list.
 - [ ] Run app for 2+ hours without crash
 - [ ] Check `heap <PID> | grep NSTextField` — count should be stable (no growth)
-- [ ] Confirm `updateTrackingAreas` all have `guard window != nil`
+- [x] Confirm `updateTrackingAreas` all have `guard window != nil` — fixed 3 missing sites
+      (`TabOverviewController.swift:170`, `ContentAreaViewController.swift:706,797`), rest already compliant
 
 See: `agent-memory/knowledge/bugs/zombie-crash-macos26.md` for full details.
 
@@ -82,8 +90,8 @@ Ensure Kouen builds and runs correctly on macOS 27 beta without regressions.
 
 Low-effort adoptions that improve quality immediately.
 
-- [ ] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
-- [ ] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
+- [x] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
+- [x] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
       (about panel, settings, command palette)
 - [ ] Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
   - `ToastLabel`
