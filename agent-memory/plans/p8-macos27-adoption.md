@@ -168,6 +168,13 @@ Replace manual mouse-forwarding in file preview with system text selection.
 Long-term tech debt: replace mouseDown overrides with gesture recognizers.
 Not urgent but aligns with Apple's direction.
 
+**Deliberately not attempted (2026-07-26):** genuinely needs live interactive testing
+this session couldn't provide (no display access) — gesture recognizers change core
+event handling for 8 interaction-critical components (drag reorder, split-divider
+drag, tracking loops); shipping that blind, unverified by anyone actually clicking
+around, is a real regression risk. Also explicitly P2/"not urgent" in this plan's own
+priority scheme.
+
 Priority targets (most complex mouseDown logic):
 - [ ] `TerminalTabBarView` — drag reorder + context menu
 - [ ] `SessionCardRowView` — click + hover + context menu
@@ -202,8 +209,11 @@ Adopt `NSWindowRestoration` for seamless relaunch after system updates.
       falls back to the 220pt default so nobody's sidebar silently resizes on update),
       `MainSplitViewController.applySidebarVisibility` reads it for the "visible" target
       width, and a new `handlePotentialUserSidebarResize()` (wired through
-      `SplitChromeDelegate.onResize`, gated on a `isProgrammaticSidebarResize` flag so only
-      genuine user drags persist, debounced 0.3s) saves it back. 3 new tests in
+      `SplitChromeDelegate.onResize`, gated on `NSEvent.pressedMouseButtons` so only a
+      genuine physical drag persists — an earlier boolean-flag approach was scrapped after
+      it misclassified every programmatic resize as a user drag, since NSSplitView's resize
+      notification isn't guaranteed synchronous with the `setPosition` call the flag wrapped;
+      debounced 0.3s) saves it back. 3 new tests in
       `KouenSettingsTests.swift` (default nil, round-trips a dragged value, absent-key in an
       older settings.json decodes to nil cleanly). Formal `NSWindowRestoration` adoption not
       pursued — no remaining gap it would close.
@@ -218,6 +228,10 @@ These require no code changes, just running on macOS 26+/27:
 
 Verify:
 - [ ] File tree with large repos (10k+ files) — measure scroll perf on 27 vs 26
+
+**Deliberately not attempted (2026-07-26):** real-device scroll-perf benchmarking needs
+a live display and a large repo checked out to scroll through — not something to
+fake with a synthetic number.
 
 ---
 
@@ -279,6 +293,10 @@ Glanceable status widget for desktop and Notification Center.
 - [ ] Implement `TimelineProvider` rendering active pane count, running jobs, and daemon health
 - [ ] Share session state via App Group / daemon IPC status snapshot
 
+**Deliberately not attempted (2026-07-26):** needs a new Xcode app-extension target
+plus App Group entitlement/provisioning-profile setup — real infrastructure surgery
+that isn't achievable through source edits alone from a CLI-only session.
+
 ## Phase 11 — Metal Frame Pacing & DisplayLink Optimization (P2)
 
 Optimize Metal render loop for macOS 27 display pipeline and ProMotion.
@@ -287,12 +305,22 @@ Optimize Metal render loop for macOS 27 display pipeline and ProMotion.
 - [ ] Pause display link when terminal surface is static / inactive tab to conserve GPU power
 - [ ] Benchmark 120Hz ProMotion vs 60Hz rendering frame latency
 
+**Deliberately not attempted (2026-07-26):** frame-pacing tuning needs to be judged
+against real ProMotion hardware and a live render loop, not guessed at from source —
+the risk of a "looks reasonable" change quietly regressing frame latency outweighs
+doing it blind.
+
 ## Phase 12 — Terminal Accessibility Tree (P2)
 
 Expose terminal buffer grid to VoiceOver and macOS 27 Accessibility APIs.
 
 - [ ] Implement `NSAccessibility` element provider over `KouenTerminalSurfaceView` grid
 - [ ] Expose line-by-line text and prompt location to `NSAccessibilityNavigableStaticText`
+
+**Deliberately not attempted (2026-07-26):** an accessibility tree is only real once
+someone's actually run VoiceOver against it — shipping an unverified implementation
+risks a worse outcome than no implementation (a broken/confusing tree a screen-reader
+user can't opt out of).
 - [ ] Test with VoiceOver navigation and macOS 27 system Accessibility inspector
 
 ---
