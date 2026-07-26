@@ -2,6 +2,33 @@
 
 Older releases. See [CHANGELOG.md](../CHANGELOG.md) for recent versions.
 
+## [4.7.4] - 2026-07-23
+
+### Fixed
+- Stop daemon-side pane changes from being silently discarded while a browser pane is open (release v4.7.4) ([`6c14a8a`](https://github.com/Vit129/kouen-terminal/commit/6c14a8a7e96a98bb7b8832c23dd8380db208a1fd))
+
+## [4.7.3] - 2026-07-23
+
+### Fixed
+- Raise daemon-routed git request timeout from 2s to 30s (fetch/pull/push were silently timing out on ordinary network latency) (release v4.7.3) ([`c6e8cf7`](https://github.com/Vit129/kouen-terminal/commit/c6e8cf72a71ada16249f3de8345766334930990c))
+
+## [4.7.2] - 2026-07-23
+
+### Added
+- MAW-style merge validate gate + agent handoff surfacing (human review + agent-to-agent spawn seed) (release v4.7.2) ([`c788cf8`](https://github.com/Vit129/kouen-terminal/commit/c788cf8141cce3a64fe845ea3a9925c8813ad172))
+
+## [4.7.1] - 2026-07-22
+
+### Added
+- Ghq-style wake command, signal-file agent routing, graphify LSP hover (release v4.7.0) ([`8280e1c`](https://github.com/Vit129/kouen-terminal/commit/8280e1cc3e9933a8b06e34ca2394ac2eff422e7c))
+
+### Fixed
+- Replace Harness placeholder logo with Kouen brand mark ([`60b749d`](https://github.com/Vit129/kouen-terminal/commit/60b749d8e5f9404f3273343fa97e42edb9ff0cd3))
+- Closed notch pill no longer forced to a 100pt floor on non-notch Macs ([`a3cd3e3`](https://github.com/Vit129/kouen-terminal/commit/a3cd3e3916faaba9cf49c5fbb8a8f293571cff2f))
+- Stop swallowing gh release create/edit errors in full-cycle.sh ([`3e0f86d`](https://github.com/Vit129/kouen-terminal/commit/3e0f86de8e5c0e6974c237dd68aabcc9a4d42b31))
+- Guard release notes against GitHub's 125000-char body limit ([`33f4f7d`](https://github.com/Vit129/kouen-terminal/commit/33f4f7dca97b5f0600dceae4c117b2d21a6fa5ec))
+- Browser pane always opens in the requesting session's own tab, not whichever tab is focused (release v4.7.1) ([`d712328`](https://github.com/Vit129/kouen-terminal/commit/d712328be65c5365d9752107f629d07e87e61e88))
+
 ## [4.6.1] - 2026-07-18
 
 ### Added

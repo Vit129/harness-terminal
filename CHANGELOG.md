@@ -8,7 +8,12 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.9.0] - 2026-07-26
 
 ### Added
-- Release version bump to v4.9.0.
+- Approve/deny, quick-reply, exact-pane jump, per-event sounds ([`d590786`](https://github.com/Vit129/kouen-terminal/commit/d59078689bc404f8e9bb9977176e3de2212f3fad))
+
+### Fixed
+- Restore Liquid Glass transparency pipeline and finish browser-pane chrome ([`157e5aa`](https://github.com/Vit129/kouen-terminal/commit/157e5aa6477ffa30540d6719bfb6d5f15474dd2b))
+- Enable arrow-key line editing in release-pipeline prompts ([`cc60fc3`](https://github.com/Vit129/kouen-terminal/commit/cc60fc3484cd057b53052a8aff24c6499d2e24e2))
+- Guard MobileBridgeServer reference for platforms without Network ([`9f7297f`](https://github.com/Vit129/kouen-terminal/commit/9f7297ff046b34daf8b613c50851153ca0cc2fbd))
 
 ## [4.8.0] - 2026-07-25
 
