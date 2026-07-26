@@ -72,6 +72,10 @@ public struct KouenSettings: Codable, Sendable, Equatable {
     public var sidebarVisible: Bool
     public var sidebarOnRight: Bool
     public var sidebarCollapsedOnLaunch: Bool
+    /// User's last drag-resized sidebar width (200...320pt, matching `SplitChromeDelegate`'s
+    /// constrain range). nil until the user actually drags the divider — `KouenDesign.sidebarWidth`
+    /// (220) stays the default so an untouched sidebar doesn't change size across an update.
+    public var sidebarWidth: Float?
     /// Restore the main window's size + position across launches. When false (default),
     /// the window opens at its built-in default size, centered. Window-level only — the
     /// frame is persisted via `NSWindow.setFrameAutosaveName`.
@@ -331,6 +335,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         sidebarVisible: Bool = true,
         sidebarOnRight: Bool = false,
         sidebarCollapsedOnLaunch: Bool = false,
+        sidebarWidth: Float? = nil,
         restoreWindowSize: Bool = false,
         backgroundOpacity: Float = 0.63,
         backgroundBlur: Int = 16,
@@ -409,6 +414,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         self.sidebarVisible = sidebarVisible
         self.sidebarOnRight = sidebarOnRight
         self.sidebarCollapsedOnLaunch = sidebarCollapsedOnLaunch
+        self.sidebarWidth = sidebarWidth
         self.restoreWindowSize = restoreWindowSize
         self.backgroundOpacity = backgroundOpacity
         self.backgroundBlur = backgroundBlur
@@ -565,6 +571,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         sidebarVisible = try container.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? fallback.sidebarVisible
         sidebarOnRight = try container.decodeIfPresent(Bool.self, forKey: .sidebarOnRight) ?? fallback.sidebarOnRight
         sidebarCollapsedOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .sidebarCollapsedOnLaunch) ?? fallback.sidebarCollapsedOnLaunch
+        sidebarWidth = try container.decodeIfPresent(Float.self, forKey: .sidebarWidth) ?? fallback.sidebarWidth
         restoreWindowSize = try container.decodeIfPresent(Bool.self, forKey: .restoreWindowSize) ?? fallback.restoreWindowSize
         backgroundOpacity = try container.decodeIfPresent(Float.self, forKey: .backgroundOpacity) ?? fallback.backgroundOpacity
         backgroundBlur = try container.decodeIfPresent(Int.self, forKey: .backgroundBlur) ?? fallback.backgroundBlur

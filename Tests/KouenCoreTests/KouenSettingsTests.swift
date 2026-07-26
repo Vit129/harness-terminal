@@ -45,6 +45,35 @@ final class KouenSettingsTests: XCTestCase {
         }
     }
 
+    func testSidebarWidthDefaultsToNil() {
+        XCTAssertNil(KouenSettings().sidebarWidth)
+        XCTAssertNil(KouenSettings.makeDefaults(imported: nil).sidebarWidth)
+    }
+
+    func testSidebarWidthLoadPreservesUserDragValue() throws {
+        try withTemporaryKouenHome { root in
+            try KouenPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "sidebarWidth": 275.5 }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            let settings = KouenSettings.load()
+            XCTAssertEqual(settings.sidebarWidth, 275.5)
+        }
+    }
+
+    func testSidebarWidthAbsentFromOlderSettingsFileDecodesAsNil() throws {
+        try withTemporaryKouenHome { root in
+            try KouenPaths.ensureDirectories()
+            try Data("""
+            { "fontSize": 14, "sidebarVisible": true }
+            """.utf8).write(to: root.appendingPathComponent("settings.json"))
+
+            let settings = KouenSettings.load()
+            XCTAssertNil(settings.sidebarWidth, "a settings.json predating this field must load cleanly, not throw/default to a stale width")
+        }
+    }
+
     func testSidebarCollapsedOnLaunchDefaultsToFalse() {
         XCTAssertFalse(KouenSettings().sidebarCollapsedOnLaunch)
         XCTAssertFalse(KouenSettings.makeDefaults(imported: nil).sidebarCollapsedOnLaunch)

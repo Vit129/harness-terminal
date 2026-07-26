@@ -24,9 +24,17 @@ final class SidebarPlacementSyncTests: XCTestCase {
         setenv("KOUEN_HOME", root.path, 1)
         let originalSidebarOnRight = SessionCoordinator.shared.settings.sidebarOnRight
         let originalSidebarVisible = SessionCoordinator.shared.settings.sidebarVisible
+        // This file's assertions are hardcoded against KouenDesign.sidebarWidth (220) — force
+        // that default explicitly rather than just restoring whatever was there, so a leaked
+        // non-nil width from another test (or a real user-drag width on a dev machine's real
+        // settings.json, if this ever ran without KOUEN_HOME isolation) can't silently throw
+        // off every pixel-width expectation in this file.
+        let originalSidebarWidth = SessionCoordinator.shared.settings.sidebarWidth
+        SessionCoordinator.shared.settings.sidebarWidth = nil
         defer {
             SessionCoordinator.shared.settings.sidebarOnRight = originalSidebarOnRight
             SessionCoordinator.shared.settings.sidebarVisible = originalSidebarVisible
+            SessionCoordinator.shared.settings.sidebarWidth = originalSidebarWidth
             if let previousHome { setenv("KOUEN_HOME", previousHome, 1) } else { unsetenv("KOUEN_HOME") }
             try? FileManager.default.removeItem(at: root)
         }

@@ -16,6 +16,7 @@ final class MainSplitViewController: NSViewController {
     /// frame bails out — prevents two toggles from fighting over the divider position.
     private var sidebarAnimToken = 0
     private var sidebarDisplayLink: CADisplayLink?
+    private var sidebarWidthSaveWorkItem: DispatchWorkItem?
     // params valid while sidebarDisplayLink is non-nil
     private var _sidebarStart: CGFloat = 0
     private var _sidebarTarget: CGFloat = 0
@@ -46,6 +47,7 @@ final class MainSplitViewController: NSViewController {
         // re-applied on load; an autosaved divider width would restore a stale
         // collapsed state and fight the settings-driven restore.
         split.delegate = splitDelegate
+        splitDelegate.onResize = { [weak self] in self?.handlePotentialUserSidebarResize() }
 
         // Container is a transparent wrapper so the sidebar.view's own chrome
         // backdrop is the only one in play. Stacking two ChromeBackdrops (one
@@ -338,7 +340,8 @@ final class MainSplitViewController: NSViewController {
     /// sidebar to an unusable sliver — but a programmatic collapse must reach 0).
     private func applySidebarVisibility(_ visible: Bool, animated: Bool) {
         sidebarAnimToken &+= 1
-        let target = visible ? KouenDesign.sidebarWidth : 0
+        let persistedWidth = SessionCoordinator.shared.settings.sidebarWidth.map(CGFloat.init) ?? KouenDesign.sidebarWidth
+        let target = visible ? persistedWidth : 0
         splitDelegate.allowFullCollapse = true
         guard animated, let panel = sidebarContainerView else {
             let panel = sidebarContainerView
@@ -549,6 +552,31 @@ final class MainSplitViewController: NSViewController {
         split.setPosition(position, ofDividerAt: 0)
     }
 
+    /// Fired by `SplitChromeDelegate` on every split-view resize — animations, `viewDidLayout`,
+    /// `setSidebarVisible`, and genuine user divider drags all funnel through this one
+    /// notification with no reliable way to tell them apart by call site: `NSSplitView` doesn't
+    /// guarantee the notification fires synchronously inside `setPosition`, so a "was I the one
+    /// calling setPosition just now" boolean flag can already be back to `false` by the time
+    /// this runs — misclassifying programmatic resizes (including every frame of the open/close
+    /// slide animation) as user drags. `NSEvent.pressedMouseButtons` sidesteps the timing
+    /// question entirely: it's only nonzero while a mouse button is physically held down, which
+    /// is true during an actual divider drag and never true for a menu command, test, or
+    /// animation-driven resize. Debounced — a drag fires this continuously, and writing to disk
+    /// on every pixel would be wasteful.
+    private func handlePotentialUserSidebarResize() {
+        guard NSEvent.pressedMouseButtons & 1 != 0,
+              let panel = sidebarContainerView, !panel.isHidden
+        else { return }
+        let width = Float(panel.frame.width)
+        sidebarWidthSaveWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
+            SessionCoordinator.shared.settings.sidebarWidth = width
+            try? SessionCoordinator.shared.settings.save()
+        }
+        sidebarWidthSaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+    }
+
     func toggleSidebarPosition() {
         SessionCoordinator.shared.settings.sidebarOnRight.toggle()
         try? SessionCoordinator.shared.settings.save()
@@ -563,6 +591,13 @@ private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
     /// sidebar can fully disappear. At rest it's false, so a *user drag* still floors
     /// at 200pt and can't shrink the sidebar to an unusable sliver.
     var allowFullCollapse = false
+    /// Fired on every resize (drag or programmatic) — the owner filters for genuine
+    /// user drags via `NSEvent.pressedMouseButtons`.
+    var onResize: (() -> Void)?
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        onResize?()
+    }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimum: CGFloat, ofSubviewAt index: Int) -> CGFloat {
         let right = SessionCoordinator.shared.settings.sidebarOnRight

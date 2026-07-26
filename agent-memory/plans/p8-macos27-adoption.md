@@ -140,11 +140,28 @@ Low-effort adoptions that improve quality immediately.
 
 Replace manual mouse-forwarding in file preview with system text selection.
 
-- [ ] Evaluate `NSTextSelectionManager` for `SyntaxTextView` (file editor)
-- [ ] Evaluate for `FileViewerViewController` QuickLook text selection
-- [ ] If viable, remove manual `mouseDown/mouseDragged/mouseUp` forwarding
+- [x] Evaluate `NSTextSelectionManager` for `SyntaxTextView` (file editor)
+- [x] Evaluate for `FileViewerViewController` QuickLook text selection
+- [x] If viable, remove manual `mouseDown/mouseDragged/mouseUp` forwarding
       (currently needed per RL-010/CASE-018)
-- [ ] Test bidirectional selection, drag-and-drop text
+- [x] Test bidirectional selection, drag-and-drop text
+      **RESOLVED (2026-07-26), not applicable — no code change:** this phase's premise doesn't
+      match the actual architecture. `FileViewerViewController` uses `QLPreviewView` directly
+      (`FileViewerViewController.swift:18`) — a system component that already owns its own
+      text selection internally; there's no custom mouse/selection code here to replace at all.
+      `SyntaxTextView` already wraps a real `NSTextView` (`SyntaxTextViewInner`,
+      `SyntaxTextView.swift:748`) — the only "manual forwarding" is a single `mouseDown`
+      routing shim (`SyntaxTextView.swift:248-262`), needed because the *outer* wrapper view
+      (not the inner NSTextView) is first responder for vi-mode `keyDown` dispatch, so the
+      click has to be handed down explicitly. `mouseDragged`/`mouseUp` are deliberately NOT
+      forwarded — the inner `NSTextView`'s own `mouseDown` already installs its native
+      tracking loop for drag/selection (already using system text selection under the hood;
+      TextKit chooses its own selection mechanism internally, `NSTextSelectionManager` is not
+      something call sites opt into directly for a stock `NSTextView`). The code comment at
+      `SyntaxTextView.swift:265-267` documents *why* forwarding `mouseUp` was already tried and
+      reverted: infinite recursion via the responder chain (stack overflow crash). Removing
+      the existing shim would break Cmd+click-to-definition and vi-mode `keyDown` routing for
+      no selection-behavior gain — both components already get proper system-native selection.
 
 ## Phase 4 — Gesture Recognizer Migration (P2)
 
@@ -165,13 +182,31 @@ Lower priority (simpler or less frequent):
 
 Adopt `NSWindowRestoration` for seamless relaunch after system updates.
 
-- [ ] Evaluate overlap with existing `SessionStore` persistence
-- [ ] Implement `encodeRestorableState` on `MainWindowController` (sidebar
-      width, selected tab, sidebar visibility, active workspace)
-- [ ] Implement `restoreWindow(withIdentifier:)` in restoration class
-- [ ] Call `invalidateRestorableState()` on relevant state changes
-- [ ] Keep `SessionStore` for daemon-side session state (pane tree, surfaces)
-      — restoration handles window chrome only
+- [x] Evaluate overlap with existing `SessionStore` persistence
+      **RESOLVED (2026-07-26):** 3 of the 4 planned restoration targets are already
+      persisted, deliberately, via simpler/already-battle-tested mechanisms — adopting
+      the full `NSWindowRestoration` protocol on top would duplicate them and risk two
+      systems racing to decide "what was open" on launch:
+      - sidebar visibility → `settings.sidebarVisible` (`MainSplitViewController.swift:45`
+        has an explicit comment: "No autosaveName: visibility lives in
+        `settings.sidebarVisible`" — a deliberate prior decision, not an oversight)
+      - selected tab / active workspace → daemon-side session state (`SessionCoordinator`),
+        which is the whole point of Kouen as a persistent terminal multiplexer — already
+        restored on reconnect
+      - window frame/position → `settings.restoreWindowSize` + `NSWindow.setFrameAutosaveName`
+        (`MainWindowController.swift:70-77`), opt-in, already working
+      The one genuine gap: **sidebar width** was a hardcoded constant
+      (`KouenDesign.sidebarWidth`, 220pt), never persisted despite being user-drag-resizable
+      (`SplitChromeDelegate` allows a 200-320pt range). Closed that gap directly instead of
+      building the larger API: added `KouenSettings.sidebarWidth: Float?` (nil = untouched,
+      falls back to the 220pt default so nobody's sidebar silently resizes on update),
+      `MainSplitViewController.applySidebarVisibility` reads it for the "visible" target
+      width, and a new `handlePotentialUserSidebarResize()` (wired through
+      `SplitChromeDelegate.onResize`, gated on a `isProgrammaticSidebarResize` flag so only
+      genuine user drags persist, debounced 0.3s) saves it back. 3 new tests in
+      `KouenSettingsTests.swift` (default nil, round-trips a dragged value, absent-key in an
+      older settings.json decodes to nil cleanly). Formal `NSWindowRestoration` adoption not
+      pursued — no remaining gap it would close.
 
 ## Phase 6 — SwiftUI Performance (Free wins)
 
@@ -190,11 +225,27 @@ Verify:
 
 Expose Kouen CLI/Daemon control to system-wide AppIntents and Shortcuts app.
 
-- [ ] Create `KouenShortcutsProvider` conforming to `AppShortcutsProvider`
-- [ ] Define `RunCommandIntent` (execute command in active/specified pane)
-- [ ] Define `SplitPaneIntent` (split horizontally/vertically with target profile/command)
-- [ ] Define `SwitchWorkspaceIntent` & `GetTerminalOutputIntent`
-- [ ] Wire intents to `DaemonClient` / IPC bridge
+- [x] Create `KouenShortcutsProvider` conforming to `AppShortcutsProvider`
+- [x] Define `RunCommandIntent` (execute command in active pane — a raw pane-ID parameter
+      was considered for "or specified pane" but dropped: Shortcuts has no sensible picker
+      for one, and "the active pane" is what every other Kouen entry point already means by
+      "run a command here")
+- [x] Define `SplitPaneIntent` (split horizontally/vertically, optional command via
+      `SessionCoordinator.splitActivePaneAndRun`)
+- [x] Define `SwitchWorkspaceIntent` & `GetTerminalOutputIntent`
+- [x] Wire intents to `DaemonClient` / IPC bridge
+      **RESOLVED (2026-07-26):** `Apps/Kouen/Sources/KouenApp/AppIntents/KouenAppIntents.swift`,
+      runs in-process (no separate extension target). `RunCommandIntent`/`SplitPaneIntent`/
+      `SwitchWorkspaceIntent` call the app's own already-existing high-level coordinator
+      methods (`SessionCoordinator.terminalHostIfExists`+`sendInput`, `.splitActivePane`/
+      `.splitActivePaneAndRun`, `.selectWorkspace`) rather than reinventing them.
+      `GetTerminalOutputIntent` goes through `DaemonClient().request(.capturePane(...))`
+      directly (same lightweight IPC client `kouen-cli` itself uses) since there was no
+      existing Swift-level capture helper to reuse. 2 unit tests
+      (`KouenAppIntentsTests.swift`) cover the pure logic (enum→IPC-direction mapping, error
+      message content). Not verified live (Shortcuts.app registration, Siri phrase
+      recognition) — needs a real device/display session, same limitation as the rest of
+      this plan's live-GUI checklist items.
 
 ## Phase 8 — Actionable User Notifications (P1)
 
