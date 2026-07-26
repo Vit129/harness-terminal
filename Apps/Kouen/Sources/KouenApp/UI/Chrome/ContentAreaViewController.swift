@@ -73,11 +73,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         if opacity >= 1 {
             terminalHost.layer?.backgroundColor = KouenChrome.current.terminalBackground.cgColor
         } else {
-            let isDark = KouenChrome.current.isDark
-            let minTint: CGFloat = isDark ? 0.3 : 0.5
-            let effectiveAlpha = max(CGFloat(opacity), minTint)
-            terminalHost.layer?.backgroundColor = KouenChrome.current.terminalBackground
-                .withAlphaComponent(effectiveAlpha).cgColor
+            terminalHost.layer?.backgroundColor = nil
         }
     }
 

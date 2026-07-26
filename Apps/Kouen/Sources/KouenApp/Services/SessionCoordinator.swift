@@ -595,6 +595,35 @@ final class SessionCoordinator: NSObject {
         NotificationCenter.default.post(name: NotificationBus.shared.snapshotChanged, object: nil, userInfo: ["beginRenameActiveTab": true])
     }
 
+    private var preToggleBackgroundOpacity: Float?
+
+    func toggleWindowOpacity() {
+        if let saved = preToggleBackgroundOpacity {
+            settings.backgroundOpacity = saved
+            preToggleBackgroundOpacity = nil
+            if let view = NSApp.mainWindow?.contentView {
+                Toast.show("Glass Mode (\(Int(saved * 100))%)", in: view)
+            }
+        } else {
+            preToggleBackgroundOpacity = settings.backgroundOpacity
+            settings.backgroundOpacity = 1.0
+            if let view = NSApp.mainWindow?.contentView {
+                Toast.show("Solid Opaque Mode (100%)", in: view)
+            }
+        }
+        KouenChrome.update(
+            themeName: snapshot.themeName,
+            opacity: CGFloat(settings.backgroundOpacity),
+            blur: settings.backgroundBlur,
+            backgroundHex: settings.customBackgroundHex,
+            foregroundHex: settings.customForegroundHex,
+            cursorHex: settings.customCursorHex
+        )
+        if let main = NSApp.mainWindow?.windowController as? MainWindowController {
+            main.applyChrome()
+        }
+    }
+
     func updateFontSize(delta: Float) { applyFontSize(settings.fontSize + delta) }
     func resetFontSize() { applyFontSize(KouenSettings().fontSize) }
     private func applyFontSize(_ size: Float) {

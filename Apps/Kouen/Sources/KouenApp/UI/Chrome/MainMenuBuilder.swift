@@ -209,6 +209,11 @@ let exportLayoutItem = NSMenuItem(title: "Export Layout…", action: #selector(M
         zoomReset.keyEquivalentModifierMask = [.command]
         zoomReset.target = MenuTarget.shared
         view.submenu?.addItem(zoomReset)
+        view.submenu?.addItem(.separator())
+        let opacityItem = NSMenuItem(title: "Toggle Solid/Glass Opacity Mode", action: #selector(MenuTarget.toggleWindowOpacity), keyEquivalent: "u")
+        opacityItem.keyEquivalentModifierMask = [.command, .shift]
+        opacityItem.target = MenuTarget.shared
+        view.submenu?.addItem(opacityItem)
         main.addItem(view)
 
         // Remote — connect the GUI to a KouenDaemon on another machine over an SSH tunnel.
@@ -418,6 +423,10 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
 
     @objc func findInFiles() {
         CommandPaletteController.present(relativeTo: NSApp.keyWindow, mode: .grep(query: ""))
+    }
+
+    @objc func toggleWindowOpacity() {
+        SessionCoordinator.shared.toggleWindowOpacity()
     }
 
 

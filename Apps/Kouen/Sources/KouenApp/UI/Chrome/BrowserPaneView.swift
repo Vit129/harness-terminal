@@ -34,6 +34,8 @@ public final class BrowserPaneView: NSView {
     internal let urlTextField = NSTextField()
     internal let closePaneButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     internal let viewSourceButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+    internal let darkModeButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+    private var isWebDarkModeForced = false
     /// Called when user taps the close (×) button in the toolbar.
     public var onClosePaneRequested: (() -> Void)?
     /// Called when user taps "View Source" while showing a local .html/.htm file:// URL.
@@ -171,21 +173,14 @@ public final class BrowserPaneView: NSView {
     }
 
     private func setupUI() {
-        // Toolbar styling — translucent blur (CMUX-style)
+        // Toolbar styling — translucent Liquid Glass backdrop matching backgroundOpacity setting
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.wantsLayer = true
-        let blurView = NSVisualEffectView()
-        blurView.material = .hudWindow
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(blurView, positioned: .below, relativeTo: nil)
-        NSLayoutConstraint.activate([
-            blurView.topAnchor.constraint(equalTo: toolbar.topAnchor),
-            blurView.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            blurView.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
-            blurView.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-        ])
+        KouenDesign.applyTabBarChrome(to: toolbar)
+
+        // WebKit transparency configuration — prevents initial white background paint/flash
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.setValue(NSColor.clear, forKey: "underPageBackgroundColor")
 
         let border = NSView()
         border.wantsLayer = true
@@ -209,13 +204,20 @@ public final class BrowserPaneView: NSView {
         configureNavigationButton(closePaneButton, symbolName: "xmark", action: #selector(closePaneClicked))
         closePaneButton.setAccessibilityIdentifier("browser-close-button")
         closePaneButton.toolTip = "Close Browser Pane"
-        closePaneButton.setContentHuggingPriority(.required, for: .horizontal)
-        closePaneButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        for btn in [backButton, forwardButton, reloadStopButton, closePaneButton, viewSourceButton, darkModeButton] {
+            btn.setContentHuggingPriority(.required, for: .horizontal)
+            btn.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
 
         configureNavigationButton(viewSourceButton, symbolName: "chevron.left.slash.chevron.right", action: #selector(viewSourceClicked))
         viewSourceButton.setAccessibilityIdentifier("browser-view-source-button")
         viewSourceButton.toolTip = "View Source"
         viewSourceButton.isHidden = true
+
+        configureNavigationButton(darkModeButton, symbolName: "moon.fill", action: #selector(toggleWebDarkMode))
+        darkModeButton.setAccessibilityIdentifier("browser-dark-mode-button")
+        darkModeButton.toolTip = "Toggle Force Dark Mode for Web Page"
 
         // URL Text Field container & configuration
         let urlContainer = NSView()
@@ -236,37 +238,64 @@ public final class BrowserPaneView: NSView {
         urlTextField.focusRingType = .none
         urlTextField.target = self
         urlTextField.action = #selector(urlEntered(_:))
+        urlTextField.alignment = .left
         urlTextField.font = NSFont.systemFont(ofSize: KouenDesign.FontSize.chromeBody)
         urlTextField.setAccessibilityIdentifier("browser-url-text-field")
 
         urlContainer.addSubview(urlTextField)
-        urlContainer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        urlContainer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // Web View container background — solid dark canvas behind web content so wallpaper doesn't leak through
+        wantsLayer = true
+        layer?.backgroundColor = KouenChrome.current.terminalBackground.cgColor
 
         NSLayoutConstraint.activate([
-            urlTextField.leadingAnchor.constraint(equalTo: urlContainer.leadingAnchor, constant: 6),
-            urlTextField.trailingAnchor.constraint(equalTo: urlContainer.trailingAnchor, constant: -6),
+            urlTextField.leadingAnchor.constraint(equalTo: urlContainer.leadingAnchor, constant: 8),
+            urlTextField.trailingAnchor.constraint(equalTo: urlContainer.trailingAnchor, constant: -8),
             urlTextField.centerYAnchor.constraint(equalTo: urlContainer.centerYAnchor),
         ])
 
-        let toolbarStack = NSStackView(views: [backButton, forwardButton, reloadStopButton, urlContainer, viewSourceButton, closePaneButton])
+        // Two equal-priority flexible spacers straddling the url field center it in the
+        // remaining space between the nav-button group (left) and the action-button group
+        // (right), instead of pinning it to either edge.
+        let leadingSpacer = NSView()
+        leadingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        leadingSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        leadingSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+
+        let trailingSpacer = NSView()
+        trailingSpacer.translatesAutoresizingMaskIntoConstraints = false
+        trailingSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        trailingSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+
+        let toolbarStack = NSStackView(views: [backButton, forwardButton, reloadStopButton, leadingSpacer, urlContainer, trailingSpacer, viewSourceButton, darkModeButton, closePaneButton])
         toolbarStack.orientation = .horizontal
         toolbarStack.spacing = 6
-        toolbarStack.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
+        toolbarStack.edgeInsets = NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 8)
         toolbarStack.alignment = .centerY
         toolbarStack.distribution = .fill
         toolbarStack.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(toolbarStack)
 
-        urlContainer.setContentHuggingPriority(.init(1), for: .horizontal)
+        urlContainer.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        urlContainer.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         NSLayoutConstraint.activate([
+            backButton.widthAnchor.constraint(equalToConstant: 24),
+            forwardButton.widthAnchor.constraint(equalToConstant: 24),
+            reloadStopButton.widthAnchor.constraint(equalToConstant: 24),
+            darkModeButton.widthAnchor.constraint(equalToConstant: 24),
+            closePaneButton.widthAnchor.constraint(equalToConstant: 24),
+            urlContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            urlContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
             toolbarStack.topAnchor.constraint(equalTo: toolbar.topAnchor),
             toolbarStack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             toolbarStack.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
             toolbarStack.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
             urlContainer.heightAnchor.constraint(equalToConstant: 24),
         ])
+
+        // Default Web Browser to Dark Mode on start
+        applyWebDarkMode()
 
         // Error Banner configuration
         errorBanner.wantsLayer = true
@@ -304,12 +333,7 @@ public final class BrowserPaneView: NSView {
     private func setupTabBar() {
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.wantsLayer = true
-        let tabBlur = NSVisualEffectView()
-        tabBlur.material = .hudWindow
-        tabBlur.blendingMode = .behindWindow
-        tabBlur.state = .active
-        tabBlur.translatesAutoresizingMaskIntoConstraints = false
-        tabBar.addSubview(tabBlur, positioned: .below, relativeTo: nil)
+        KouenDesign.applyTabBarChrome(to: tabBar)
 
         tabBarStack.orientation = .horizontal
         tabBarStack.spacing = 1
@@ -325,11 +349,7 @@ public final class BrowserPaneView: NSView {
         tabBarStack.addArrangedSubview(newTabButton)
 
         NSLayoutConstraint.activate([
-            tabBlur.topAnchor.constraint(equalTo: tabBar.topAnchor),
-            tabBlur.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor),
-            tabBlur.trailingAnchor.constraint(equalTo: tabBar.trailingAnchor),
-            tabBlur.bottomAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            tabBarStack.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor, constant: 8),
+            tabBarStack.leadingAnchor.constraint(equalTo: tabBar.leadingAnchor, constant: 2),
             tabBarStack.trailingAnchor.constraint(lessThanOrEqualTo: tabBar.trailingAnchor, constant: -8),
             tabBarStack.centerYAnchor.constraint(equalTo: tabBar.centerYAnchor),
         ])
@@ -361,16 +381,79 @@ public final class BrowserPaneView: NSView {
         createTab(url: URL(string: home) ?? URL(string: "https://www.google.com")!)
     }
 
+    @objc private func toggleWebDarkMode() {
+        isWebDarkModeForced.toggle()
+        applyWebDarkMode()
+        let mode = isWebDarkModeForced ? "Force Dark Mode ON" : "Force Dark Mode OFF"
+        Toast.show(mode, in: self)
+    }
+
+    private func applyWebDarkMode() {
+        darkModeButton.contentTintColor = isWebDarkModeForced ? KouenDesign.chrome.accent : KouenDesign.chrome.textSecondary
+        if #available(macOS 10.14, *) {
+            webView.appearance = isWebDarkModeForced ? NSAppearance(named: .darkAqua) : nil
+        }
+        let script = """
+        (function() {
+            var id = 'kouen-force-dark-mode-style';
+            var existing = document.getElementById(id);
+            if (\(isWebDarkModeForced ? "true" : "false")) {
+                if (!existing) {
+                    var style = document.createElement('style');
+                    style.id = id;
+                    style.innerHTML = `
+                        html, body { filter: invert(0.94) hue-rotate(180deg) !important; background-color: #121212 !important; }
+                        img, video, iframe, canvas, svg, picture, [style*="background-image"] { filter: invert(1.06) hue-rotate(180deg) !important; }
+                    `;
+                    (document.head || document.documentElement).appendChild(style);
+                }
+            } else {
+                if (existing) existing.remove();
+            }
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
     @discardableResult
     func createTab(url: URL, configuration: WKWebViewConfiguration? = nil, skipLoad: Bool = false) -> WKWebView {
         let isFreshConfiguration = configuration == nil
         let config = configuration ?? WKWebViewConfiguration()
         if isFreshConfiguration { config.limitsNavigationsToAppBoundDomains = false }
         let newWeb = WKWebView(frame: webView.frame, configuration: config)
+        newWeb.appearance = isWebDarkModeForced ? NSAppearance(named: .darkAqua) : nil
         newWeb.navigationDelegate = self
         newWeb.uiDelegate = self
         newWeb.translatesAutoresizingMaskIntoConstraints = false
         newWeb.customUserAgent = Self.desktopSafariUserAgent
+
+        let darkModeUserScript = WKUserScript(
+            source: """
+            (function() {
+                function inject() {
+                    var id = 'kouen-force-dark-mode-style';
+                    if (!document.getElementById(id)) {
+                        var style = document.createElement('style');
+                        style.id = id;
+                        style.innerHTML = `
+                            html, body { filter: invert(0.94) hue-rotate(180deg) !important; background-color: #121212 !important; }
+                            img, video, iframe, canvas, svg, picture, [style*="background-image"] { filter: invert(1.06) hue-rotate(180deg) !important; }
+                        `;
+                        (document.head || document.documentElement).appendChild(style);
+                    }
+                }
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', inject);
+                }
+                inject();
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        if isWebDarkModeForced {
+            config.userContentController.addUserScript(darkModeUserScript)
+        }
 
         // A reused configuration (popup/window.open via createWebViewWith) shares its
         // WKUserContentController with the opener tab, which already has these handlers
@@ -454,6 +537,14 @@ public final class BrowserPaneView: NSView {
             mainStack.topAnchor.constraint(equalTo: topAnchor),
             mainStack.leadingAnchor.constraint(equalTo: leadingAnchor),
             mainStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // `mainStack.alignment = .width` alone doesn't reliably hold tabBar/toolbar to
+            // the full pane width — they were observed shrinking to content size and
+            // drifting off the left edge (NSStackView width-alignment constraints lose out
+            // to the row's own internal layout). Pin explicitly instead of relying on it.
+            tabBar.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor),
             mainStack.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             tabBar.heightAnchor.constraint(equalToConstant: 28),
@@ -971,6 +1062,7 @@ extension BrowserPaneView: WKNavigationDelegate {
             tabs[idx].title = String(title.prefix(20))
             refreshTabBar()
         }
+        applyWebDarkMode()
         // The nested-iframe scroll fix (kickCompositorRelayout) is driven by the in-frame
         // pointer-move signal, not from here — a blind post-load timer raced the iframe's
         // async mount and mis-fired before its scrollable content existed.

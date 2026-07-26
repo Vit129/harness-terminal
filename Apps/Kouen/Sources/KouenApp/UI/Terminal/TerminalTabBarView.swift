@@ -109,7 +109,14 @@ final class TerminalTabBarView: NSView {
     }
 
     func applyChrome() {
+        layer?.backgroundColor = Self.backgroundLayerColor()
         model.chromeEpoch += 1
+    }
+
+    /// Solid fill when opaque; nil (clear) when translucent so the window-wide blur
+    /// (MainWindowController.applyTransparency) shows through instead of being blocked.
+    fileprivate static func backgroundLayerColor() -> CGColor? {
+        KouenChrome.backgroundOpacity >= 0.999 ? KouenChrome.current.terminalBackground.cgColor : nil
     }
 
     func setLeadingInset(_ inset: CGFloat) {
@@ -118,6 +125,9 @@ final class TerminalTabBarView: NSView {
 
     private func setup() {
         wantsLayer = true
+        layer?.backgroundColor = Self.backgroundLayerColor()
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hostingView)
 
@@ -160,7 +170,7 @@ private struct TerminalTabBarBody: View {
 
             HStack(spacing: pillSpacing) {
                 Color.clear
-                    .frame(width: max(0, model.leadingInset + edgeInset - pillSpacing))
+                    .frame(width: edgeInset)
 
                 ForEach(Array(visibleRange), id: \.self) { index in
                     let tab = model.tabs[index]
@@ -223,7 +233,7 @@ private struct TerminalTabBarBody: View {
                 Spacer(minLength: max(0, edgeInset + model.trailingInset))
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
-            .background(Color(KouenDesign.chrome.terminalBackground))
+            .background(KouenChrome.backgroundOpacity >= 0.999 ? Color(KouenChrome.current.terminalBackground) : Color.clear)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(Color(KouenDesign.chrome.border))
@@ -527,9 +537,6 @@ private struct TabPillView: View {
     }
 
     private func backgroundColor(chrome c: KouenChromePalette) -> Color {
-        if isActive {
-            return Color(c.accent).opacity(c.isDark ? 0.13 : 0.10)
-        }
         if isHovered {
             return Color(c.rowHoverFill)
         }

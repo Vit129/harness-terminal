@@ -7,15 +7,24 @@ struct AgentNotchRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    private var shellBackground: Color {
+        let opacity = KouenChrome.backgroundOpacity
+        if opacity < 0.999 {
+            return Color(KouenChrome.current.terminalBackground.withAlphaComponent(max(0.65, opacity * 0.85)))
+        } else {
+            return Color.black
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             shell
                 .frame(width: currentWidth, height: currentHeight, alignment: .top)
-                .background(Color.black)
+                .background(shellBackground)
                 .clipShape(NotchShape(topRadius: topRadius, bottomRadius: bottomRadius))
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.black)
+                        .fill(shellBackground)
                         .frame(height: 1)
                         .accessibilityHidden(true)
                 }

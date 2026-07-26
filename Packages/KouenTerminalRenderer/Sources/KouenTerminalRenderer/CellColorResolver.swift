@@ -84,8 +84,16 @@ public struct CellColorResolver: Sendable {
 
         // 3.5: enforce a minimum contrast (skip concealed cells, which want fg == bg). Applied
         // before inverse — the ratio is symmetric, so it still holds after the swap.
-        if minimumContrast > 1, !cell.invisible {
-            fg = Self.ensureContrast(foreground: fg, background: bg, ratio: minimumContrast)
+        // Faint / ghost text (e.g. zsh-autosuggestions, ANSI 8) is given a 4.5:1 floor when
+        // minimum contrast is active so ghost text remains legible on translucent glass backgrounds.
+        let isGhostOrFaint = cell.faint || {
+            if case let .palette(i) = cell.foreground, i == 8 { return true }
+            return false
+        }()
+        let effectiveMinContrast = isGhostOrFaint ? max(minimumContrast, 4.5) : minimumContrast
+
+        if effectiveMinContrast > 1, !cell.invisible {
+            fg = Self.ensureContrast(foreground: fg, background: bg, ratio: effectiveMinContrast)
         }
 
         // 4: inverse swaps.
