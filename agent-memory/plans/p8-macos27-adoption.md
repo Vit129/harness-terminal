@@ -102,11 +102,20 @@ Ensure Kouen builds and runs correctly on macOS 27 beta without regressions.
 - [ ] Verify window corner radius change doesn't clip terminal content or overlays — same, needs a live run
 - [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API — same, needs a live run
 - [ ] Confirm Metal renderer still works (no display pipeline changes expected) — same, needs a live run
-- [ ] Run full test suite on macOS 27 — **BLOCKED (2026-07-25):** `swift test` under the beta toolchain
-      fails at the XCTest-bundle-loading stage for every target (`dlopen: Library not loaded:
-      @rpath/Sparkle.framework/...`) — the vendored Sparkle binary artifact isn't resolving under Xcode 27's
-      test harness rpath search. Toolchain/environment issue, not a code defect (`swift build` compiles and
-      links the actual app fine). Not chased further — needs Sparkle SPM artifact or search-path fix.
+- [x] Run full test suite on macOS 27 — **RESOLVED (2026-07-26):** root-caused the Sparkle rpath failure —
+      the xctest binaries carry an `LC_RPATH` pointing at `.build/out/Products/Debug/PackageFrameworks`
+      (confirmed via `otool -l`), but SwiftPM's Xcode-27-beta XCBuild-integrated layout never copies/symlinks
+      Sparkle.xcframework's binary there (it only lands one level up). Workaround script:
+      `Scripts/fix-xcode27beta-test-rpath.sh` (re-run after any clean `.build/out/` rebuild; drop once
+      Xcode 27 ships a fixed SwiftPM integration). With that applied, `swift test` runs for real under the
+      beta toolchain: 657+ tests execute. Found and fixed 2 real regressions surfaced by actually running
+      the suite: `ReleaseNotesGuardTests` (this session's release commit regenerated `CHANGELOG.md` via
+      `git-cliff` but never re-ran `make release-notes`, so `GeneratedReleaseNotes.swift` drifted) and
+      `NotchLayoutMetricsTests.testPeekSizeStretchesFromClosedShape` (hardcoded the pre-shrink `+144/+26`
+      peek-size deltas, stale after this session's notch-size reduction to `+110/+20`). Also found 2
+      **pre-existing, unrelated** failures (`ExperienceModeTests.testShowsKouenControlsDerivesFromMode`,
+      `Phase6KeysTests.testRootTableSeededAndBindable`) — confirmed identical under the regular (non-beta)
+      Xcode toolchain too, so not a macOS 27 compatibility issue; left untouched, out of this plan's scope.
 
 ## Phase 2 — Quick Wins (P1)
 

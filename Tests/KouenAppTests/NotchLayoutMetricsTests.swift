@@ -45,8 +45,8 @@ final class NotchLayoutMetricsTests: XCTestCase {
 
         // Peek reads as the notch stretching: wider than closed, far narrower than open,
         // and just tall enough for one row under the hardware lip.
-        XCTAssertEqual(metrics.peekWidth, metrics.closedWidth + 144)
-        XCTAssertEqual(metrics.peekHeight, metrics.closedHeight + 26)
+        XCTAssertEqual(metrics.peekWidth, metrics.closedWidth + 110)
+        XCTAssertEqual(metrics.peekHeight, metrics.closedHeight + 20)
         XCTAssertLessThan(metrics.peekWidth, metrics.openWidth)
         XCTAssertLessThan(metrics.peekHeight, metrics.openHeight)
         // The panel frame must already be large enough to contain the peek.
