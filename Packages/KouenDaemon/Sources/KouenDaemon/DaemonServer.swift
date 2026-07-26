@@ -745,12 +745,19 @@ public final class DaemonServer: @unchecked Sendable {
             minRows = min(minRows, size.rows); minCols = min(minCols, size.cols)
             maxRows = max(maxRows, size.rows); maxCols = max(maxCols, size.cols)
             latestRows = size.rows; latestCols = size.cols
+            // MobileBridgeServer (Network.framework) doesn't exist on platforms without
+            // Network — no mobile clients can connect there, so every vote is native.
+            #if canImport(Network)
             if clients[voteFD]?.label == MobileBridgeServer.clientLabel {
                 mobileMaxRows = max(mobileMaxRows, size.rows); mobileMaxCols = max(mobileMaxCols, size.cols)
             } else {
                 foundNative = true
                 nativeMinRows = min(nativeMinRows, size.rows); nativeMinCols = min(nativeMinCols, size.cols)
             }
+            #else
+            foundNative = true
+            nativeMinRows = min(nativeMinRows, size.rows); nativeMinCols = min(nativeMinCols, size.cols)
+            #endif
         }
         guard found, minRows > 0, minCols > 0 else { return }
         let mode = registry.optionStore.get("window-size")?.stringValue ?? "smallest"
