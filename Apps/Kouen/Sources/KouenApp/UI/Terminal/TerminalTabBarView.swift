@@ -109,6 +109,7 @@ final class TerminalTabBarView: NSView {
     }
 
     func applyChrome() {
+        KouenDesign.applyTabBarChrome(to: self)
         model.chromeEpoch += 1
     }
 
@@ -118,6 +119,9 @@ final class TerminalTabBarView: NSView {
 
     private func setup() {
         wantsLayer = true
+        KouenDesign.applyTabBarChrome(to: self)
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hostingView)
 
@@ -160,7 +164,7 @@ private struct TerminalTabBarBody: View {
 
             HStack(spacing: pillSpacing) {
                 Color.clear
-                    .frame(width: max(0, model.leadingInset + edgeInset - pillSpacing))
+                    .frame(width: edgeInset)
 
                 ForEach(Array(visibleRange), id: \.self) { index in
                     let tab = model.tabs[index]
@@ -223,7 +227,11 @@ private struct TerminalTabBarBody: View {
                 Spacer(minLength: max(0, edgeInset + model.trailingInset))
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
-            .background(Color(KouenDesign.chrome.terminalBackground))
+            // Fill comes from the NSView-level ChromeBackdrop (KouenDesign.applyTabBarChrome,
+            // installed on the parent TerminalTabBarView) — same mechanism as the title strip
+            // and sidebar, so all chrome bars read as one consistent surface. This SwiftUI
+            // layer must stay clear or it'd paint its own fill on top and defeat that.
+            .background(Color.clear)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(Color(KouenDesign.chrome.border))
@@ -527,9 +535,6 @@ private struct TabPillView: View {
     }
 
     private func backgroundColor(chrome c: KouenChromePalette) -> Color {
-        if isActive {
-            return Color(c.accent).opacity(c.isDark ? 0.13 : 0.10)
-        }
         if isHovered {
             return Color(c.rowHoverFill)
         }

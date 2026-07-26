@@ -1434,7 +1434,7 @@ public final class KouenTerminalSurfaceView: NSView {
             windowKeyObservers.append(nc.addObserver(
                 forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     guard let self else { return }
                     self.windowIsKey = true
                     self.focusStateChanged()
@@ -1443,7 +1443,7 @@ public final class KouenTerminalSurfaceView: NSView {
             windowKeyObservers.append(nc.addObserver(
                 forName: NSWindow.didResignKeyNotification, object: window, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     guard let self else { return }
                     self.windowIsKey = false
                     self.focusStateChanged()
@@ -1459,7 +1459,7 @@ public final class KouenTerminalSurfaceView: NSView {
             windowKeyObservers.append(nc.addObserver(
                 forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     guard let self, let window = self.window else { return }
                     self.setWindowOccluded(!window.occlusionState.contains(.visible))
                 }
@@ -1472,7 +1472,7 @@ public final class KouenTerminalSurfaceView: NSView {
             windowKeyObservers.append(nc.addObserver(
                 forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor in
                     guard let self else { return }
                     self.applyPreferredFrameRateRange()
                     self.scheduleRender()

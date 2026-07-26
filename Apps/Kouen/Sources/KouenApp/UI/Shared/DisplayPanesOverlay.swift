@@ -61,9 +61,19 @@ final class DisplayPanesOverlay {
         }
     }
 
+@MainActor
+private final class DisplayPanesChipView: NSView {
+#if compiler(>=6.4)
+    @available(macOS 27.0, *)
+    override var cornerConfiguration: NSViewCornerConfiguration? {
+        .corners(radius: .containerConcentric)
+    }
+#endif
+}
+
     private func makeChip(_ number: Int) -> NSView {
         let chrome = KouenChrome.current
-        let view = NSView()
+        let view = DisplayPanesChipView()
         view.wantsLayer = true
         view.layer?.cornerRadius = 14
         view.layer?.cornerCurve = .continuous

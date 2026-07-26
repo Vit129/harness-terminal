@@ -84,8 +84,36 @@ public struct CellColorResolver: Sendable {
 
         // 3.5: enforce a minimum contrast (skip concealed cells, which want fg == bg). Applied
         // before inverse — the ratio is symmetric, so it still holds after the swap.
-        if minimumContrast > 1, !cell.invisible {
-            fg = Self.ensureContrast(foreground: fg, background: bg, ratio: minimumContrast)
+        // Faint text with NO explicit color (ghost/autosuggestion text) or the literal
+        // "ANSI 8" grey convention some autosuggestion themes use gets a legibility floor
+        // (at least 4.5:1, or the configured minimumContrast if higher) so it stays
+        // readable on translucent glass backgrounds. Faint text with an EXPLICIT color is
+        // exempted from contrast enforcement entirely, regardless of the configured
+        // minimumContrast — ANSI-art content (pixel-art banners, gradients) routinely uses
+        // `faint` on explicit truecolor/palette values as a deliberate shading technique,
+        // and enforcing ANY contrast floor there replaces intended dark shading with
+        // washed-out/white blocks, corrupting the art. Non-faint cells are unaffected —
+        // this only changes how `faint` cells interact with the floor.
+        let effectiveMinContrast: Double
+        if Self.isGraphicsGlyph(cell.codepoint) {
+            // Block-drawing / Braille / legacy-computing glyphs (▀▄█░▒▓⣿🬀…) are used as
+            // graphics pixels, not letters — half-block ANSI art routinely sets fg/bg to
+            // deliberately near-identical colors for smooth shading (no `faint` attribute
+            // involved at all). Forcing a contrast floor between two adjacent pixel colors
+            // is meaningless and corrupts the art into washed-out blocks. Skip entirely,
+            // regardless of the configured minimumContrast.
+            effectiveMinContrast = 1
+        } else if cell.faint {
+            switch cell.foreground {
+            case .none, .palette(8): effectiveMinContrast = max(minimumContrast, 4.5)
+            case .palette, .rgb: effectiveMinContrast = 1
+            }
+        } else {
+            effectiveMinContrast = minimumContrast
+        }
+
+        if effectiveMinContrast > 1, !cell.invisible {
+            fg = Self.ensureContrast(foreground: fg, background: bg, ratio: effectiveMinContrast)
         }
 
         // 4: inverse swaps.
@@ -99,6 +127,19 @@ public struct CellColorResolver: Sendable {
         }
 
         return ResolvedCellColors(foreground: fg, background: bg)
+    }
+
+    /// True for Unicode codepoints used as sub-cell graphics pixels rather than letters:
+    /// Block Elements (▀▁…▟), Braille Patterns (⠁…⣿, used for dot-matrix art/spinners),
+    /// and Symbols for Legacy Computing (🬀…🯡, finer sextant/octant blocks). Terminal-art
+    /// tools render these with fg/bg colors chosen for pixel shading, not text legibility.
+    static func isGraphicsGlyph(_ codepoint: UInt32) -> Bool {
+        switch codepoint {
+        case 0x2580...0x259F: return true  // Block Elements
+        case 0x2800...0x28FF: return true  // Braille Patterns
+        case 0x1FB00...0x1FBFF: return true  // Symbols for Legacy Computing
+        default: return false
+        }
     }
 
     /// WCAG relative luminance of an sRGB color (0…1).

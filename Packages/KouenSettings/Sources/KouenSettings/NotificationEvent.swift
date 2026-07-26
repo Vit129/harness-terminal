@@ -48,4 +48,17 @@ public enum NotificationEvent: String, CaseIterable, Codable, Sendable {
         case .commandFinished: return false
         }
     }
+
+    /// Named system sound (`/System/Library/Sounds/*.aiff`, resolved by `NSSound(named:)` —
+    /// no bundled asset needed) played for this event, distinct per case so the user can
+    /// tell "agent needs you" apart from "agent finished" without looking. `agentWaiting` is
+    /// deliberately the sharpest/most attention-grabbing since it's the one actionable case.
+    public var soundName: String {
+        switch self {
+        case .agentWaiting: return "Ping"
+        case .agentFinished: return "Glass"
+        case .bell: return "Tink"
+        case .commandFinished: return "Pop"
+        }
+    }
 }

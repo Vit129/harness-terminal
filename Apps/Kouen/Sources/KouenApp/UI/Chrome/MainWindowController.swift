@@ -45,6 +45,7 @@ final class MainWindowController: NSWindowController {
         }
         window.appearance = Self.resolvedWindowAppearance()
         window.contentViewController = MainSplitViewController()
+        window.autorecalculatesKeyViewLoop = true
         self.init(window: window)
         // Launch full-size by default so the terminal opens in the visible frame on the
         // current screen. If autosave is enabled and a saved frame exists, that still wins.

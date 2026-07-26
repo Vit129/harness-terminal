@@ -44,11 +44,11 @@ public struct NotchRect: Sendable, Equatable {
 }
 
 public struct NotchLayoutMetrics: Sendable, Equatable {
-    public static let fallbackClosedWidth: Double = 80
-    public static let fallbackClosedHeight: Double = 20
-    public static let minimumOpenWidth: Double = 336
-    public static let preferredOpenWidth: Double = 420
-    public static let preferredOpenHeight: Double = 286
+    public static let fallbackClosedWidth: Double = 68
+    public static let fallbackClosedHeight: Double = 18
+    public static let minimumOpenWidth: Double = 288
+    public static let preferredOpenWidth: Double = 360
+    public static let preferredOpenHeight: Double = 240
     public static let shadowPadding: Double = 20
 
     public var hasPhysicalNotch: Bool
@@ -60,8 +60,8 @@ public struct NotchLayoutMetrics: Sendable, Equatable {
 
     /// Transient peek card (one-row live activity): slightly wider than the closed notch so
     /// the dropped row reads as the notch stretching, never as a detached toast.
-    public var peekWidth: Double { closedWidth + 144 }
-    public var peekHeight: Double { closedHeight + 26 }
+    public var peekWidth: Double { closedWidth + 110 }
+    public var peekHeight: Double { closedHeight + 20 }
 
     public init(
         hasPhysicalNotch: Bool,

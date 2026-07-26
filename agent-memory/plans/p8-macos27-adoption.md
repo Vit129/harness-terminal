@@ -54,13 +54,25 @@ These MUST be maintained on any macOS 27 SDK upgrade.
 
 ### Verification checklist for macOS 27 beta
 
-- [ ] Run `grep -rn "nonisolated override" Apps/ Packages/` — allowed only in RL-040 sites
+- [x] Run `grep -rn "nonisolated override" Apps/ Packages/` — allowed only in RL-040 sites
       (KouenWindow: sendEvent/close, WindowBorderOverlayView: layout/hitTest); any new site needs a RL-040 comment
-- [ ] Run `grep -rn "MainActor.assumeIsolated" Apps/` — allowed only in MainExecutor.execute()
+      **RESOLVED (2026-07-25):** 3 undocumented sites found — `BoardViewController.swift:9`,
+      `GitPanelView.swift:2487` (both `nonisolated override var isFlipped`), correctly `nonisolated`,
+      now carry RL-040 comments. `KouenTerminalSurfaceView.swift:1282` (`resetCursorRects`) already had one.
+- [x] Run `grep -rn "MainActor.assumeIsolated" Apps/` — allowed only in MainExecutor.execute()
       (synchronous bridge with Thread.isMainThread guard) and TerminalHostView hot path ([weak self]+guard)
+      **RESOLVED (2026-07-25):** stale 2-exception allow-list replaced with a full 29-site audit
+      (agy classification, then hand-reviewed before any edit — see commit history). 18 sites confirmed
+      safe (AppKit lifecycle overrides paired with `nonisolated` per RL-040, or `DispatchQueue.main.async`
+      hot paths preserving FIFO output order). 10 sites in `BrowserPaneView.swift`, `SettingsModel.swift`,
+      `SessionCoordinator.swift`, `WorktreeAutoIsolateService.swift`, `KouenTerminalSurfaceView.swift`,
+      `ImmersiveOnboardingWindowController.swift` were genuinely unsafe (Timer/NotificationCenter/
+      NSAnimationContext-completion/DispatchSource callbacks with no Task context) — converted to
+      `Task { @MainActor in }`. Build + full test suite (swift test, Tests/robot/run.sh) verified after.
 - [ ] Run app for 2+ hours without crash
 - [ ] Check `heap <PID> | grep NSTextField` — count should be stable (no growth)
-- [ ] Confirm `updateTrackingAreas` all have `guard window != nil`
+- [x] Confirm `updateTrackingAreas` all have `guard window != nil` — fixed 3 missing sites
+      (`TabOverviewController.swift:170`, `ContentAreaViewController.swift:706,797`), rest already compliant
 
 See: `agent-memory/knowledge/bugs/zombie-crash-macos26.md` for full details.
 
@@ -70,28 +82,50 @@ See: `agent-memory/knowledge/bugs/zombie-crash-macos26.md` for full details.
 
 Ensure Kouen builds and runs correctly on macOS 27 beta without regressions.
 
-- [ ] Build with Xcode 27 beta, fix any deprecation warnings-as-errors
-- [ ] Verify Liquid Glass doesn't break custom sidebar chrome (`KouenDesign`,
+- [x] Build with Xcode 27 beta, fix any deprecation warnings-as-errors
+      **RESOLVED (2026-07-25):** Xcode 27.0 (27A5228h) now installed at `/Applications/Xcode-beta.app`.
+      Clean build via `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift build --product Kouen`:
+      0 errors, 20 distinct warnings, **none in `KouenCore`/`KouenTerminalEngine`** (the only two
+      `-warnings-as-errors` targets) — the checklist item as literally written is satisfied.
+      Of the 20: 1 trivial (`FrecencyDirectoryStore.swift:45` var→let, fixed). 8 are in `KouenWindow.swift`
+      (RL-040's `nonisolated override sendEvent/close`) — Xcode 27's AppKit headers now annotate
+      `NSWindow.contentView`/`firstResponder`/`sendEvent`/`close` etc. as `@MainActor`-isolated, and the
+      compiler is correctly flagging that RL-040 *deliberately* violates that isolation to stay safe on
+      zombie views. **Do not silence these — every fix either reintroduces the executor check (the crash)
+      or is a no-op unsafe cast.** 2 more (`KouenTerminalSurfaceView.swift:2318,2556`) are weak/strong
+      capture-list warnings in the FIFO-preserving frame build/present pipeline — same reasoning, left as
+      warnings. Remaining ~9 are mechanical (unnecessary `nonisolated(unsafe)`, Sendable-closure captures,
+      weak-capture mismatches in non-critical files) — candidates for a follow-up pass, not blocking.
+- [x] Verify Liquid Glass doesn't break custom sidebar chrome (`KouenDesign`,
       `ChromeBackdrop`, `WindowBlur.apply()`)
-- [ ] Verify window corner radius change doesn't clip terminal content or overlays
-- [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API
-- [ ] Confirm Metal renderer still works (no display pipeline changes expected)
-- [ ] Run full test suite on macOS 27
+      **RESOLVED (2026-07-25):** Removed redundant dark layer tint from `terminalHost` in `ContentAreaViewController.swift` so `window.backgroundColor` and `WindowBlur` render as a single continuous Liquid Glass surface without dark seams below the tab bar. Added a 4.5:1 WCAG AA contrast floor for faint/ANSI 8 text in `CellColorResolver.swift` so ghost text / autosuggestions (e.g. `y` in `agy`) remain clearly visible over translucent backgrounds.
+- [ ] Verify window corner radius change doesn't clip terminal content or overlays — same, needs a live run
+- [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API — same, needs a live run
+- [ ] Confirm Metal renderer still works (no display pipeline changes expected) — same, needs a live run
+- [ ] Run full test suite on macOS 27 — **BLOCKED (2026-07-25):** `swift test` under the beta toolchain
+      fails at the XCTest-bundle-loading stage for every target (`dlopen: Library not loaded:
+      @rpath/Sparkle.framework/...`) — the vendored Sparkle binary artifact isn't resolving under Xcode 27's
+      test harness rpath search. Toolchain/environment issue, not a code defect (`swift build` compiles and
+      links the actual app fine). Not chased further — needs Sparkle SPM artifact or search-path fix.
 
 ## Phase 2 — Quick Wins (P1)
 
 Low-effort adoptions that improve quality immediately.
 
-- [ ] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
-- [ ] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
+- [x] Set `window.autorecalculatesKeyViewLoop = true` on `MainWindowController`
+- [x] Set `preventsApplicationTerminationWhenModal = false` on non-critical sheets
       (about panel, settings, command palette)
-- [ ] Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
-  - `ToastLabel`
-  - `DisplayPanesOverlay` chips
+- [x] Adopt `NSViewCornerConfiguration` + `.containerConcentric` on:
+  - `ToastLabel` (`ToastHostingView` in `Toast.swift`)
+  - `DisplayPanesOverlay` chips (`DisplayPanesChipView` in `DisplayPanesOverlay.swift`)
   - `ResizeHUDView`
   - `NotificationDropdownPanelView`
-- [ ] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
-      due to custom sidebar)
+  **RESOLVED (2026-07-25):** Dual-gated with `#if compiler(>=6.4)` and `@available(macOS 27.0, *)` property overrides (`override var cornerConfiguration: NSViewCornerConfiguration? { .corners(radius: .containerConcentric) }`) to safely compile on Xcode 26.6 SDK and adopt container-concentric corners on macOS 27. Verified clean build under Xcode 27 beta and full pass on `Tests/robot/run.sh`.
+- [x] Adopt sidebar semi-bold selection text style (if system doesn't auto-apply
+      due to custom sidebar) — `WorktreeRowView.titleLabel` was hardcoded `.semibold`
+      unconditionally; now `.semibold` only when `isSelected`, `.regular` otherwise,
+      toggled in `refresh()`. `SessionWorktreeRowView` (leaf worktree rows) has no
+      selection concept, left untouched.
 
 ## Phase 3 — NSTextSelectionManager (P1)
 
@@ -143,6 +177,66 @@ Verify:
 
 ---
 
+## Phase 7 — AppIntents & System Shortcuts Integration (P1)
+
+Expose Kouen CLI/Daemon control to system-wide AppIntents and Shortcuts app.
+
+- [ ] Create `KouenShortcutsProvider` conforming to `AppShortcutsProvider`
+- [ ] Define `RunCommandIntent` (execute command in active/specified pane)
+- [ ] Define `SplitPaneIntent` (split horizontally/vertically with target profile/command)
+- [ ] Define `SwitchWorkspaceIntent` & `GetTerminalOutputIntent`
+- [ ] Wire intents to `DaemonClient` / IPC bridge
+
+## Phase 8 — Actionable User Notifications (P1)
+
+Enhance long-running process notifications with interactive action buttons.
+
+- [x] Extend `NotificationCoordinator` to register `UNNotificationCategory` for terminal jobs
+- [x] Add notification actions: `Focus Pane`, `Rerun Command`, `Copy Output`
+- [x] Handle action callbacks via `UNUserNotificationCenterDelegate` and route to `SessionCoordinator`
+  *(Note: Rerun Command reuses the command recorded in `TerminalBlock` via OSC 133 boundaries when available for the surface and resends it via daemon input IPC `.send`. For panes without OSC 133 integration or captured blocks, no hidden state was invented.)*
+
+## Phase 9 — Background Power & Activity Management (P1)
+
+Prevent App Nap / macOS 27 sleep from interrupting active builds and agent tasks.
+
+- [x] Wrap active PTY build sessions in `ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason:)`
+- [x] Add `ActivityAssertionManager` to track active agent/subagent runs
+      *(Note: "daemon tasks" was originally wired to `TaskStore`/`KouenTask` — turned out to be the
+      unrelated Task Dashboard TODO checklist, which deliberately persists after its owning session
+      closes. Using it would have kept the Mac awake forever whenever any unchecked TODO item existed
+      anywhere. Removed that block rather than keep a wrong signal; "active daemon tasks" in the
+      Process-management sense has no existing equivalent in this codebase to wire up yet.)*
+- [x] Ensure process assertions release cleanly on task completion or process termination —
+      released via `terminalHosts.onRetire` (same real pane-teardown hook as `SecureInputMonitor.release`),
+      plus `releaseAll()` on `applicationWillTerminate`
+
+## Phase 10 — WidgetKit & Desktop Status Panel (P2)
+
+Glanceable status widget for desktop and Notification Center.
+
+- [ ] Add WidgetKit extension target for macOS (`KouenWidget`)
+- [ ] Implement `TimelineProvider` rendering active pane count, running jobs, and daemon health
+- [ ] Share session state via App Group / daemon IPC status snapshot
+
+## Phase 11 — Metal Frame Pacing & DisplayLink Optimization (P2)
+
+Optimize Metal render loop for macOS 27 display pipeline and ProMotion.
+
+- [ ] Review `TerminalMetalRenderer` frame pacing against macOS 27 `CVDisplayLink` / `CAMetalLayer` callbacks
+- [ ] Pause display link when terminal surface is static / inactive tab to conserve GPU power
+- [ ] Benchmark 120Hz ProMotion vs 60Hz rendering frame latency
+
+## Phase 12 — Terminal Accessibility Tree (P2)
+
+Expose terminal buffer grid to VoiceOver and macOS 27 Accessibility APIs.
+
+- [ ] Implement `NSAccessibility` element provider over `KouenTerminalSurfaceView` grid
+- [ ] Expose line-by-line text and prompt location to `NSAccessibilityNavigableStaticText`
+- [ ] Test with VoiceOver navigation and macOS 27 system Accessibility inspector
+
+---
+
 ## Non-goals
 - Liquid Glass full redesign (keep custom chrome for brand identity)
 - 3D charts / spatial layout (not relevant for terminal)
@@ -155,8 +249,11 @@ Verify:
 - `NSTextSelectionManager` may not support our use case (syntax-highlighted
   attributed text with line numbers) — evaluate before committing
 - Gesture recognizer migration is large scope, defer if time-constrained
+- `AppIntents` and `WidgetKit` require App Group setup for shared IPC status with daemon
+- `NSAccessibility` virtual grid mapping can incur performance overhead if re-computed every frame; must diff dirty lines
 
 ## Timeline
-- **Beta 1–3 (Jun–Aug 2026):** Phase 1 + 2
-- **RC (Sep 2026):** Phase 3 evaluated, Phase 6 verified
-- **Post-release:** Phase 4 + 5 as time allows
+- **Beta 1–3 (Jun–Aug 2026):** Phase 1 + 2 + 7 + 8
+- **RC (Sep 2026):** Phase 3 evaluated, Phase 6 verified, Phase 9 + 11 verified
+- **Post-release:** Phase 4 + 5 + 10 + 12 as time allows
+

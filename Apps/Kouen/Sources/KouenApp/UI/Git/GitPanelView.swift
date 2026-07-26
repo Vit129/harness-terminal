@@ -2484,6 +2484,10 @@ private final class HunkActionButton: NSButton {
 }
 
 private final class FlippedView: NSView {
+    // RL-040: `nonisolated` prevents the Swift 6.3 `@objc` thunk from performing an
+    // actor-isolation check that dereferences metadata — this view is explicitly held
+    // alive past `removeFromSuperview()` (see below) specifically because AppKit can
+    // still dispatch layout/scroll callbacks like `isFlipped` to it during that window.
     nonisolated override var isFlipped: Bool { true }
     override func removeFromSuperview() {
         ZombieHoldRegistry.shared.hold(self)

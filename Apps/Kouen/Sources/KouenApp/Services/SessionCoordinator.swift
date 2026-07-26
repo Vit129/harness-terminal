@@ -49,6 +49,7 @@ final class SessionCoordinator: NSObject {
         terminalHosts.onRetire = { [weak self] surfaceID in
             self?.inlineAIControllers.removeValue(forKey: surfaceID.uuidString)
             SecureInputMonitor.shared.release(surfaceID)
+            ActivityAssertionManager.shared.releaseAssertions(forSurface: surfaceID)
             if self?.runSurfaceID == surfaceID { self?.runSurfaceID = nil }
         }
         // Update the floating queue bar whenever a surface's queue changes.
@@ -69,7 +70,7 @@ final class SessionCoordinator: NSObject {
     private func startMemoryPressureMonitor() {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 guard let self else { return }
                 let isCritical = source.data.contains(.critical)
                 // Inactive sessions: trim to 1 000 lines (warning) or 0 (critical).
@@ -592,6 +593,35 @@ final class SessionCoordinator: NSObject {
 
     func beginRenameActiveTab() {
         NotificationCenter.default.post(name: NotificationBus.shared.snapshotChanged, object: nil, userInfo: ["beginRenameActiveTab": true])
+    }
+
+    private var preToggleBackgroundOpacity: Float?
+
+    func toggleWindowOpacity() {
+        if let saved = preToggleBackgroundOpacity {
+            settings.backgroundOpacity = saved
+            preToggleBackgroundOpacity = nil
+            if let view = NSApp.mainWindow?.contentView {
+                Toast.show("Glass Mode (\(Int(saved * 100))%)", in: view)
+            }
+        } else {
+            preToggleBackgroundOpacity = settings.backgroundOpacity
+            settings.backgroundOpacity = 1.0
+            if let view = NSApp.mainWindow?.contentView {
+                Toast.show("Solid Opaque Mode (100%)", in: view)
+            }
+        }
+        KouenChrome.update(
+            themeName: snapshot.themeName,
+            opacity: CGFloat(settings.backgroundOpacity),
+            blur: settings.backgroundBlur,
+            backgroundHex: settings.customBackgroundHex,
+            foregroundHex: settings.customForegroundHex,
+            cursorHex: settings.customCursorHex
+        )
+        if let main = NSApp.mainWindow?.windowController as? MainWindowController {
+            main.applyChrome()
+        }
     }
 
     func updateFontSize(delta: Float) { applyFontSize(settings.fontSize + delta) }

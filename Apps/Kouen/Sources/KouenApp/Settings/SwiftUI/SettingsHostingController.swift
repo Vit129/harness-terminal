@@ -31,6 +31,7 @@ final class SettingsWindowController: NSObject {
         win.titleVisibility = .visible
         win.isMovableByWindowBackground = false
         win.isRestorable = false
+        win.preventsApplicationTerminationWhenModal = false
         win.isReleasedWhenClosed = false
         win.minSize = NSSize(width: 840, height: 600)
         win.setContentSize(NSSize(width: 940, height: 680))

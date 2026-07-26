@@ -745,7 +745,13 @@ final class ChromeBackdrop: NSView {
             vibrancy.material = material(for: role)
             vibrancy.isHidden = translucent
         }
-        tint.layer?.backgroundColor = baseColor.withAlphaComponent(opacity).cgColor
+        // When translucent, MainWindowController.applyTransparency() already paints the
+        // window's own bg×opacity tint behind everything — this flat layer must NOT also
+        // paint it, or the two composite into a visibly more opaque/saturated result than
+        // the terminal (which correctly goes nil here — see
+        // ContentAreaViewController.refreshTerminalHostFill). Only opaque needs a solid
+        // fill of its own, matching terminalHost's `opacity >= 1` branch exactly.
+        tint.layer?.backgroundColor = translucent ? nil : baseColor.cgColor
 
         // No drawn hairline anywhere: the tab strip / sidebar / status line now read
         // as distinct from the terminal purely by their elevated chrome background

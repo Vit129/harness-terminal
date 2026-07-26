@@ -91,7 +91,7 @@ final class ImmersiveOnboardingWindowController: NSWindowController, NSWindowDel
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window?.animator().alphaValue = 0.0
         }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 self?.close()
                 self?.onDismiss()
                 if launchDemo {

@@ -19,7 +19,7 @@ final class WorktreeAutoIsolateService {
             object: nil, queue: .main
         ) { [weak self] note in
             let tabIDs = note.userInfo?["tabIDs"] as? [TabID] ?? []
-            MainActor.assumeIsolated { self?.handleBranchChange(tabIDs: tabIDs) }
+            Task { @MainActor in self?.handleBranchChange(tabIDs: tabIDs) }
         }
     }
 

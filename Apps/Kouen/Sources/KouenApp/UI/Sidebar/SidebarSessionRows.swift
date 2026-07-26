@@ -265,7 +265,7 @@ final class WorktreeRowView: NSView {
         branchIcon.setContentHuggingPriority(.required, for: .horizontal)
         branchIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .regular)
         titleLabel.usesSingleLineMode = true
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -469,6 +469,7 @@ final class WorktreeRowView: NSView {
 
     private func refresh() {
         let c = KouenDesign.chrome
+        titleLabel.font = .systemFont(ofSize: 12, weight: isSelected ? .semibold : .regular)
         closeButton.alphaValue = isHovered ? 1 : 0
         let closeColor = c.textSecondary
         closeButton.attributedTitle = NSAttributedString(

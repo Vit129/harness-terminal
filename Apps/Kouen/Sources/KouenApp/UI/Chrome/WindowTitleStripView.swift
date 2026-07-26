@@ -142,8 +142,6 @@ final class WindowTitleStripView: NSView {
     }
 
     func applyColors() {
-        // Same vibrancy+tint backdrop as the tab bar below, so the strip reads as one
-        // continuous chrome surface instead of a transparent hole in the titlebar region.
         KouenDesign.applyTabBarChrome(to: self)
         let c = KouenDesign.chrome
         folderIcon.contentTintColor = c.textSecondary

@@ -73,11 +73,7 @@ final class ContentAreaViewController: NSViewController, TerminalTabBarDelegate 
         if opacity >= 1 {
             terminalHost.layer?.backgroundColor = KouenChrome.current.terminalBackground.cgColor
         } else {
-            let isDark = KouenChrome.current.isDark
-            let minTint: CGFloat = isDark ? 0.3 : 0.5
-            let effectiveAlpha = max(CGFloat(opacity), minTint)
-            terminalHost.layer?.backgroundColor = KouenChrome.current.terminalBackground
-                .withAlphaComponent(effectiveAlpha).cgColor
+            terminalHost.layer?.backgroundColor = nil
         }
     }
 
@@ -706,6 +702,7 @@ private final class PaneHoverButton: NSButton {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let old = trackingArea_ { removeTrackingArea(old) }
+        guard window != nil else { trackingArea_ = nil; return }
         let area = NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
@@ -797,6 +794,7 @@ private final class PaneDragGripView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach { removeTrackingArea($0) }
+        guard window != nil else { return }
         addTrackingArea(NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],

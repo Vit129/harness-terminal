@@ -170,6 +170,7 @@ private final class TabCell: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach { removeTrackingArea($0) }
+        guard window != nil else { return }
         addTrackingArea(NSTrackingArea(rect: bounds,
             options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
     }

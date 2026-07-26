@@ -223,6 +223,7 @@ FloatingPaneController.shared.install()
         // "keep my work"), and the next clean quit will reap them. Synchronous + longer-timeout +
         // single retry so a momentarily busy daemon still reaps before the process exits.
         SessionCoordinator.shared.closeEphemeralSessionsBeforeQuit()
+        ActivityAssertionManager.shared.releaseAll()
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

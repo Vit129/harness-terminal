@@ -20,6 +20,7 @@ grep -rn "<keyword>" agent-memory/knowledge/cases/ agent-memory/knowledge/rl-les
 | `knowledge/cases/cwd-worktree-bleed.md` | cwd/worktree, deepest-descendant, tab pill/file tree/git panel wrong dir during builds |
 | `knowledge/bugs/tab-switch-black-screen.md` | Tab switch black screen — 4 FM deep dive, final fix pattern |
 | `knowledge/bugs/browser-pane-local-daemon-merge.md` | Browser pane vs daemon pane-tree sync — 2nd recurrence (2026-06-15, 2026-07-23), same broken merge condition each time |
+| `knowledge/bugs/p8-liquid-glass-chrome-regressions.md` | P8 macOS27 Liquid Glass: transparency hardcoded off, chrome double-tint, un-unified tab-bar chrome, ANSI-art contrast-floor corruption (CASE-066) |
 | `knowledge/rl-lessons.md` | All RL-xxx prevention lessons |
 
 ## Open Cases

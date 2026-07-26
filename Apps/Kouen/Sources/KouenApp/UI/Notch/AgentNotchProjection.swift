@@ -14,6 +14,11 @@ public struct AgentNotchRowSummary: Sendable, Equatable, Identifiable {
     public var sessionID: UUID
     public var sessionName: String
     public var tabID: UUID?
+    /// The specific split pane this row represents, when known — lets `openRow` focus the
+    /// exact pane instead of just landing on the tab and leaving the user to find it among
+    /// however many splits it has.
+    public var paneID: PaneID?
+    public var surfaceID: SurfaceID?
     public var title: String
     public var detail: String
     public var tabCount: Int
@@ -35,6 +40,8 @@ public struct AgentNotchRowSummary: Sendable, Equatable, Identifiable {
         sessionID: UUID,
         sessionName: String,
         tabID: UUID?,
+        paneID: PaneID? = nil,
+        surfaceID: SurfaceID? = nil,
         title: String,
         detail: String,
         tabCount: Int,
@@ -52,6 +59,8 @@ public struct AgentNotchRowSummary: Sendable, Equatable, Identifiable {
         self.sessionID = sessionID
         self.sessionName = sessionName
         self.tabID = tabID
+        self.paneID = paneID
+        self.surfaceID = surfaceID
         self.title = title
         self.detail = detail
         self.tabCount = tabCount
@@ -128,6 +137,8 @@ public enum AgentNotchProjection {
                 sessionID: context.session.id,
                 sessionName: context.session.name,
                 tabID: agent.tabID,
+                paneID: agent.paneID.flatMap(PaneID.init(uuidString:)),
+                surfaceID: SurfaceID(uuidString: agent.surfaceID),
                 title: displayTitle(for: context.tab),
                 detail: agentDetail(
                     workspace: context.workspace,
@@ -150,6 +161,10 @@ public enum AgentNotchProjection {
                 let hasAgentRows = session.tabs.contains { agentTabIDs.contains($0.id) }
                 if !hasAgentRows {
                     let activeTab = session.activeTab ?? session.tabs.first
+                    let activePaneID = activeTab?.activePaneID
+                    let activeSurfaceID = activePaneID.flatMap { paneID in
+                        activeTab?.rootPane.allLeaves().first { $0.id == paneID }?.activeSurfaceID
+                    }
                     rows.append(AgentNotchRowSummary(
                         id: "session:\(session.id.uuidString)",
                         rowKind: .session,
@@ -158,6 +173,8 @@ public enum AgentNotchProjection {
                         sessionID: session.id,
                         sessionName: session.name,
                         tabID: activeTab?.id,
+                        paneID: activePaneID,
+                        surfaceID: activeSurfaceID,
                         title: session.name.isEmpty ? displayTitle(for: activeTab) : session.name,
                         detail: sessionDetail(workspace: workspace, session: session, tab: activeTab),
                         tabCount: session.tabs.count,

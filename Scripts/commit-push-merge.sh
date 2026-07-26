@@ -21,7 +21,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Conventional commit format: <type>(<scope>): <summary>"
   echo "  types: feat, fix, refactor, chore, docs, test, perf, build, ci"
   echo ""
-  read -rp "Commit message: " msg
+  read -erp "Commit message: " msg
   if [[ -z "$msg" ]]; then
     echo "Empty commit message — aborting." >&2
     exit 1

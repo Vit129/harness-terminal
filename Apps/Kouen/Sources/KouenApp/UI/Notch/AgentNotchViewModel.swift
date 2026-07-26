@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import KouenCore
+import KouenTerminalKit
 import SwiftUI
 
 enum AgentNotchPresentation: Equatable {
@@ -233,12 +234,42 @@ final class AgentNotchViewModel: ObservableObject {
         isOpen ? close() : open()
     }
 
+    /// Resolve a waiting agent's approval prompt straight from the notch, without navigating
+    /// there first — same bytes `AgentApprovalBar` sends on the pane itself (`\n` to continue,
+    /// Ctrl-C to abort), just addressed at the row's surface directly via
+    /// `terminalHostIfExists(for:)` so it works for a row that isn't the focused pane.
+    /// Deliberately doesn't call `close()` — approving from the notch is meant to let the user
+    /// keep working somewhere else, not force-navigate them into the pane they just resolved.
+    func decideRow(_ row: AgentNotchRowSummary, approve: Bool) {
+        guard let surfaceID = row.surfaceID,
+              let host = SessionCoordinator.shared.terminalHostIfExists(for: surfaceID)
+        else { return }
+        host.sendInput(approve ? Data([0x0A]) : Data([0x03]))
+    }
+
+    /// Free-text quick-reply, for when the agent's prompt needs more than Allow/Deny — types
+    /// `text` into the row's own pane followed by Enter, same as the user typing it there
+    /// directly. Empty/whitespace-only text is a no-op (nothing worth sending).
+    func replyToRow(_ row: AgentNotchRowSummary, text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let surfaceID = row.surfaceID,
+              let host = SessionCoordinator.shared.terminalHostIfExists(for: surfaceID)
+        else { return }
+        host.sendInput(Data(text.utf8) + Data([0x0A]))
+    }
+
     func openRow(_ row: AgentNotchRowSummary) {
         let coordinator = SessionCoordinator.shared
         coordinator.selectWorkspace(row.workspaceID)
         coordinator.selectSession(workspaceID: row.workspaceID, sessionID: row.sessionID)
         if let tabID = row.tabID {
             coordinator.selectTab(workspaceID: row.workspaceID, tabID: tabID)
+            // Narrow further to the exact split pane the row represents, not just the tab —
+            // a tab can hold several panes, and without this the user still has to hunt for
+            // the one the agent/session actually lives in.
+            if let paneID = row.paneID, let surfaceID = row.surfaceID {
+                coordinator.selectPaneSurface(tabID: tabID, paneID: paneID, surfaceID: surfaceID)
+            }
         }
         AgentNotchWindowActivator.bringKouenToFront()
         close()

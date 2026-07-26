@@ -53,6 +53,13 @@ final class NotificationDropdownPanelView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+#if compiler(>=6.4)
+    @available(macOS 27.0, *)
+    override var cornerConfiguration: NSViewCornerConfiguration? {
+        .corners(radius: .containerConcentric)
+    }
+#endif
+
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {

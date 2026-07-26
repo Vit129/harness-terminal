@@ -6,6 +6,9 @@ import KouenCore
 /// top and bottom, that showed the column headers rendered shifted down from the top
 /// (and made `scrollToTop()`'s `scroll(to: .zero)` scroll to the bottom instead).
 private final class FlippedView: NSView {
+    // RL-040: `nonisolated` prevents the Swift 6.3 `@objc` thunk from performing an
+    // actor-isolation check that dereferences metadata — AppKit's layout/scroll machinery
+    // can call `isFlipped` on this view after it starts tearing down.
     nonisolated override var isFlipped: Bool { true }
 }
 
