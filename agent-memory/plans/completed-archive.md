@@ -126,7 +126,50 @@ Phases A-D (remote workflow parity, sidebar dev-server visibility, git workflow 
 - Native iPad app (Phase 0-6: shared renderer extraction, mobile IPC transport, UIKit terminal MVP, app shell, multiplexer parity, polish) — hard-blocked since 2026-07-04 on no paid Apple Developer Program account (required for TestFlight/App Store/APNs push)
 - Pivoted to Web/PWA MVP instead — continued as `p37-mobile-connect-v1.md` (W1 daemon bridge + multi-device pairing shipped + live-verified 2026-07-07; W2-W9 resize-sync/session-switcher frontend/file preview+attach/browser-open/command-palette/git-panel/LSP/notification-inbox folded into that doc's ongoing scope)
 - Closed 2026-07-23: checked whether a fresh Xcode "Apple Development" signing certificate changed the blocker — confirmed it's only the free Personal Team cert (auto-issued, no payment), not a paid Developer Program enrollment; TestFlight/App Store/APNs remain blocked. Cross-checked against this repo's own release scripts (`Scripts/finalize-release.sh`'s own comment: "this fork's releases are plain `git tag` + `gh release create`, no notarization" — ad-hoc signing only, no Developer ID in use here) and `codexbar`'s (its Developer ID cert belongs to that project's upstream author, not this user) — neither project is evidence of a paid account existing. Revisit only if a paid Apple Developer Program account is actually obtained.
-- Design mockup `agent-memory/plans/p25-mobile-session-switcher-design.html` stays in `plans/` (not archived) — still the live design reference for P37 Phase C, already shipped from it
+- Design mockup `p25-mobile-session-switcher-design.html` (was the live design reference for P37 Phase C — already shipped from it) and this doc's own source, `p25-ios-ipados-support.md`, deleted 2026-07-26 (user request); P37 Phase C UI is already shipped, so nothing upcoming still reads either file
+
+## P8 — macOS 27 Golden Gate Adoption (CLOSED 2026-07-26)
+- CLI-achievable scope closed: Phase 0 concurrency audit, Phase 1 compat/build/full-test-suite
+  (root-caused + worked around Xcode 27 beta's Sparkle rpath test-bundle-loading gap via
+  `Scripts/fix-xcode27beta-test-rpath.sh`), Phase 2 quick wins (`NSViewCornerConfiguration`
+  `.containerConcentric`, key-view-loop, modal-termination flags), Phase 3 evaluated (no code
+  change — both file-preview components already use system-native text selection), Phase 5
+  sidebar-width persistence gap closed, Phase 7 AppIntents/Shortcuts, Phase 8/9 notification
+  actions + power/activity assertions.
+- Real bug found and fixed mid-session: `FileTreeWatcher` FSEventStream teardown race — shared
+  concurrent dispatch queue + synchronous context release let an in-flight callback dereference
+  freed memory (SIGBUS, confirmed via a real crash report captured during this session). Fixed
+  with a dedicated serial queue per stream + deferred release for FIFO ordering. RL-075/CASE-067.
+- **Left genuinely open** (need a live display/hardware session, not achievable from CLI):
+  Phase 0's 2+ hour crash-free re-run (fix landed, unverified live) and heap-growth check;
+  Phase 1's corner-radius clipping, `NSStatusItem` expanded-interface check, Metal renderer
+  visual check; Phase 4/6/10/11/12 (all P2, non-blocking) — gesture-recognizer migration,
+  real-device scroll-perf benchmark, WidgetKit extension (needs new Xcode target/entitlements),
+  Metal frame-pacing tuning, VoiceOver accessibility tree. Full checklist detail: see git history
+  for `agent-memory/plans/p8-macos27-adoption.md` (removed from `plans/` after archiving here —
+  `git log --all --full-history -- agent-memory/plans/p8-macos27-adoption.md`).
+
+## P37 — Mobile Connect v1: QR + Tailscale pairing (CLOSED 2026-07-26)
+- Phone connects via Tailscale (same tailnet), scans a half-block ASCII QR from the daemon
+  (or native QR in Settings ▸ Remote, Phase B), lands on an embedded xterm.js web page
+  (no native iOS app — that direction was P25, abandoned for no paid Apple Developer account)
+  that attaches over WebSocket to a real Kouen session on the Mac.
+- All phases shipped and confirmed in source: Phase A (rate-limit lockout, per-device
+  re-auth secret, dedicated `mobile-bridge` DispatchQueue — `MobileBridgeServer.swift`),
+  Phase B (native QR + countdown in Settings, `mobilePairingInfo` IPC), Phase C (xterm.js
+  client, resize-sync, reconnect), Phase D (D1 file preview, D2 file/image attach, D3 browser
+  mirror driving the real `BrowserPaneView` via ref-based snapshot/interact — Kouen's most
+  differentiated mobile feature per the 2026-07-13 competitive survey, no surveyed competitor
+  had shipped the mobile half of it), Phase E (tab-strip + tablet-rail session switcher),
+  F2/F3/F4 (keyboard toolbar, live per-char input, Mosh-style reconnect resilience).
+- Real-phone E2E (camera scan → Safari → touch) — the one gap flagged repeatedly since
+  Phase C as "only scripted/loopback verified" — confirmed done by the user 2026-07-26,
+  actively using it day-to-day.
+- Dropped, not pursuing: **F1** (APNs push for "needs input" — blocked on the user's own
+  Apple Developer/APNs cert setup, revisit if that ever happens), **F5** (iOS share-sheet
+  upload entry — needs a native iOS share extension, user declined to reopen that direction),
+  **F6** (volume-button session cycling — low value for the effort). None were committed
+  plan items (Phase F was explicitly "candidates, not scoped, not scheduled").
 
 ## P7 — Sidebar UI Polish
 - Large-screen sidebar group header button visibility/alignment completed

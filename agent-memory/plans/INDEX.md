@@ -5,8 +5,6 @@
 | File | Title | Status |
 |------|-------|--------|
 | [p41-automations/dev-task-progress.md](p41-automations/dev-task-progress.md) | P41 — Automations (scheduled agent launches, `kouen-mcp`) | All tasks built, build/test/robot green, live-check pending |
-| [p37-mobile-connect-v1.md](p37-mobile-connect-v1.md) | P37 — Mobile Connect v1 (QR+Tailscale hardening, in-app QR, real client) | Active — F2/F3/F4 done (F4 reconnect resilience live-verified 2026-07-13), F5 deferred pending web feature completion, F6 parked, F1 blocked on user's own APNs cert setup |
-| [p8-macos27-adoption.md](p8-macos27-adoption.md) | P8 — macOS 27 Golden Gate Adoption | Active |
 
 ## Completed
 
@@ -16,6 +14,8 @@
 
 | Plan | Version | Notes |
 |------|---------|-------|
+| P37 — Mobile Connect v1 | Closed | All phases (A-E) shipped and confirmed in source; real-phone E2E confirmed by user 2026-07-26 (actively using it); F1/F5/F6 dropped (APNs-cert-blocked / native-iOS-declined / low-value) — see completed-archive.md |
+| P8 — macOS 27 Golden Gate Adoption | Closed | CLI-achievable scope done (Phase 0/1/2/3/5/7/8/9), found+fixed a real FSEventStream teardown SIGBUS along the way (RL-075); live-hardware-only items (2hr crash re-run, heap check, corner-radius/NSStatusItem/Metal visual check, P2 phases 4/6/10/11/12) left open, closed 2026-07-26 — see completed-archive.md |
 | P25 — iOS/iPadOS Support | Parked | Native app blocked on no paid Apple Developer Program account (confirmed still true 2026-07-23 — a free Xcode signing cert isn't one); Web/PWA MVP continues as P37 — see completed-archive.md |
 | P43 — Add Repo/Folder to Workspace | Reverted | Browse-only built + live-verified, "open session here" follow-up broke on first test, torn down 2026-07-17 — see completed-archive.md |
 | P42 — Workspace Sidebar Panels | Superseded | Built+shipped then reverted (too cramped in narrow sidebar), real ask continued as P43 (2026-07-17) — see completed-archive.md |
