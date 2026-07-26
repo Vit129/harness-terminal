@@ -147,7 +147,7 @@ fi
 if [[ -z "$build" ]]; then
   next_build=$((plist_build + 1))
   if [[ -t 0 ]]; then
-    read -rp "Build number for $version [$next_build]: " build_input
+    read -erp "Build number for $version [$next_build]: " build_input
     build="${build_input:-$next_build}"
   else
     build="$next_build"

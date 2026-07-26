@@ -18,7 +18,7 @@ echo ""
 echo "Conventional commit format: <type>(<scope>): <summary>"
 echo "  types: feat, fix, refactor, chore, docs, test, perf, build, ci"
 echo ""
-read -rp "Commit message: " msg
+read -erp "Commit message: " msg
 if [[ -z "$msg" ]]; then
   echo "Empty commit message — aborting." >&2
   exit 1
@@ -42,7 +42,7 @@ branch="$(git branch --show-current)"
 git push -u origin "$branch"
 
 if [[ "$branch" != "main" ]]; then
-  read -rp "Open a PR for '$branch' into main? (y/N): " open_pr
+  read -erp "Open a PR for '$branch' into main? (y/N): " open_pr
   if [[ "$open_pr" =~ ^[Yy]$ ]]; then
     gh pr create --fill --base main --head "$branch" || gh pr view --web
   fi

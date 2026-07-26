@@ -22,7 +22,7 @@ echo "  2) minor -> $major.$((minor + 1)).0"
 echo "  3) major -> $((major + 1)).0.0"
 echo "  4) skip — no version bump"
 echo ""
-read -rp "Enter choice (1-4): " choice
+read -erp "Enter choice (1-4): " choice
 
 if [[ ! "$choice" =~ ^[1-4]$ ]]; then
   echo "Invalid choice — enter a number from 1 to 4" >&2
