@@ -1,0 +1,535 @@
+<title>One scan, every session</title>
+
+<style>
+  :root {
+    --bg: #f5f2ee;
+    --surface: #ffffff;
+    --surface-2: #ece7e0;
+    --text: #1c1815;
+    --muted: #7a7168;
+    --border: #e0d9d0;
+    --accent: #b85c3e;
+    --accent-cyan: #2f8f8c;
+    --live: #4f8f52;
+    --code-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ui-font: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #100d0b;
+    --surface: #1a1613;
+    --surface-2: #221d19;
+    --text: #ede8e2;
+    --muted: #9b8f80;
+    --border: #322a23;
+    --accent: #d77757;
+    --accent-cyan: #5ec4c1;
+    --live: #7fb878;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100d0b;
+      --surface: #1a1613;
+      --surface-2: #221d19;
+      --text: #ede8e2;
+      --muted: #9b8f80;
+      --border: #322a23;
+      --accent: #d77757;
+      --accent-cyan: #5ec4c1;
+      --live: #7fb878;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui-font);
+    line-height: 1.5;
+  }
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 3rem;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .page { grid-template-columns: 1fr; }
+    .phone-col { order: -1; justify-self: center; }
+  }
+
+  h1 {
+    font-size: clamp(1.6rem, 2.6vw, 2.1rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 0.6rem;
+  }
+  .eyebrow {
+    font-family: var(--code-font);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.9rem;
+  }
+  .lede {
+    color: var(--muted);
+    font-size: 1rem;
+    max-width: 60ch;
+    margin: 0 0 2rem;
+  }
+
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0 0 2.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .flow-step {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .flow-step .n {
+    font-family: var(--code-font);
+    color: var(--muted);
+    font-size: 0.85rem;
+    padding-top: 0.1rem;
+  }
+  .flow-step h3 {
+    margin: 0 0 0.25rem;
+    font-size: 0.98rem;
+  }
+  .flow-step p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    max-width: 52ch;
+  }
+
+  .notes {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.4rem 1.5rem;
+  }
+  .notes h2 {
+    font-size: 0.95rem;
+    margin: 0 0 1rem;
+  }
+  .notes dl {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .notes dt {
+    font-weight: 600;
+    font-size: 0.88rem;
+    margin-bottom: 0.2rem;
+  }
+  .notes dd {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .notes code {
+    font-family: var(--code-font);
+    background: var(--surface-2);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.82em;
+  }
+  .tradeoff {
+    border-left: 2px solid var(--accent);
+    padding-left: 0.8rem;
+    margin-top: 0.4rem;
+  }
+
+  /* ---- phone mockup: fixed dark device, independent of page theme ---- */
+  .phone-col { position: sticky; top: 2rem; }
+  .phone {
+    width: 300px;
+    height: 630px;
+    background: #0a0807;
+    border-radius: 42px;
+    padding: 12px;
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  }
+  .screen {
+    width: 100%;
+    height: 100%;
+    background: #100d0b;
+    border-radius: 30px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--ui-font);
+    color: #ede8e2;
+  }
+  .statusbar {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.6rem 1.2rem 0.3rem;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: #ede8e2;
+    flex-shrink: 0;
+  }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.active { display: flex; }
+
+  /* home / scan view */
+  #view-home {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 2rem;
+    gap: 1.2rem;
+  }
+  .mark {
+    font-family: var(--code-font);
+    font-size: 1.6rem;
+    color: #d77757;
+  }
+  #view-home h4 { margin: 0; font-size: 1rem; font-weight: 600; }
+  #view-home p { margin: 0; color: #9b8f80; font-size: 0.82rem; max-width: 22ch; }
+  .btn {
+    appearance: none; border: none; cursor: pointer;
+    background: #d77757; color: #100d0b;
+    font-family: var(--ui-font); font-weight: 600; font-size: 0.85rem;
+    padding: 0.65rem 1.3rem; border-radius: 20px;
+    margin-top: 0.4rem;
+  }
+  .btn:focus-visible { outline: 2px solid #5ec4c1; outline-offset: 2px; }
+  .btn.ghost {
+    background: transparent; color: #ede8e2; border: 1px solid #322a23;
+  }
+
+  /* paired toast view */
+  #view-paired {
+    align-items: center; justify-content: center; text-align: center; gap: 0.7rem;
+  }
+  .check {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #7fb878; color: #0a0807;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; font-weight: 700;
+  }
+  #view-paired h4 { margin: 0; font-size: 0.95rem; }
+  #view-paired p { margin: 0; color: #9b8f80; font-size: 0.8rem; }
+
+  /* session list view */
+  .list-header {
+    padding: 0.2rem 1.1rem 0.8rem;
+    border-bottom: 1px solid #241f1b;
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.6rem;
+  }
+  .list-header .host {
+    font-family: var(--code-font); font-size: 0.68rem;
+    color: #9b8f80; letter-spacing: 0.03em;
+  }
+  .list-header h4 { margin: 0.15rem 0 0; font-size: 1.05rem; }
+  .list-header-text { min-width: 0; }
+  .sessions { flex: 1; overflow-y: auto; padding: 0.6rem 0.8rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .session-card {
+    display: flex; align-items: center; gap: 0.7rem;
+    background: #1a1613; border: 1px solid #241f1b; border-radius: 12px;
+    padding: 0.7rem 0.8rem;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    color: inherit;
+    font-family: inherit;
+  }
+  .session-card:focus-visible { outline: 2px solid #5ec4c1; outline-offset: 1px; }
+  .session-card .glyph { color: #d77757; font-size: 1rem; width: 1.1rem; flex-shrink: 0; }
+  .session-card .meta { min-width: 0; flex: 1; }
+  .session-card .title {
+    font-size: 0.87rem; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .session-card .cwd {
+    font-family: var(--code-font); font-size: 0.7rem; color: #9b8f80;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.15rem;
+  }
+  .pill {
+    flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #7fb878;
+  }
+
+  /* new-session (+) button */
+  .add-btn {
+    appearance: none; border: none; cursor: pointer; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #322a23; color: #ede8e2;
+    font-size: 1.1rem; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease;
+  }
+  .add-btn:hover { background: #423a32; }
+  .add-btn:focus-visible { outline: 2px solid #5ec4c1; outline-offset: 2px; }
+  .add-btn:active { transform: scale(0.94); }
+
+  /* terminal view */
+  .term-header {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.5rem 0.7rem; border-bottom: 1px solid #241f1b; flex-shrink: 0;
+  }
+  .iconbtn {
+    appearance: none; background: none; border: none; color: #ede8e2;
+    font-size: 1.1rem; padding: 0.2rem 0.4rem; cursor: pointer; line-height: 1;
+  }
+  .term-header .title { font-size: 0.85rem; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .term-body {
+    flex: 1; overflow-y: auto; padding: 0.7rem 0.8rem;
+    font-family: var(--code-font); font-size: 0.72rem; line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .term-body .dim { color: #6b6259; }
+  .term-body .path { color: #5ec4c1; }
+  .term-body .ok { color: #7fb878; }
+  .cursor { display: inline-block; width: 0.5em; height: 1em; background: #ede8e2; vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; opacity: 1; } }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* switcher sheet */
+  .sheet-backdrop {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.45);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  .sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #1a1613; border-radius: 18px 18px 0 0;
+    border-top: 1px solid #322a23;
+    transform: translateY(100%); transition: transform 0.25s ease;
+    max-height: 70%; display: flex; flex-direction: column;
+  }
+  .sheet.open { transform: translateY(0); }
+  .sheet-handle { width: 32px; height: 4px; background: #322a23; border-radius: 2px; margin: 0.6rem auto; flex-shrink: 0; }
+  .sheet .sessions { padding: 0.2rem 0.8rem 1rem; }
+  .sheet .list-header { padding: 0 0.4rem 0.6rem; border-bottom: none; }
+</style>
+
+<div class="page">
+  <div>
+    <p class="eyebrow">P25 — mobile session switcher</p>
+    <h1>Scan once. Every session is already there.</h1>
+    <p class="lede">
+      The earlier spike bound one QR to one terminal — scan again to switch sessions.
+      This design pairs the phone with the whole daemon in a single scan, so switching
+      sessions is a tap, not a re-scan.
+    </p>
+
+    <div class="flow">
+      <div class="flow-step">
+        <span class="n">01</span>
+        <div>
+          <h3>Scan once, from any screen on the Mac</h3>
+          <p>The QR still opens Safari with a token in the URL — same mechanism as before. What changes is what the token grants.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <span class="n">02</span>
+        <div>
+          <h3>The token pairs with the daemon, not one surface</h3>
+          <p>On connect, the phone gets the live session list over the same socket — titles, working directories, a status pill per session.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <span class="n">03</span>
+        <div>
+          <h3>Tap a session to open it — tap the switcher to leave</h3>
+          <p>Opening a session subscribes on the existing connection; going back unsubscribes. No new pairing, no new token, ever.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <span class="n">04</span>
+        <div>
+          <h3>Tap + to spawn a new session on the Mac, from the phone</h3>
+          <p>Sends a create-session request over the same connection (F6's "create a session on a remote host") — no new pairing, appears in the list like any other session.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h2>Design notes</h2>
+      <dl>
+        <dt>Try it →</dt>
+        <dd>Tap the phone: Scan → Paired → tap a session to open it → tap the ↕ icon in the terminal header to switch without leaving, or tap + in the list/sheet header to spawn a new one. Sample data reuses the three real sessions this spike attached to during testing.</dd>
+
+        <dt>What the wire protocol needs to add</dt>
+        <dd>
+          Right now <code>PairingBox</code> binds one token to one <code>surfaceID</code>, and <code>attachToPairedSurface</code> subscribes immediately on auth. This design needs the token to grant the daemon as a whole: on auth, push a <code>{"sessions":[...]}</code> frame (from the real <code>.listSurfaces</code> call, already have this), then accept a client-sent <code>{"attach":"&lt;surfaceID&gt;"}</code> message to subscribe, <code>{"detach"}</code> to drop the current subscription and return to the list, and <code>{"spawn":{"cwd":...}}</code> to create a new session (reuses the real <code>spawnSession</code> daemon call) — all multiplexed over the one already-open connection, no reconnect.
+        </dd>
+
+        <dt class="tradeoff">Tradeoff: broader grant per pairing</dt>
+        <dd>
+          The current design's whole point was closing "any paired client can land on any surface." This change reopens that on purpose — one scan, deliberately, grants the whole workspace, because that's the actual use case here (Vit's own phone, own Mac, over his own Tailscale). The real requirement it doesn't remove: per-device revocation (F3) still needs to exist before this is anything but a personal spike, since right now there's still no way to revoke a specific paired phone without restarting the whole bridge. Spawning a session from the phone widens this further — same trust boundary as attach, so it rides on whatever F3 solves, not a separate concern.
+        </dd>
+
+        <dt>Resize is still unsolved</dt>
+        <dd>Switching sessions mid-connection makes the "one hardcoded 80×30 terminal size" gap from the single-session spike more visible, not less — worth solving alongside this, not after.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="phone-col">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>Kouen Mobile</span></div>
+
+        <div class="view active" id="view-home">
+          <div class="mark">⌁ kouen</div>
+          <h4>Not paired</h4>
+          <p>Scan the QR shown on your Mac to pair with every open session at once.</p>
+          <button class="btn" onclick="goto('paired')">Simulate scan</button>
+        </div>
+
+        <div class="view" id="view-paired">
+          <div class="check">✓</div>
+          <h4>Paired with supavits-macbook-pro</h4>
+          <p>3 sessions available</p>
+        </div>
+
+        <div class="view" id="view-list">
+          <div class="list-header">
+            <div class="list-header-text">
+              <div class="host">supavits-macbook-pro · via tailscale</div>
+              <h4 id="list-count">3 sessions</h4>
+            </div>
+            <button class="add-btn" onclick="spawnSession('main')" aria-label="New session">+</button>
+          </div>
+          <div class="sessions" id="sessions-main"></div>
+        </div>
+
+        <div class="view" id="view-term">
+          <div class="term-header">
+            <button class="iconbtn" onclick="goto('list')" aria-label="Back to sessions">←</button>
+            <div class="title" id="term-title">—</div>
+            <button class="iconbtn" onclick="openSheet()" aria-label="Switch session">⇅</button>
+          </div>
+          <div class="term-body" id="term-body"></div>
+        </div>
+
+        <div class="sheet-backdrop" id="sheet-backdrop" onclick="closeSheet()">
+          <div class="sheet" id="sheet" onclick="event.stopPropagation()">
+            <div class="sheet-handle"></div>
+            <div class="list-header">
+              <div class="list-header-text">
+                <h4 id="sheet-count" style="font-size:0.9rem;">3 sessions</h4>
+              </div>
+              <button class="add-btn" onclick="spawnSession('sheet')" aria-label="New session">+</button>
+            </div>
+            <div class="sessions" id="sessions-sheet"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SESSIONS = [
+    { id: '52CAFED7', glyph: '⠂', title: 'terminal on mobile research', cwd: '~/Git/Personal/kouen-terminal',
+      lines: ['<span class="dim">$</span> kouen-cli daemon-stats', '<span class="ok">attached</span> · streaming live output…', 'มือถือ<span class="dim">→</span>WebSocket<span class="dim">→</span>daemon<span class="dim">→</span>กลับมาที่มือถือ'] },
+    { id: '9A2DB45C', glyph: '✳', title: 'graphify upstream comparison', cwd: '~/Git/Personal/graphify',
+      lines: ['<span class="path">graphify</span> on  main', '<span class="dim">$</span> git log --oneline -3', '4d91df5 chore(graphify): update code graph', '2202305 fix(notifications): respect sound toggle'] },
+    { id: 'EB8593FB', glyph: '✳', title: 'git versioning strategy', cwd: '~/Git/Personal',
+      lines: ['<span class="path">Personal</span> on  main', '<span class="dim">$</span> git status', 'On branch main, working tree clean'] },
+  ];
+
+  let newSessionCount = 0;
+
+  function cardHTML(s) {
+    return `<button class="session-card" onclick="openSession('${s.id}')">
+      <span class="glyph">${s.glyph}</span>
+      <span class="meta">
+        <div class="title">${s.title}</div>
+        <div class="cwd">${s.cwd}</div>
+      </span>
+      <span class="pill"></span>
+    </button>`;
+  }
+
+  function renderSessions() {
+    const html = SESSIONS.map(cardHTML).join('');
+    document.getElementById('sessions-main').innerHTML = html;
+    document.getElementById('sessions-sheet').innerHTML = html;
+    document.getElementById('list-count').textContent = SESSIONS.length + ' sessions';
+    document.getElementById('sheet-count').textContent = SESSIONS.length + ' sessions';
+  }
+  renderSessions();
+
+  function goto(name) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + name).classList.add('active');
+    if (name === 'paired') {
+      setTimeout(() => goto('list'), 900);
+    }
+  }
+
+  let typeTimer = null;
+
+  function openSession(id) {
+    closeSheet();
+    const s = SESSIONS.find(x => x.id === id);
+    document.getElementById('term-title').textContent = s.title;
+    const body = document.getElementById('term-body');
+    body.innerHTML = '';
+    goto('term');
+    clearTimeout(typeTimer);
+    let i = 0;
+    const typeNext = () => {
+      if (i < s.lines.length) {
+        const line = document.createElement('div');
+        line.innerHTML = s.lines[i];
+        body.appendChild(line);
+        body.scrollTop = body.scrollHeight;
+        i++;
+        typeTimer = setTimeout(typeNext, 380);
+      } else {
+        const cursorLine = document.createElement('div');
+        cursorLine.innerHTML = '<span class="cursor"></span>';
+        body.appendChild(cursorLine);
+      }
+    };
+    typeNext();
+  }
+
+  function spawnSession(origin) {
+    newSessionCount++;
+    const id = 'NEW' + newSessionCount;
+    const newSession = {
+      id,
+      glyph: '＋',
+      title: 'new session',
+      cwd: '~',
+      lines: ['<span class="dim">$</span> <span class="ok">spawned</span> on supavits-macbook-pro', '<span class="path">~</span>'],
+    };
+    SESSIONS.unshift(newSession);
+    renderSessions();
+    openSession(id);
+  }
+
+  function openSheet() {
+    document.getElementById('sheet-backdrop').classList.add('open');
+    document.getElementById('sheet').classList.add('open');
+  }
+  function closeSheet() {
+    document.getElementById('sheet-backdrop').classList.remove('open');
+    document.getElementById('sheet').classList.remove('open');
+  }
+</script>

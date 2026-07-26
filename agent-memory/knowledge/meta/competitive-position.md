@@ -1,9 +1,17 @@
-# Competitive Position (as of v4.3.1, 2026-07-11)
+# Competitive Position (as of v4.9.0, 2026-07-26)
 
 > Merged from the 2026-07-02 baseline (then named "Harness") + the P39 refresh
 > (2026-07-11, added Zed/Superset/tmux, re-verified every claim against current
-> source). See `agent-memory/plans/p39-competitive-feature-gaps.md` for the
-> per-gap evidence trail and phase-by-phase implementation notes.
+> source) + the 2026-07-26 monthly refresh (see new section near the bottom —
+> 3 parallel web-research passes covering Warp/Supacode/cmux, iTerm2/Ghostty/
+> WezTerm, Zed/Superset/tmux, last ~30 days only). See
+> `agent-memory/plans/p39-competitive-feature-gaps.md` for the per-gap evidence
+> trail and phase-by-phase implementation notes from the earlier pass.
+>
+> **Policy (2026-07-26, user decision — see "Not gaps" section below):** Kouen
+> only builds features with real usage justification, not competitor-checkbox
+> parity. New gaps found in this refresh are logged for user review, not
+> auto-scoped into a plan.
 
 ## Kouen Wins
 
@@ -31,20 +39,22 @@
 | In-app git hunk staging | Superset | `GitPanelView` hunk popover, `git apply --cached` |
 | Fleet dashboard (10+ agents at a glance) | Superset | Footer badge count + inbox header "N running · M need you" |
 
-### Still open (not re-verified since 2026-07-02, watch for staleness)
+### Still open (not actionable / not a feature decision)
 
 | Gap | Who has it |
 |-----|-----------|
-| Cross-platform GUI (Win/Linux) | Warp, WezTerm, Ghostty (Linux) — macOS-only is a strategic choice, not an oversight |
-| Team sharing / cloud sync | Warp Teams |
-| Extensions/plugins ecosystem | iTerm2 (python API), WezTerm (Lua) — includes tpm-style plugin manager (resurrect/continuum/thumbs) |
-| GPU shader customization | Ghostty |
-| Large community (1M+ users) | Warp, iTerm2, Ghostty |
+| Large community (1M+ users) | Warp, iTerm2, Ghostty — growth metric, not a feature to build |
 | ~~Block-based terminal (command grouping)~~ | **STALE — already shipped, P34, 2026-07-02.** Command-boundary capture (OSC 133 `C`/`D`, zsh/fish native preexec), Copy Output/Command Only, right-click block context menu, `kouenGetLastBlock`/`kouenGetBlock` MCP tools. Only block-bookmarking was deferred, by explicit user choice, not a gap. Feature Matrix row below corrected to ✓. |
 
 ## Not gaps — deliberate positioning differences (no action)
 
+- **Cross-platform GUI (Win/Linux)** — Warp/WezTerm/Ghostty have it. Rejected 2026-07-26: macOS-only is a strategic choice, not an oversight; not revisited.
+- **Team sharing / cloud sync** — Warp Teams has it. Rejected 2026-07-26 (usable-feature-only policy below) — no account/cloud dependency is a stated USP, not a gap to close.
+- **Extensions/plugins ecosystem** — iTerm2 (python API), WezTerm (Lua), tpm-style plugin manager (resurrect/continuum/thumbs). Rejected 2026-07-26 (usable-feature-only policy below).
+- **GPU shader customization** — Ghostty has it (user-authored GLSL). Already evaluated and scoped out in P40 (`design.md:188` — no user-authored shader code / no arbitrary MSL compilation at runtime, closes a real security surface) and reconfirmed rejected 2026-07-26.
 - **Zed's built-in chat/Agent Panel UI** — Kouen removed inline AI chat deliberately (`c4e1e15`, 2026-06-29). Re-adding contradicts the CLI-agents-in-terminal-panes + MCP philosophy.
+
+**Usable-feature-only policy (2026-07-26, user decision):** the remaining open competitive gaps as of 2026-07-26 (cross-platform GUI, team sharing/cloud sync, plugin ecosystem, GPU shader customization) are explicitly closed, not deferred — user's own words: "เน้น feature ที่ใช้งานเท่านั้น ไม่เอา gimmick" (focus only on features people actually use, no gimmicks). Don't re-surface these as gaps to fix in future competitive sweeps; a genuinely new, usage-driven feature request is a different thing from chasing a competitor's checkbox.
 - **Superset/cmux Electron vs native** — Kouen's native Swift engine is a stated USP.
 
 ## Known Limitations (honest assessment)
@@ -303,3 +313,71 @@ instead dedupes the repo roots of every currently-open tab — a deliberate scop
 not a copy, same pattern as Tasks/Automations above. Everything else from the original
 5-item competitive list is closed, deferred by choice, or was never a real gap to
 begin with.
+
+## 2026-07-26 monthly refresh (last ~30 days only, 3 parallel research agents)
+
+Scope: only changes dated roughly 2026-06-26 → 2026-07-26, across all 9 previously
+tracked competitors (Warp, Supacode, cmux, iTerm2, Ghostty, WezTerm, Zed, Superset,
+tmux). Older news already covered above was not re-collected.
+
+**Already-matched / no action** (competitor shipped something Kouen already has,
+confirms design direction rather than opening a gap):
+- Superset's new "workspace activity strip + dock badge for attention-needed
+  workspaces" (2026-07-06) converges on the same idea as Kouen's footer badge +
+  inbox "N running · M need you" — independent validation of that design, not a gap.
+- Zed's Git panel gaining staged/unstaged hunk grouping + Git Graph (2026-07-15/23)
+  is Zed catching up to Kouen's existing in-app hunk staging — narrows Zed's deficit,
+  doesn't open one for Kouen.
+- tmux 3.7's new **floating panes** (2026-06-26) — verified against Kouen's own
+  code: Kouen already shipped floating panes in P30 "Otty Feature Parity"
+  (`⌘⌥F`, `NSPanel`-based, v3.11.x, see `feature-provenance.md`) well before this
+  tmux release. Already-matched, not new.
+- Warp's git branch status chip (ahead/behind count) — cosmetic, already covered by
+  Kouen's PR-status + hunk-staging depth.
+
+**Platform/mobile-companion signal (cross-ref existing work, not a new track)**:
+cmux shipped an iOS companion reaching feature parity (files gallery, voice
+dictation, multi-Mac host switcher) and iTerm2's beta (3.7.0beta6/7) added
+"iTerm2 Buddy" (iPhone companion: live session video, e2e-encrypted push
+notifications). Both validate the *category* Kouen is already pursuing as
+**P37 — Mobile Connect v1** (QR+Tailscale, in-app QR, real client — F2/F3/F4 done
+per `INDEX.md`), not a brand-new gap. Worth a glance at P37's remaining scope
+(F5/F6) against these two feature sets before calling P37 "done," but this is
+in-flight work, not a new item.
+
+**Genuine new gaps found this pass (not yet in any plan, unscoped, flagged for
+user review — not auto-built per the no-gimmick policy above)**:
+
+| # | Gap | Source | Why it's not a gimmick (real workflow value) |
+|---|-----|--------|-----------------------------------------------|
+| M1 | **Warp Cloud Agent Runners** — hosted/cloud execution tier for agents, GA'd to all users 2026-07-23 | docs.warp.dev/changelog/2026 | Different architecture (cloud vs local-daemon) — same class as Claude Code Desktop's Remote mode already noted above as "worth tracking, not yet a gap to close" |
+| M2 | **Warp custom model routers** — per-request rules routing agent calls to different LLMs, UI editor added 2026-07-03 | same | Real cost/quality control lever for heavy agent users, not cosmetic |
+| M3 | **cmux Browser Design Mode** — visually edit/annotate pages inside the browser pane, 2026-07-19 | cmux.com/docs/changelog | Kouen's browser pane has an agent API but no human-facing visual edit mode — plausible real workflow gap for a human doing quick UI tweaks alongside an agent |
+| M4 | **cmux Fork Conversation** — branch a running agent session into a new split/tab/workspace, 2026-07-14/19 | same | Directly useful for "try two approaches from the same point" — a real multi-agent workflow pattern, not decoration |
+| M5 | **cmux saved workspace layouts** — named, reusable split-arrangement templates, 2026-07-14 | same | Distinct from Kouen's daemon *restore* (state snapshot) — this is a *reusable template* you apply to a fresh workspace; real repeat-workflow value |
+| M6 | **iTerm2 (beta) per-action AI safety-checking** — every agent command/keystroke individually judged against the original request, risky ones held for one-tap approval, 3.7.0beta7, 2026-07-15 | iterm2.com/appcasts/testing_changes3.txt | Safety/trust feature, not a gimmick — relevant given Kouen's agents already run arbitrary shell commands unsupervised |
+| M7 | **iTerm2 (beta) Claude Code "workgroup" review automation** — auto-request peer-session code review on idle, auto-paste results back, 3.7.0beta7, 2026-07-15 | same | Real automation of an already-common manual habit (ask a second agent to review) |
+| M8 | **Supacode PR worktree status inspector + PR policy waiver on maintainer approval**, v0.10.6, 2026-07-12 | github.com/supabitapp/supacode/releases | Smaller than M1-M7, but a real gap next to Kouen's existing merge-strategy picker (adds an approval-waiver step Kouen's picker doesn't have) |
+| M9 | **Superset rich terminal-input composer** (multi-line, @file mentions, slash commands) for CLI agents, 2026-07-12 | superset.sh/changelog/2026-07-12-... | Minor, nice-to-have prompt-composition UX, not core — lowest priority of this list |
+
+**Note on M-numbering**: these are refresh-pass findings, not yet triaged into gap
+vs. rejected — unlike the G-numbered items from the 2026-07-11 pass (all resolved
+into Closed/Rejected above), none of M1-M9 has a user decision yet. Don't silently
+promote these into a plan; surface the list and let the user pick what (if anything)
+is worth scoping.
+
+**Nothing new found**: Ghostty (still 1.3.1, Mar 2026 — commits since are Xcode 27
+SDK/packaging only, no user-facing feature), WezTerm (no tagged release since Feb
+2024; in-window commits are Wayland-blur/bugfixes only), Zed (no fleet-dashboard or
+browser-pane changes beyond the git-panel catch-up noted above).
+
+### Sources (2026-07-26 refresh)
+- Warp: https://docs.warp.dev/changelog/2026/
+- Supacode: https://github.com/supabitapp/supacode/releases
+- cmux: https://cmux.com/docs/changelog
+- iTerm2: https://iterm2.com/appcasts/full_changes.txt , https://iterm2.com/appcasts/testing_changes3.txt
+- Ghostty: https://ghostty.org/docs/install/release-notes , https://github.com/ghostty-org/ghostty/commits/main
+- WezTerm: https://wezterm.org/changelog.html , github.com/wezterm/wezterm issues #7615/#7444/#7154
+- Zed: https://zed.dev/releases/stable
+- Superset: https://superset.sh/changelog/2026-07-06-custom-agents-workspace-activity-fable , https://superset.sh/changelog/2026-07-12-rich-input-ghostty-mistral
+- tmux: https://raw.githubusercontent.com/tmux/tmux/master/CHANGES , https://github.com/tmux/tmux/releases

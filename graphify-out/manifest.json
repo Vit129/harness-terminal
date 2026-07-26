@@ -120,8 +120,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/FileExplorer/FileTreeWatcher.swift": {
-    "mtime": 1783306380.7331085,
-    "ast_hash": "51810b3567dd4461d5b7ba6e3444b6b0",
+    "mtime": 1785068655.2745392,
+    "ast_hash": "7a6bc32e071d1a80fae035144d7264a3",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/FileExplorer/GitStatusProvider.swift": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainSplitViewController.swift": {
-    "mtime": 1784379350.640393,
-    "ast_hash": "bf063edc26f34070ffc53bf66beefbb1",
+    "mtime": 1785058044.5509267,
+    "ast_hash": "dbcd5bb6059fb3e20d43d40c158105bc",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainWindowController.swift": {
@@ -1505,8 +1505,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenSettings/Sources/KouenSettings/KouenSettings.swift": {
-    "mtime": 1785024747.3355825,
-    "ast_hash": "9ee6d02f4039f54004deb92133eb7343",
+    "mtime": 1785057187.584546,
+    "ast_hash": "352945ed3c501eccf24df58a2b4401a2",
     "semantic_hash": ""
   },
   "Packages/KouenSettings/Sources/KouenSettings/NotchVisibilityMode.swift": {
@@ -2105,8 +2105,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/FileTreeWatcherTests.swift": {
-    "mtime": 1783306380.8777807,
-    "ast_hash": "9a952031c015d5f88c9352b1520d0023",
+    "mtime": 1785068710.0421853,
+    "ast_hash": "d486fbff24d8b8d489e5de35ba57d99c",
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/FrecencyDirectoryStoreTests.swift": {
@@ -2195,8 +2195,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/SidebarPlacementSyncTests.swift": {
-    "mtime": 1783926845.5277987,
-    "ast_hash": "9e4c6a77336ab4fcc3a520394137f3eb",
+    "mtime": 1785058343.3387165,
+    "ast_hash": "9910945b7b76f89118448842fbec3151",
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/SurfaceProgressTrackerTests.swift": {
@@ -2445,8 +2445,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenCoreTests/KouenSettingsTests.swift": {
-    "mtime": 1783306380.8908095,
-    "ast_hash": "249148156db7cc2ab295b3e0077b80ea",
+    "mtime": 1785057354.9742317,
+    "ast_hash": "cc3e7b36f8a5f071214813e5acca84e0",
     "semantic_hash": ""
   },
   "Tests/KouenCoreTests/LaunchAgentInstallerTests.swift": {
@@ -3324,11 +3324,6 @@
     "ast_hash": "0ce39ba23caca647964b4589a7b57cfa",
     "semantic_hash": ""
   },
-  "agent-memory/plans/p25-mobile-session-switcher-design.html": {
-    "mtime": 1783519825.9814835,
-    "ast_hash": "20ef72143502e39e4cf580bc87d46c40",
-    "semantic_hash": ""
-  },
   "cliff.toml": {
     "mtime": 1783306380.9411683,
     "ast_hash": "7ae8cef4ff233c45584f8b6c68cda8ea",
@@ -3595,8 +3590,8 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/cases/swift6-concurrency.md": {
-    "mtime": 1782179270.1225445,
-    "ast_hash": "8ccd228e828f4a106b7a609d4b307414",
+    "mtime": 1785068748.7061222,
+    "ast_hash": "2c49967f2434e46032496186a11d4b7a",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/cases/testing-infra.md": {
@@ -3610,8 +3605,8 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/meta/competitive-position.md": {
-    "mtime": 1784247032.9579594,
-    "ast_hash": "7ab9731a38f59509441dd9c41df61c6d",
+    "mtime": 1785069091.8725808,
+    "ast_hash": "2702aff5b5a26d8b2c20b69aac14d338",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/meta/project-history.md": {
@@ -3645,8 +3640,8 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/rl-lessons.md": {
-    "mtime": 1785050503.1019707,
-    "ast_hash": "d71b554e6a74707dadbc1d5375843861",
+    "mtime": 1785068759.1794288,
+    "ast_hash": "4045602aea472e7abcb96770c038027d",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/sidebar-swiftui-migration.md": {
@@ -3685,108 +3680,13 @@
     "semantic_hash": ""
   },
   "agent-memory/plans/INDEX.md": {
-    "mtime": 1784790440.1888719,
-    "ast_hash": "ed42e578ce176502ad259d0c3f6eb457",
+    "mtime": 1785069913.3512194,
+    "ast_hash": "24de75c495b6143b3b8257fe0a283e1e",
     "semantic_hash": ""
   },
   "agent-memory/plans/completed-archive.md": {
-    "mtime": 1784790425.2804608,
-    "ast_hash": "3e63a2f7b68a01726f5078a07ac3bda5",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p25-ios-ipados-support.md": {
-    "mtime": 1785050503.1026313,
-    "ast_hash": "ca39d52173c48c647ef70972a7bf7713",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p37-mobile-connect-v1.md": {
-    "mtime": 1783948486.847874,
-    "ast_hash": "19f0d118b55db567e278e31a2c2baad7",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p37-phase-d-file-browser/dev-task-progress.md": {
-    "mtime": 1784790726.4602592,
-    "ast_hash": "ae23414b5f2f6514c9d97c129cf5990d",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p37-phase-g-autocomplete/design.md": {
-    "mtime": 1784790726.485403,
-    "ast_hash": "d333f870cad56a62074e3f0889447cbd",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p37-phase-g-autocomplete/dev-task-progress.md": {
-    "mtime": 1784790726.5137048,
-    "ast_hash": "1bf11a1d66e2eb0bd0674e3db4903826",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-competitive-feature-gaps.md": {
-    "mtime": 1784790726.5336056,
-    "ast_hash": "196da5db23e0784021e2689d3e66dea3",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-a-diff-dashboard/design.md": {
-    "mtime": 1784790726.5534422,
-    "ast_hash": "56e35712019bbcda9c6180e99e3d3a80",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-a-diff-dashboard/dev-task-progress.md": {
-    "mtime": 1784790726.5736675,
-    "ast_hash": "85b5c2cd889ab1b0ee80fbd29c151624",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-b-subagent-visibility/design.md": {
-    "mtime": 1784790726.6114926,
-    "ast_hash": "91a6691d23a049ab749495d01d870d06",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-b-subagent-visibility/dev-task-progress.md": {
-    "mtime": 1784790726.6682005,
-    "ast_hash": "056ae6e29784b2258e02f7e751dc9a00",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-c-thread-overlay/design.md": {
-    "mtime": 1784790726.6899705,
-    "ast_hash": "31113a0b13528daed503d72c3fde123e",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-c-thread-overlay/dev-task-progress.md": {
-    "mtime": 1784790726.7210555,
-    "ast_hash": "b9ce84bcafd028aa9cfd019745a55a13",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-d-kitty-conformance/design.md": {
-    "mtime": 1784790726.7499988,
-    "ast_hash": "7cdebef919ca574cf9c207b4877deea9",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-d-kitty-conformance/dev-task-progress.md": {
-    "mtime": 1784790726.7822459,
-    "ast_hash": "50894216243d443a4a8adbaba059b847",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-e-scripting-hooks/design.md": {
-    "mtime": 1784790726.8203683,
-    "ast_hash": "797f4444201c2acf8552e58d3b2abb96",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p38-phase-e-scripting-hooks/dev-task-progress.md": {
-    "mtime": 1784790726.8652692,
-    "ast_hash": "9361a8efaba38c9970f4682784bebd14",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p39-competitive-feature-gaps.md": {
-    "mtime": 1784790726.9122927,
-    "ast_hash": "0cc24fe97f87faee8bbb630308b822f7",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p40-mcp-surface-and-shader-presets/design.md": {
-    "mtime": 1784790726.9611592,
-    "ast_hash": "43c65a01ea65773548eed7e40eebb35f",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p40-mcp-surface-and-shader-presets/dev-task-progress.md": {
-    "mtime": 1784790727.0075338,
-    "ast_hash": "adb1a87f22bc71149caeee057f65ddc8",
+    "mtime": 1785069902.232367,
+    "ast_hash": "19e0435a9145f74d171d3820b1d5dc89",
     "semantic_hash": ""
   },
   "agent-memory/plans/p41-automations/design.md": {
@@ -3797,11 +3697,6 @@
   "agent-memory/plans/p41-automations/dev-task-progress.md": {
     "mtime": 1783778399.0811758,
     "ast_hash": "3ee2ce333ef53a8fcc8377feb9a01f44",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p8-macos27-adoption.md": {
-    "mtime": 1785055578.15817,
-    "ast_hash": "cad15e19a547cc2856cd701dfd536374",
     "semantic_hash": ""
   },
   "docs/AGENT-HANDBOOK.md": {
@@ -4034,26 +3929,6 @@
     "ast_hash": "274fa61bc9e2f45cf8df8d84f6a805c7",
     "semantic_hash": ""
   },
-  "agent-memory/plans/p42-workspace-sidebar-panels/design.md": {
-    "mtime": 1784790727.0509222,
-    "ast_hash": "473f12df965a59e54d927f3e43fd5e15",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p42-workspace-sidebar-panels/dev-task-progress.md": {
-    "mtime": 1784790727.086357,
-    "ast_hash": "222205be6db2a5e10236f3b59985c5fe",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p43-add-repo-to-workspace/design.md": {
-    "mtime": 1784790727.1215394,
-    "ast_hash": "184d17191cf6605db0fcc76c476f71b7",
-    "semantic_hash": ""
-  },
-  "agent-memory/plans/p43-add-repo-to-workspace/dev-task-progress.md": {
-    "mtime": 1784790727.1526814,
-    "ast_hash": "6782b3fb4976fe19f8d9d974159930f3",
-    "semantic_hash": ""
-  },
   "Packages/KouenCore/Sources/KouenCore/Routing/SignalFileRouter.swift": {
     "mtime": 1784774899.840976,
     "ast_hash": "8d2f7f3947ada9f8b40be6d47c30f0c0",
@@ -4132,6 +4007,161 @@
   "Scripts/fix-xcode27beta-test-rpath.sh": {
     "mtime": 1785055551.7894301,
     "ast_hash": "8f12b350cacf4be0bbcbca3df60728e3",
+    "semantic_hash": ""
+  },
+  "Apps/Kouen/Sources/KouenApp/AppIntents/KouenAppIntents.swift": {
+    "mtime": 1785057598.3515608,
+    "ast_hash": "4426a6637743e4dbfc49d37f4b70a973",
+    "semantic_hash": ""
+  },
+  "Tests/KouenAppTests/KouenAppIntentsTests.swift": {
+    "mtime": 1785057637.9853632,
+    "ast_hash": "6117abd97b47a1a88b4403b0cecdaa0c",
+    "semantic_hash": ""
+  },
+  "plans/p25-mobile-session-switcher-design.html": {
+    "mtime": 1783519825.9814835,
+    "ast_hash": "20ef72143502e39e4cf580bc87d46c40",
+    "semantic_hash": ""
+  },
+  "plans/INDEX.md": {
+    "mtime": 1784790440.1888719,
+    "ast_hash": "ed42e578ce176502ad259d0c3f6eb457",
+    "semantic_hash": ""
+  },
+  "plans/completed-archive.md": {
+    "mtime": 1784790425.2804608,
+    "ast_hash": "3e63a2f7b68a01726f5078a07ac3bda5",
+    "semantic_hash": ""
+  },
+  "plans/p25-ios-ipados-support.md": {
+    "mtime": 1785050503.1026313,
+    "ast_hash": "ca39d52173c48c647ef70972a7bf7713",
+    "semantic_hash": ""
+  },
+  "plans/p37-mobile-connect-v1.md": {
+    "mtime": 1783948486.847874,
+    "ast_hash": "19f0d118b55db567e278e31a2c2baad7",
+    "semantic_hash": ""
+  },
+  "plans/p37-phase-d-file-browser/dev-task-progress.md": {
+    "mtime": 1784790726.4602592,
+    "ast_hash": "ae23414b5f2f6514c9d97c129cf5990d",
+    "semantic_hash": ""
+  },
+  "plans/p37-phase-g-autocomplete/design.md": {
+    "mtime": 1784790726.485403,
+    "ast_hash": "d333f870cad56a62074e3f0889447cbd",
+    "semantic_hash": ""
+  },
+  "plans/p37-phase-g-autocomplete/dev-task-progress.md": {
+    "mtime": 1784790726.5137048,
+    "ast_hash": "1bf11a1d66e2eb0bd0674e3db4903826",
+    "semantic_hash": ""
+  },
+  "plans/p38-competitive-feature-gaps.md": {
+    "mtime": 1784790726.5336056,
+    "ast_hash": "196da5db23e0784021e2689d3e66dea3",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-a-diff-dashboard/design.md": {
+    "mtime": 1784790726.5534422,
+    "ast_hash": "56e35712019bbcda9c6180e99e3d3a80",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-a-diff-dashboard/dev-task-progress.md": {
+    "mtime": 1784790726.5736675,
+    "ast_hash": "85b5c2cd889ab1b0ee80fbd29c151624",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-b-subagent-visibility/design.md": {
+    "mtime": 1784790726.6114926,
+    "ast_hash": "91a6691d23a049ab749495d01d870d06",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-b-subagent-visibility/dev-task-progress.md": {
+    "mtime": 1784790726.6682005,
+    "ast_hash": "056ae6e29784b2258e02f7e751dc9a00",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-c-thread-overlay/design.md": {
+    "mtime": 1784790726.6899705,
+    "ast_hash": "31113a0b13528daed503d72c3fde123e",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-c-thread-overlay/dev-task-progress.md": {
+    "mtime": 1784790726.7210555,
+    "ast_hash": "b9ce84bcafd028aa9cfd019745a55a13",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-d-kitty-conformance/design.md": {
+    "mtime": 1784790726.7499988,
+    "ast_hash": "7cdebef919ca574cf9c207b4877deea9",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-d-kitty-conformance/dev-task-progress.md": {
+    "mtime": 1784790726.7822459,
+    "ast_hash": "50894216243d443a4a8adbaba059b847",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-e-scripting-hooks/design.md": {
+    "mtime": 1784790726.8203683,
+    "ast_hash": "797f4444201c2acf8552e58d3b2abb96",
+    "semantic_hash": ""
+  },
+  "plans/p38-phase-e-scripting-hooks/dev-task-progress.md": {
+    "mtime": 1784790726.8652692,
+    "ast_hash": "9361a8efaba38c9970f4682784bebd14",
+    "semantic_hash": ""
+  },
+  "plans/p39-competitive-feature-gaps.md": {
+    "mtime": 1784790726.9122927,
+    "ast_hash": "0cc24fe97f87faee8bbb630308b822f7",
+    "semantic_hash": ""
+  },
+  "plans/p40-mcp-surface-and-shader-presets/design.md": {
+    "mtime": 1784790726.9611592,
+    "ast_hash": "43c65a01ea65773548eed7e40eebb35f",
+    "semantic_hash": ""
+  },
+  "plans/p40-mcp-surface-and-shader-presets/dev-task-progress.md": {
+    "mtime": 1784790727.0075338,
+    "ast_hash": "adb1a87f22bc71149caeee057f65ddc8",
+    "semantic_hash": ""
+  },
+  "plans/p41-automations/design.md": {
+    "mtime": 1783778386.0895622,
+    "ast_hash": "85b86d585e6dd51db137e5500f326fd5",
+    "semantic_hash": ""
+  },
+  "plans/p41-automations/dev-task-progress.md": {
+    "mtime": 1783778399.0811758,
+    "ast_hash": "3ee2ce333ef53a8fcc8377feb9a01f44",
+    "semantic_hash": ""
+  },
+  "plans/p42-workspace-sidebar-panels/design.md": {
+    "mtime": 1784790727.0509222,
+    "ast_hash": "473f12df965a59e54d927f3e43fd5e15",
+    "semantic_hash": ""
+  },
+  "plans/p42-workspace-sidebar-panels/dev-task-progress.md": {
+    "mtime": 1784790727.086357,
+    "ast_hash": "222205be6db2a5e10236f3b59985c5fe",
+    "semantic_hash": ""
+  },
+  "plans/p43-add-repo-to-workspace/design.md": {
+    "mtime": 1784790727.1215394,
+    "ast_hash": "184d17191cf6605db0fcc76c476f71b7",
+    "semantic_hash": ""
+  },
+  "plans/p43-add-repo-to-workspace/dev-task-progress.md": {
+    "mtime": 1784790727.1526814,
+    "ast_hash": "6782b3fb4976fe19f8d9d974159930f3",
+    "semantic_hash": ""
+  },
+  "plans/p8-macos27-adoption.md": {
+    "mtime": 1785069047.0743034,
+    "ast_hash": "507bdea6fa01509a42a4011fff415096",
     "semantic_hash": ""
   }
 }
