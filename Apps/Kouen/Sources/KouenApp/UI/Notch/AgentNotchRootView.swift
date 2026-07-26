@@ -175,7 +175,10 @@ struct AgentNotchRootView: View {
                                 waiting: row.waitingCount > 0,
                                 working: row.agentActivity == .working
                             )),
-                            reduceTransparency: reduceTransparency
+                            reduceTransparency: reduceTransparency,
+                            onApprove: row.surfaceID != nil ? { model.decideRow(row, approve: true) } : nil,
+                            onDeny: row.surfaceID != nil ? { model.decideRow(row, approve: false) } : nil,
+                            onReply: row.surfaceID != nil ? { text in model.replyToRow(row, text: text) } : nil
                         ) {
                             model.openRow(row)
                         }
@@ -349,11 +352,68 @@ private struct NotchOverviewRow: View {
     let now: Date
     let dot: AnyView
     let reduceTransparency: Bool
+    /// Non-nil only when the row is waiting AND has a resolvable surface — resolve the
+    /// prompt right here instead of the usual "needs input" badge.
+    let onApprove: (() -> Void)?
+    let onDeny: (() -> Void)?
+    let onReply: ((String) -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var isReplying = false
+    @State private var replyText = ""
+    @FocusState private var replyFieldFocused: Bool
+
+    private var showsApprovalControls: Bool {
+        row.waitingCount > 0 && onApprove != nil && onDeny != nil
+    }
 
     var body: some View {
+        if isReplying {
+            replyEditor
+        } else {
+            openableRow
+        }
+    }
+
+    /// Free-text quick-reply, swapped in for the whole row (not nested inside the row's
+    /// `Button`) — a `TextField` inside a `Button`'s label doesn't reliably take keyboard
+    /// focus/clicks in SwiftUI, since the outer button intercepts the interaction. Branching
+    /// at the top level instead of nesting sidesteps that entirely.
+    private var replyEditor: some View {
+        HStack(spacing: 6) {
+            TextField("Reply…", text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white)
+                .focused($replyFieldFocused)
+                .onSubmit(submitReply)
+            Button("Send", action: submitReply)
+                .buttonStyle(.plain)
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color(red: 0.30, green: 0.68, blue: 0.42), in: Capsule())
+            Button("Cancel") { isReplying = false; replyText = "" }
+                .buttonStyle(.plain)
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 8)
+        .background(Color.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .task { replyFieldFocused = true }
+    }
+
+    private func submitReply() {
+        let text = replyText
+        isReplying = false
+        replyText = ""
+        onReply?(text)
+    }
+
+    private var openableRow: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 dot
@@ -368,18 +428,22 @@ private struct NotchOverviewRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                if let relative = relativeTime {
-                    Text(relative)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.38))
-                }
-                if let badge {
-                    Text(badge.text)
-                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(badge.color)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(badge.color.opacity(0.16), in: Capsule())
+                if showsApprovalControls {
+                    approvalControls
+                } else {
+                    if let relative = relativeTime {
+                        Text(relative)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.38))
+                    }
+                    if let badge {
+                        Text(badge.text)
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(badge.color)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(badge.color.opacity(0.16), in: Capsule())
+                    }
                 }
             }
             .frame(height: 38)
@@ -390,6 +454,39 @@ private struct NotchOverviewRow: View {
         .buttonStyle(NotchRowButtonStyle())
         .onHover { hovering = $0 }
         .accessibilityLabel("\(title), \(subtitle)")
+    }
+
+    /// Deliberately plain `Button`s (not `NotchRowButtonStyle`) nested inside the row's own
+    /// button — SwiftUI resolves the innermost control on tap, so Allow/Deny consume the tap
+    /// before it reaches `action` (open row) underneath. No `.simultaneousGesture` trick
+    /// needed since these aren't overlapping the same hit area, just adjacent in the HStack.
+    private var approvalControls: some View {
+        HStack(spacing: 6) {
+            if onReply != nil {
+                Button("Reply", action: { isReplying = true })
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.10), in: Capsule())
+            }
+            Button("Deny", action: { onDeny?() })
+                .buttonStyle(.plain)
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.10), in: Capsule())
+            Button("Allow", action: { onApprove?() })
+                .buttonStyle(.plain)
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color(red: 0.30, green: 0.68, blue: 0.42), in: Capsule())
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private var title: String {

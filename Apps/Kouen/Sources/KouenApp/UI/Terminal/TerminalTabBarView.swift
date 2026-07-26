@@ -109,14 +109,8 @@ final class TerminalTabBarView: NSView {
     }
 
     func applyChrome() {
-        layer?.backgroundColor = Self.backgroundLayerColor()
+        KouenDesign.applyTabBarChrome(to: self)
         model.chromeEpoch += 1
-    }
-
-    /// Solid fill when opaque; nil (clear) when translucent so the window-wide blur
-    /// (MainWindowController.applyTransparency) shows through instead of being blocked.
-    fileprivate static func backgroundLayerColor() -> CGColor? {
-        KouenChrome.backgroundOpacity >= 0.999 ? KouenChrome.current.terminalBackground.cgColor : nil
     }
 
     func setLeadingInset(_ inset: CGFloat) {
@@ -125,7 +119,7 @@ final class TerminalTabBarView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = Self.backgroundLayerColor()
+        KouenDesign.applyTabBarChrome(to: self)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -233,7 +227,11 @@ private struct TerminalTabBarBody: View {
                 Spacer(minLength: max(0, edgeInset + model.trailingInset))
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
-            .background(KouenChrome.backgroundOpacity >= 0.999 ? Color(KouenChrome.current.terminalBackground) : Color.clear)
+            // Fill comes from the NSView-level ChromeBackdrop (KouenDesign.applyTabBarChrome,
+            // installed on the parent TerminalTabBarView) — same mechanism as the title strip
+            // and sidebar, so all chrome bars read as one consistent surface. This SwiftUI
+            // layer must stay clear or it'd paint its own fill on top and defeat that.
+            .background(Color.clear)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(Color(KouenDesign.chrome.border))

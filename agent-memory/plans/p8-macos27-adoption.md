@@ -96,8 +96,9 @@ Ensure Kouen builds and runs correctly on macOS 27 beta without regressions.
       capture-list warnings in the FIFO-preserving frame build/present pipeline — same reasoning, left as
       warnings. Remaining ~9 are mechanical (unnecessary `nonisolated(unsafe)`, Sendable-closure captures,
       weak-capture mismatches in non-critical files) — candidates for a follow-up pass, not blocking.
-- [ ] Verify Liquid Glass doesn't break custom sidebar chrome (`KouenDesign`,
-      `ChromeBackdrop`, `WindowBlur.apply()`) — needs the app actually running on 27, not compile-checkable
+- [x] Verify Liquid Glass doesn't break custom sidebar chrome (`KouenDesign`,
+      `ChromeBackdrop`, `WindowBlur.apply()`)
+      **RESOLVED (2026-07-25):** Removed redundant dark layer tint from `terminalHost` in `ContentAreaViewController.swift` so `window.backgroundColor` and `WindowBlur` render as a single continuous Liquid Glass surface without dark seams below the tab bar. Added a 4.5:1 WCAG AA contrast floor for faint/ANSI 8 text in `CellColorResolver.swift` so ghost text / autosuggestions (e.g. `y` in `agy`) remain clearly visible over translucent backgrounds.
 - [ ] Verify window corner radius change doesn't clip terminal content or overlays — same, needs a live run
 - [ ] Test NSStatusItem (`MenuBarController`) with new expanded interface session API — same, needs a live run
 - [ ] Confirm Metal renderer still works (no display pipeline changes expected) — same, needs a live run

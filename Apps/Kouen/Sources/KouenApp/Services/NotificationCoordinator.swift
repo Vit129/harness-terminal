@@ -92,10 +92,15 @@ final class NotificationCoordinator {
         let wantBanner = coord.settings.systemNotificationsEnabled
         let wantChime = coord.settings.notificationSoundEnabled
         guard wantBanner || wantChime else { return }
+        // Played manually, independent of banner delivery — DesktopNotifier.show is always
+        // called with withSound: false so the OS never also auto-sounds the banner (that'd
+        // double-ding). This is what makes distinct per-event sounds possible: the banner
+        // API only ever offers "default sound or none," never a per-event named sound.
+        if wantChime {
+            NSSound(named: event.soundName)?.play()
+        }
         if wantBanner {
-            DesktopNotifier.show(title: title, body: body, withSound: wantChime, surfaceID: surfaceID?.uuidString)
-        } else if wantChime {
-            NSSound(named: "Glass")?.play()
+            DesktopNotifier.show(title: title, body: body, withSound: false, surfaceID: surfaceID?.uuidString)
         }
     }
 

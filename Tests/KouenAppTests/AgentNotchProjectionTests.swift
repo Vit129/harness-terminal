@@ -212,6 +212,63 @@ final class AgentNotchProjectionTests: XCTestCase {
         XCTAssertFalse(rows[0].detail.contains("working"))
     }
 
+    /// Regression: `openRow` needs the exact split pane a row represents, not just its tab —
+    /// a tab with two panes must resolve to the pane the agent actually lives in, not
+    /// whichever leaf happens to come first in the tree.
+    func testAgentRowCarriesItsOwnPaneAndSurfaceNotTheFirstLeafInTheTab() {
+        let firstLeaf = PaneLeaf(id: UUID(), surfaceID: UUID())
+        let secondLeaf = PaneLeaf(id: UUID(), surfaceID: UUID())
+        let tab = Tab(
+            title: "Claude Code",
+            cwd: "/Users/robert/api",
+            rootPane: .branch(direction: .vertical, ratio: 0.5, first: .leaf(firstLeaf), second: .leaf(secondLeaf))
+        )
+        let session = SessionGroup(name: "backend", tabs: [tab], activeTabID: tab.id)
+        let workspace = Workspace(name: "Dev", sessions: [session])
+        let snapshot = SessionSnapshot(workspaces: [workspace])
+        let agent = AgentSessionSummary(
+            workspaceName: workspace.name,
+            sessionID: session.id,
+            sessionName: session.name,
+            tabID: tab.id,
+            tabTitle: tab.title,
+            surfaceID: secondLeaf.surfaceID.uuidString,
+            paneID: secondLeaf.id.uuidString,
+            kind: .claudeCode,
+            activity: .working,
+            waiting: false,
+            lastActivityAt: .now
+        )
+
+        let rows = AgentNotchProjection.rows(from: snapshot, agents: [agent])
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].paneID, secondLeaf.id)
+        XCTAssertEqual(rows[0].surfaceID, secondLeaf.surfaceID)
+        XCTAssertNotEqual(rows[0].paneID, firstLeaf.id)
+    }
+
+    /// Same guarantee for a generic (no-agent) session row: it should resolve to the tab's
+    /// `activePaneID`, not just the first leaf in the pane tree.
+    func testSessionRowUsesTabsActivePaneNotFirstLeaf() {
+        let firstLeaf = PaneLeaf(id: UUID(), surfaceID: UUID())
+        let secondLeaf = PaneLeaf(id: UUID(), surfaceID: UUID())
+        let tab = Tab(
+            title: "Shell",
+            cwd: "/Users/robert/web",
+            rootPane: .branch(direction: .vertical, ratio: 0.5, first: .leaf(firstLeaf), second: .leaf(secondLeaf)),
+            activePaneID: secondLeaf.id
+        )
+        let session = SessionGroup(name: "Default", tabs: [tab], activeTabID: tab.id)
+        let snapshot = SessionSnapshot(workspaces: [Workspace(name: "Dev", sessions: [session])])
+
+        let rows = AgentNotchProjection.rows(from: snapshot)
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].paneID, secondLeaf.id)
+        XCTAssertEqual(rows[0].surfaceID, secondLeaf.surfaceID)
+    }
+
     func testSessionRowDetailLeadsWithPathAndBranch() {
         let tab = Tab(
             title: "Shell",

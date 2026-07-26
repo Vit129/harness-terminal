@@ -157,4 +157,60 @@ final class CellColorResolverTests: XCTestCase {
         let r = resolver.resolve(cell)
         XCTAssertEqual(r.foreground, r.background) // conceal still wins (fg == bg)
     }
+
+    /// Regression: ANSI-art content (pixel-art banners, gradients) routinely uses the
+    /// `faint` SGR attribute on explicit truecolor values as a legitimate shading
+    /// technique — not as a "de-emphasize this UI text" signal. The ghost-text contrast
+    /// floor must only kick in for cells with NO explicit color (default fg + faint, or
+    /// the literal ANSI-8 grey convention some autosuggestion themes use), or it corrupts
+    /// deliberately dark/faint art pixels into washed-out high-contrast blocks.
+    func testGhostContrastFloorDoesNotCorruptExplicitlyColoredFaintCells() {
+        let resolver = CellColorResolver(palette: ANSIPalette(base16: theme.palette),
+                                         defaultForeground: theme.foreground, defaultBackground: theme.background,
+                                         minimumContrast: 3.5)
+        // A deliberately dark truecolor pixel (art shading), faint, on a near-black canvas —
+        // exactly the shape of an ANSI pixel-art gradient's shadow tone.
+        let artPixel = TerminalGridCell(codepoint: 0x20,
+                                        foreground: .rgb(r: 40, g: 30, b: 60),
+                                        background: .rgb(r: 5, g: 5, b: 5),
+                                        faint: true)
+        let expected = RGBColor(red: 40, green: 30, blue: 60).blended(
+            toward: RGBColor(red: 5, green: 5, blue: 5), fraction: resolver.faintFraction
+        )
+        XCTAssertEqual(resolver.resolve(artPixel).foreground, expected,
+                       "explicit truecolor + faint must NOT be force-lifted to 4.5:1 contrast")
+
+        // The actual ghost-text pattern this floor targets: no explicit color at all.
+        let ghostText = TerminalGridCell(codepoint: 0x20, foreground: .none, background: .rgb(r: 5, g: 5, b: 5), faint: true)
+        XCTAssertGreaterThanOrEqual(
+            CellColorResolver.contrastRatio(resolver.resolve(ghostText).foreground, resolver.resolve(ghostText).background),
+            4.5 - 0.05,
+            "default-colored faint text (real ghost/autosuggestion text) still gets the legibility floor"
+        )
+    }
+
+    /// Regression, captured verbatim from the "agy" (Antigravity CLI) pixel-art banner's raw
+    /// ANSI stream: `\x1b[38;2;242;146;46;48;2;246;145;46m▀` — a half-block glyph with fg/bg
+    /// set to deliberately near-identical warm tones for smooth shading. No `faint` attribute
+    /// anywhere in the tool's output — this goes through the plain (non-faint) minimumContrast
+    /// path and was getting corrected toward white/black at this user's minimumContrast: 3.5.
+    func testGraphicsGlyphsExemptFromContrastFloor() {
+        let resolver = CellColorResolver(palette: ANSIPalette(base16: theme.palette),
+                                         defaultForeground: theme.foreground, defaultBackground: theme.background,
+                                         minimumContrast: 3.5)
+        let upperHalfBlock: UInt32 = 0x2580
+        let pixel = TerminalGridCell(codepoint: upperHalfBlock,
+                                     foreground: .rgb(r: 242, g: 146, b: 46),
+                                     background: .rgb(r: 246, g: 145, b: 46))
+        XCTAssertEqual(resolver.resolve(pixel).foreground, RGBColor(red: 242, green: 146, blue: 46),
+                       "block-drawing glyph's intentionally near-identical fg/bg must not be pulled apart for contrast")
+
+        // A normal letter with the exact same low-contrast color pair still gets corrected —
+        // this only exempts graphics glyphs, not every low-contrast cell.
+        let letter = TerminalGridCell(codepoint: 0x41, // 'A'
+                                      foreground: .rgb(r: 242, g: 146, b: 46),
+                                      background: .rgb(r: 246, g: 145, b: 46))
+        XCTAssertNotEqual(resolver.resolve(letter).foreground, RGBColor(red: 242, green: 146, blue: 46),
+                          "ordinary text with the same low-contrast pair should still be lifted")
+    }
 }
