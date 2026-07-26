@@ -302,6 +302,23 @@ final class FileTreeWatcherTests: XCTestCase {
         XCTAssertEqual(results[2].node.gitStatus, .added)
     }
 
+    /// Regression test for a SIGBUS crash (Kouen-2026-07-25-215525.ips): rapid
+    /// startWatching()/stopWatching() cycles used to free the FSEventStream callback
+    /// context on a shared concurrent queue while a callback block for the old stream
+    /// could still be in flight on that same queue. Hammering the cycle is the closest
+    /// a unit test gets to that race without a debug-build sanitizer; it reliably
+    /// crashed the process under the old DispatchQueue.global() implementation.
+    func testRapidStartStopCyclesDoNotCrash() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let watcher = FileTreeWatcher()
+
+        for _ in 0..<200 {
+            await watcher.startWatching(rootPath: root.path) {}
+            await watcher.stopWatching()
+        }
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("file-tree-\(UUID().uuidString)", isDirectory: true)

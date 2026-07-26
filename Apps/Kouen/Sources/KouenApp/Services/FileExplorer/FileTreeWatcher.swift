@@ -80,6 +80,13 @@ public actor FileTreeWatcher {
     private final class FSEventStreamBox {
         private var streamRef: FSEventStreamRef?
         private var contextPointer: UnsafeMutableRawPointer?
+        // Dedicated SERIAL queue, not DispatchQueue.global(): the FSEvents callback runs
+        // on this queue, so releasing the context here too guarantees FIFO ordering —
+        // any callback block already enqueued before FSEventStreamStop() finishes running
+        // before our release block gets a turn. A shared concurrent queue gave no such
+        // ordering guarantee and let stop() free the context out from under an in-flight
+        // callback (SIGBUS, see Kouen-2026-07-25-215525.ips).
+        let queue = DispatchQueue(label: "com.vit129.kouen.filetreewatcher.fsevents")
 
         init(streamRef: FSEventStreamRef, contextPointer: UnsafeMutableRawPointer) {
             self.streamRef = streamRef
@@ -94,8 +101,12 @@ public actor FileTreeWatcher {
             self.streamRef = nil
 
             if let contextPointer = contextPointer {
-                Unmanaged<WatcherContext>.fromOpaque(contextPointer).release()
                 self.contextPointer = nil
+                let bitPattern = UInt(bitPattern: contextPointer)
+                queue.async {
+                    let pointer = UnsafeMutableRawPointer(bitPattern: bitPattern)!
+                    Unmanaged<WatcherContext>.fromOpaque(pointer).release()
+                }
             }
         }
 
@@ -150,11 +161,11 @@ public actor FileTreeWatcher {
             return
         }
 
-        let queue = DispatchQueue.global(qos: .utility)
-        FSEventStreamSetDispatchQueue(stream, queue)
+        let box = FSEventStreamBox(streamRef: stream, contextPointer: contextPointer)
+        FSEventStreamSetDispatchQueue(stream, box.queue)
         FSEventStreamStart(stream)
 
-        self.watchBox = FSEventStreamBox(streamRef: stream, contextPointer: contextPointer)
+        self.watchBox = box
     }
 
     /// Stop the active filesystem watcher.

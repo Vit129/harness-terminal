@@ -1,5 +1,27 @@
 # P8: macOS 27 Golden Gate Adoption
 
+## Status: CLOSED (2026-07-26)
+
+All work achievable from a CLI-only session (no live display/hardware) is done:
+Phase 0 concurrency audit, Phase 1 compatibility/build/test-suite, Phase 2/3/5/7/8/9
+resolved or evaluated-not-applicable. One real bug was found and fixed in the process
+(FSEventStream teardown race, SIGBUS — see Phase 0 below, RL-075, CASE-067).
+
+**Remaining unchecked items are not being silently marked done** — they genuinely
+require a live display/hardware session this environment can't provide, and stay
+open for whoever runs that session next:
+- Phase 0: 2+ hour crash-free run (fix landed, needs a fresh live run to re-verify),
+  heap growth check (`heap <PID> | grep NSTextField`)
+- Phase 1: corner-radius clipping, `NSStatusItem` expanded-interface behavior, Metal
+  renderer visual check — all need eyes on a running app
+- Phase 4, 6, 10, 11, 12 (P2): deliberately deferred, rationale recorded inline in
+  each phase — gesture-recognizer migration, real-device scroll perf, WidgetKit
+  extension (new Xcode target/entitlements), Metal frame-pacing tuning, VoiceOver
+  accessibility tree. None are ship-blocking (P2).
+
+Closing this plan means the P0/P1 CLI-achievable scope is done, not that every
+checkbox is ticked — see individual phases below for what's still open and why.
+
 ## Context
 WWDC26 announced macOS 27 Golden Gate (ships ~Sep 2026). Kouen Terminal
 currently targets macOS 26 Tahoe. This plan covers compatibility testing,
@@ -69,7 +91,16 @@ These MUST be maintained on any macOS 27 SDK upgrade.
       `ImmersiveOnboardingWindowController.swift` were genuinely unsafe (Timer/NotificationCenter/
       NSAnimationContext-completion/DispatchSource callbacks with no Task context) — converted to
       `Task { @MainActor in }`. Build + full test suite (swift test, Tests/robot/run.sh) verified after.
-- [ ] Run app for 2+ hours without crash
+- [ ] Run app for 2+ hours without crash — **NOT clean**: real SIGBUS found this session
+      (`~/Library/Logs/DiagnosticReports/Kouen-2026-07-25-215525.ips`, macOS 27.0 beta,
+      `com.vit129.kouen.preview`, crashed seconds after launch). Root cause: `FileTreeWatcher`
+      (`Apps/Kouen/Sources/KouenApp/Services/FileExplorer/FileTreeWatcher.swift`) ran
+      `FSEventStreamSetDispatchQueue` on a shared concurrent queue (`DispatchQueue.global`)
+      while `stopWatching()` synchronously freed the callback context — no ordering guarantee
+      against an in-flight callback block, classic use-after-free. Fixed: dedicated serial
+      queue per stream, context release deferred onto that same queue for FIFO ordering.
+      Regression test: `testRapidStartStopCyclesDoNotCrash` (Tests/KouenAppTests/FileTreeWatcherTests.swift).
+      Item stays unchecked — fix landed but no fresh 2+ hour live run has re-verified it yet.
 - [ ] Check `heap <PID> | grep NSTextField` — count should be stable (no growth)
 - [x] Confirm `updateTrackingAreas` all have `guard window != nil` — fixed 3 missing sites
       (`TabOverviewController.swift:170`, `ContentAreaViewController.swift:706,797`), rest already compliant
