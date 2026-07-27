@@ -3,13 +3,13 @@ _Auto-generated from GRAPH_REPORT.md · do not edit manually_
 _Regen: `graphify update .`_
 
 ## Summary
-- 15657 nodes · 35014 edges · 3434 communities (996 shown, 2438 thin omitted)
+- 15668 nodes · 35026 edges · 3407 communities (982 shown, 2425 thin omitted)
 - Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 3863 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 
 ## Graph Freshness
-- Built from commit: `7beb3157`
+- Built from commit: `7d76e183`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,14 +33,14 @@ utility/config file can rack up more edges than a real coupler while only
 ever touching one area. This ranks by how many DIFFERENT communities a
 node's neighbors span, not by raw edge count.
 1. `IPCRequest` - bridges 159 areas (177 edges)
-2. `Command` - bridges 100 areas (107 edges)
-3. `IPCResponse` - bridges 64 areas (85 edges)
+2. `Command` - bridges 101 areas (107 edges)
+3. `IPCResponse` - bridges 65 areas (85 edges)
 4. `SessionCoordinator` - bridges 58 areas (127 edges)
 5. `MenuTarget` - bridges 55 areas (62 edges)
-6. `SurfaceRegistry` - bridges 54 areas (183 edges)
-7. `KouenPaths` - bridges 51 areas (113 edges)
-8. `AgentKind` - bridges 50 areas (98 edges)
-9. `EngineConformanceTests` - bridges 50 areas (76 edges)
+6. `SurfaceRegistry` - bridges 52 areas (183 edges)
+7. `EngineConformanceTests` - bridges 50 areas (76 edges)
+8. `SpecialKey` - bridges 50 areas (56 edges)
+9. `KouenPaths` - bridges 48 areas (113 edges)
 
 ## Surprising Connections (you probably didn't know these)
 - `SUI` --calls--> `Color`  [INFERRED]

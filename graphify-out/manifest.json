@@ -360,8 +360,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainMenuBuilder.swift": {
-    "mtime": 1785050503.0824888,
-    "ast_hash": "2821d233509c633af64725c3a01b54ca",
+    "mtime": 1785144188.1185794,
+    "ast_hash": "de3047457850b198769c56510be57171",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainSplitViewController.swift": {
@@ -2195,7 +2195,7 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/SidebarPlacementSyncTests.swift": {
-    "mtime": 1785058343.3387165,
+    "mtime": 1785146905.8227525,
     "ast_hash": "9910945b7b76f89118448842fbec3151",
     "semantic_hash": ""
   },
@@ -3445,8 +3445,8 @@
     "semantic_hash": ""
   },
   "agent-memory/COMPLETED-TASKS-ARCHIVE.md": {
-    "mtime": 1785050499.7751925,
-    "ast_hash": "63bebddf31be4f65be7deac9e67e6b59",
+    "mtime": 1785070254.0219436,
+    "ast_hash": "3ca8c340b3f05da3b4c826342bb2978a",
     "semantic_hash": ""
   },
   "agent-memory/INDEX.md": {
@@ -3455,8 +3455,8 @@
     "semantic_hash": ""
   },
   "agent-memory/PLAYBOOK.md": {
-    "mtime": 1785050503.0997422,
-    "ast_hash": "9396de011e90168ff95b974c1e428ec0",
+    "mtime": 1785147164.3156102,
+    "ast_hash": "d2530832433f06f2131b326e16e3264b",
     "semantic_hash": ""
   },
   "agent-memory/SKILL-LOG.md": {
@@ -3640,8 +3640,8 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/rl-lessons.md": {
-    "mtime": 1785068759.1794288,
-    "ast_hash": "4045602aea472e7abcb96770c038027d",
+    "mtime": 1785147008.4191413,
+    "ast_hash": "e9ab5cd793de1c58cb85c28aa10b192a",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/sidebar-swiftui-migration.md": {
@@ -4162,6 +4162,16 @@
   "plans/p8-macos27-adoption.md": {
     "mtime": 1785069047.0743034,
     "ast_hash": "507bdea6fa01509a42a4011fff415096",
+    "semantic_hash": ""
+  },
+  "agent-memory/GATE-STATE.md": {
+    "mtime": 1785146383.952047,
+    "ast_hash": "575ea94470eb8696690ea555e969b163",
+    "semantic_hash": ""
+  },
+  "agent-memory/knowledge/bugs/cmd-backslash-sidebar-keywindow.md": {
+    "mtime": 1785147156.975259,
+    "ast_hash": "014fd3d3f23e3a8d06da15132a2c8fef",
     "semantic_hash": ""
   }
 }
