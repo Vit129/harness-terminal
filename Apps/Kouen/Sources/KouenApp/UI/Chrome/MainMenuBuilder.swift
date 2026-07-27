@@ -562,17 +562,23 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
     @objc func forkTab() { SessionCoordinator.shared.forkTab() }
 
     @objc func toggleSidebar() {
-        let win = NSApp.keyWindow ?? NSApp.mainWindow
-            ?? NSApp.windows.first(where: { $0.contentViewController is MainSplitViewController })
-        if let split = win?.contentViewController as? MainSplitViewController {
-            split.toggleSidebar()
+        // `keyWindow ?? mainWindow` short-circuits on any non-nil keyWindow — Agent Notch
+        // and Composer are both `canBecomeKey` floating panels, so this silently no-op'd
+        // whenever either had focus. Iterate all windows instead, same fix as jumpNotification().
+        for window in NSApp.windows {
+            if let split = window.contentViewController as? MainSplitViewController {
+                split.toggleSidebar()
+                return
+            }
         }
     }
 
     @objc func toggleSidebarPosition() {
-        let window = NSApp.keyWindow ?? NSApp.mainWindow
-        if let split = window?.contentViewController as? MainSplitViewController {
-            split.toggleSidebarPosition()
+        for window in NSApp.windows {
+            if let split = window.contentViewController as? MainSplitViewController {
+                split.toggleSidebarPosition()
+                return
+            }
         }
     }
 
