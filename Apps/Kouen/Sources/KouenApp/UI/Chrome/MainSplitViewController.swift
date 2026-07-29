@@ -1,9 +1,14 @@
 import AppKit
 import KouenCore
 import QuartzCore
+import os
 
 @MainActor
 final class MainSplitViewController: NSViewController {
+    /// ponytail: 4th distinct Cmd+\ regression in this file (keyWindow resolution,
+    /// zero-delta trap, placement desync x2, persisted-zero-width) — these lines exist
+    /// so the next one leaves real state in Console.app instead of another guessing pass.
+    private let sidebarLog = Logger(subsystem: "com.vit129.kouen", category: "sidebar")
     private let split = NSSplitView()
     private var sidebar: KouenSidebarPanelViewController!
     private var content: ContentAreaViewController!
@@ -350,6 +355,7 @@ final class MainSplitViewController: NSViewController {
         )
         let target = visible ? persistedWidth : 0
         splitDelegate.allowFullCollapse = true
+        sidebarLog.debug("applySidebarVisibility visible=\(visible) animated=\(animated) persistedWidth=\(persistedWidth) target=\(target) totalWidth=\(self.split.bounds.width) sidebarOnRight=\(SessionCoordinator.shared.settings.sidebarOnRight)")
         guard animated, let panel = sidebarContainerView else {
             let panel = sidebarContainerView
             panel?.isHidden = false              // unhide so setPosition can size it to 0
@@ -362,6 +368,7 @@ final class MainSplitViewController: NSViewController {
             splitDelegate.allowFullCollapse = false
             edgeDivider.isHidden = !visible
             updateContentLeadingInset()
+            sidebarLog.debug("applySidebarVisibility unanimated path done panelHidden=\(panel?.isHidden ?? true)")
             return
         }
 
@@ -378,12 +385,14 @@ final class MainSplitViewController: NSViewController {
         edgeDivider.isHidden = !visible
         let start = panel.frame.width
         guard abs(target - start) > 0.5 else {
+            sidebarLog.debug("applySidebarVisibility zero-delta guard fired start=\(start) target=\(target) — no animation, jumping directly")
             setSidebarWidth(target)
             if !visible { panel.isHidden = true }
             splitDelegate.allowFullCollapse = false
             updateContentLeadingInset()
             return
         }
+        sidebarLog.debug("applySidebarVisibility starting animation start=\(start) target=\(target)")
         // ponytail: presentsWithTransaction removed from animated path — was blocking main thread every frame.
         // If black flash reappears during slide, restore only on the final frame (raw >= 1).
         _sidebarStart = start
@@ -484,6 +493,7 @@ final class MainSplitViewController: NSViewController {
             applyInitialSidebarState()
         }
         let visible = SessionCoordinator.shared.settings.sidebarVisible
+        sidebarLog.debug("toggleSidebar() called, currentVisible=\(visible) window=\(String(describing: self.view.window)) keyWindow=\(NSApp.keyWindow === self.view.window)")
         setSidebarVisible(!visible, animated: true)
     }
 
@@ -546,6 +556,7 @@ final class MainSplitViewController: NSViewController {
     private func setSidebarWidth(_ width: CGFloat) {
         let totalWidth = split.bounds.width
         guard totalWidth > 0 else {
+            sidebarLog.debug("setSidebarWidth totalWidth=0, deferring to next runloop turn (width=\(width))")
             DispatchQueue.main.async { [weak self] in self?.setSidebarWidth(width) }
             return
         }
@@ -556,6 +567,7 @@ final class MainSplitViewController: NSViewController {
         } else {
             position = width
         }
+        sidebarLog.debug("setSidebarWidth width=\(width) totalWidth=\(totalWidth) sidebarOnRight=\(sidebarOnRight) -> setPosition=\(position)")
         split.setPosition(position, ofDividerAt: 0)
     }
 
@@ -579,10 +591,15 @@ final class MainSplitViewController: NSViewController {
         // reach 0 here, which then bricks every future toggle (see
         // cmd-backslash-sidebar-zero-width: target computes to 0 in both directions).
         let width = max(Float(SplitChromeDelegate.sidebarMinWidth), Float(panel.frame.width))
+        sidebarLog.debug("handlePotentialUserSidebarResize persisting width=\(width) (raw panel.frame.width=\(panel.frame.width))")
         sidebarWidthSaveWorkItem?.cancel()
-        let workItem = DispatchWorkItem {
+        let workItem = DispatchWorkItem { [sidebarLog] in
             SessionCoordinator.shared.settings.sidebarWidth = width
-            try? SessionCoordinator.shared.settings.save()
+            do {
+                try SessionCoordinator.shared.settings.save()
+            } catch {
+                sidebarLog.debug("handlePotentialUserSidebarResize save failed: \(String(describing: error))")
+            }
         }
         sidebarWidthSaveWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
