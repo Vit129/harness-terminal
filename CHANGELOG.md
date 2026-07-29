@@ -7,8 +7,8 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.9.2] - 2026-07-29
 
-### Added
-- Release version bump to v4.9.2.
+### Fixed
+- Clamp persisted sidebar width so Cmd+\ toggle can't get stuck at zero-delta (release v4.9.2) ([`ffe984d`](https://github.com/Vit129/kouen-terminal/commit/ffe984d53d59e372111f14825af499cd0f776b1e))
 
 ## [4.9.1] - 2026-07-27
 
