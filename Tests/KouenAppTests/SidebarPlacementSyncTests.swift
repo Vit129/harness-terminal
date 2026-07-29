@@ -117,4 +117,27 @@ final class SidebarPlacementSyncTests: XCTestCase {
                 vc.contentVC.view.frame.width, 1000 - KouenDesign.sidebarWidth, accuracy: 1)
         }
     }
+
+    /// Regression test for cmd-backslash-sidebar-zero-width: a persisted `sidebarWidth: 0`
+    /// (e.g. from a stuck `allowFullCollapse` letting a real user drag reach 0, see
+    /// `handlePotentialUserSidebarResize`) made `applySidebarVisibility` compute
+    /// `target == 0` for both show and hide — the toggle looked completely dead on every
+    /// press, keyboard and menu alike, on a real release build. `persistedWidth` must now
+    /// clamp to the same floor `SplitChromeDelegate` enforces on user drags, so expanding
+    /// a corrupted-zero-width sidebar still produces a real, visible width.
+    func testCorruptedZeroSidebarWidthStillExpandsToAVisibleWidth() {
+        withTemporaryKouenHome {
+            SessionCoordinator.shared.settings.sidebarOnRight = false
+            SessionCoordinator.shared.settings.sidebarVisible = false
+            SessionCoordinator.shared.settings.sidebarWidth = 0
+            let vc = makeSplitController()
+
+            vc.setSidebarVisible(true, animated: false)
+
+            // Bug reproduced would leave content pane at the full 1000pt (sidebar
+            // effectively still 0-width/invisible). Fixed behavior clamps to the same
+            // 200pt floor `SplitChromeDelegate` enforces on manual drags.
+            XCTAssertEqual(vc.contentVC.view.frame.width, 1000 - 200, accuracy: 1)
+        }
+    }
 }

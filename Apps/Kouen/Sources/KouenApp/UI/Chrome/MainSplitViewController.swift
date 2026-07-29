@@ -340,7 +340,14 @@ final class MainSplitViewController: NSViewController {
     /// sidebar to an unusable sliver — but a programmatic collapse must reach 0).
     private func applySidebarVisibility(_ visible: Bool, animated: Bool) {
         sidebarAnimToken &+= 1
-        let persistedWidth = SessionCoordinator.shared.settings.sidebarWidth.map(CGFloat.init) ?? KouenDesign.sidebarWidth
+        // Clamp to the same floor `SplitChromeDelegate` enforces on user drags — a
+        // persisted width below it (e.g. `sidebarWidth: 0` from a stuck-collapse write,
+        // see cmd-backslash-sidebar-zero-width) makes `target == 0` for both directions,
+        // so the zero-delta guard below always early-exits and the toggle looks dead.
+        let persistedWidth = max(
+            SplitChromeDelegate.sidebarMinWidth,
+            SessionCoordinator.shared.settings.sidebarWidth.map(CGFloat.init) ?? KouenDesign.sidebarWidth
+        )
         let target = visible ? persistedWidth : 0
         splitDelegate.allowFullCollapse = true
         guard animated, let panel = sidebarContainerView else {
@@ -567,7 +574,11 @@ final class MainSplitViewController: NSViewController {
         guard NSEvent.pressedMouseButtons & 1 != 0,
               let panel = sidebarContainerView, !panel.isHidden
         else { return }
-        let width = Float(panel.frame.width)
+        // Never persist below the delegate's own floor — if `allowFullCollapse` is ever
+        // left stuck true (e.g. an interrupted collapse/expand animation) a real drag can
+        // reach 0 here, which then bricks every future toggle (see
+        // cmd-backslash-sidebar-zero-width: target computes to 0 in both directions).
+        let width = max(Float(SplitChromeDelegate.sidebarMinWidth), Float(panel.frame.width))
         sidebarWidthSaveWorkItem?.cancel()
         let workItem = DispatchWorkItem {
             SessionCoordinator.shared.settings.sidebarWidth = width
@@ -587,9 +598,14 @@ final class MainSplitViewController: NSViewController {
 
 @MainActor
 private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
+    /// The floor a *user drag* can't shrink the sidebar below, on either side. Also the
+    /// floor `MainSplitViewController` clamps a persisted `sidebarWidth` to before
+    /// treating it as a toggle target — a width below this reaching disk is exactly how
+    /// `cmd-backslash-sidebar-zero-width` bricked every future toggle.
+    static let sidebarMinWidth: CGFloat = 200
     /// While a programmatic collapse/expand is running, let the divider reach 0 so the
     /// sidebar can fully disappear. At rest it's false, so a *user drag* still floors
-    /// at 200pt and can't shrink the sidebar to an unusable sliver.
+    /// at `sidebarMinWidth` and can't shrink the sidebar to an unusable sliver.
     var allowFullCollapse = false
     /// Fired on every resize (drag or programmatic) — the owner filters for genuine
     /// user drags via `NSEvent.pressedMouseButtons`.
@@ -607,7 +623,7 @@ private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
             return totalWidth - 320
         } else {
             guard index == 0 else { return proposedMinimum }
-            return allowFullCollapse ? 0 : 200
+            return allowFullCollapse ? 0 : Self.sidebarMinWidth
         }
     }
 
@@ -616,7 +632,7 @@ private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
         if right {
             guard index == 0 else { return proposedMaximum }
             let totalWidth = splitView.bounds.width
-            return allowFullCollapse ? totalWidth : (totalWidth - 200)
+            return allowFullCollapse ? totalWidth : (totalWidth - Self.sidebarMinWidth)
         } else {
             return index == 0 ? 320 : proposedMaximum
         }

@@ -22,6 +22,7 @@ grep -rn "<keyword>" agent-memory/knowledge/cases/ agent-memory/knowledge/rl-les
 | `knowledge/bugs/browser-pane-local-daemon-merge.md` | Browser pane vs daemon pane-tree sync — 2nd recurrence (2026-06-15, 2026-07-23), same broken merge condition each time |
 | `knowledge/bugs/p8-liquid-glass-chrome-regressions.md` | P8 macOS27 Liquid Glass: transparency hardcoded off, chrome double-tint, un-unified tab-bar chrome, ANSI-art contrast-floor corruption (CASE-066) |
 | `knowledge/bugs/cmd-backslash-sidebar-keywindow.md` | Cmd+\ sidebar toggle unreliable — `keyWindow ?? mainWindow` chain short-circuits on floating Notch/Composer panel (RL-076, extends RL-039) |
+| `knowledge/bugs/cmd-backslash-sidebar-zero-width.md` | Cmd+\ sidebar toggle produces zero visible change — persisted `sidebarWidth: 0` makes the zero-delta guard always early-exit (RL-077) |
 | `knowledge/rl-lessons.md` | All RL-xxx prevention lessons |
 
 ## Open Cases
