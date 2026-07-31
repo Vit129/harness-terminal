@@ -7,8 +7,8 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.9.3] - 2026-07-31
 
-### Added
-- Release version bump to v4.9.3.
+### Fixed
+- Reload board columns on metadata-only snapshot pushes (release v4.9.3) ([`42ee2f8`](https://github.com/Vit129/kouen-terminal/commit/42ee2f8c0d066fecc6ef63bde4a25b4786bb657c))
 
 ## [4.9.2] - 2026-07-29
 
