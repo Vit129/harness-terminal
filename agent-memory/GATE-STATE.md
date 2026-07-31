@@ -81,3 +81,54 @@ user answers.
   3. Regression test in `Tests/KouenAppTests/SidebarPlacementSyncTests.swift` asserting a
      persisted `sidebarWidth: 0` still produces a real (non-zero-delta) toggle.
 - Next step: present fix + rationale to user, get approval before editing.
+
+---
+
+## Gate: cmd-backslash-sidebar-launch-race-6th
+
+- Status: OPEN
+- Skill: debug-mantra-workflow
+- Gate: hypothesis pick (mantra step 3, before instrumented rebuild)
+- Bug: 6th recurrence of Cmd+\ sidebar toggle bug, one day after the
+  `cmd-backslash-sidebar-zero-width` fix (ffe984d5) was confirmed working. Same
+  installed build still running (`/Applications/Kouen.app`, built 2026-07-29 14:14,
+  contains the clamp fix but NOT the later os.Logger instrumentation commit
+  `3afb2297` at 17:11 same day — confirmed via `log show`, zero entries for
+  subsystem `com.vit129.kouen` category `sidebar`).
+- Repro confirmed by user: fresh launch, first Cmd+\ press, deterministic. Symptom:
+  sidebar area blank/black (terminal content pane stays intact) — matches the
+  visual signature of Bug #2/#3 in `agent-memory/knowledge/bugs/sidebar-cmdbackslash-toggle.md`
+  (squeeze/placement desync), NOT the zero-width case just fixed.
+- Current settings.json: `sidebarWidth:319`, `sidebarVisible:false`, `sidebarOnRight:true`
+  — not the zero-width state, rules out a recurrence of the just-fixed bug.
+- Leading hypothesis (H1, STRONG — code evidence, not yet falsified with real log data):
+  `toggleSidebar()` (`MainSplitViewController.swift:490-498`) has its own inline
+  fallback: `if !didApplyInitialSidebarState { didApplyInitialSidebarState = true;
+  applyInitialSidebarState() }`. This bypasses the guard added for Bug #3
+  (`viewDidLayout()`'s `guard view.window?.isVisible == true` at line 190) — that guard
+  only protects the `viewDidLayout()` call site, not this one. If the user presses
+  Cmd+\ immediately after launch (their actual habit per this report), before AppKit's
+  first `viewDidLayout()` pass with a visible window has run, `toggleSidebar()` calls
+  `applyInitialSidebarState()` itself against the transient 480×400 `minSize` window —
+  reproducing the exact race Bug #3 already diagnosed (divider math correct per-frame,
+  final width still wrong because it races the window's async resize-to-real-size),
+  just via a second, unguarded call site the original fix missed.
+- Weaker hypotheses: H2 sidebarOnRight physical/flag desync (Bug #2 pattern) — unlikely,
+  no Settings change this session, `sidebarOnRight` consistent in settings.json. H3 pure
+  `setSidebarWidth` totalWidth=0 defer race — `setSidebarWidth` re-reads `split.bounds.width`
+  live each call (not captured stale), so this alone should self-heal within a runloop
+  turn; less likely to explain a fully blank/black sidebar than H1.
+- Not yet falsified — no real Console log data exists for this incident since the running
+  binary predates the instrumentation commit. Per mantra step 2 (escalate to in-code
+  instrumentation only after debugger/source-trace), instrumentation already exists in
+  source but isn't in the running build — next step is a real data point, not another
+  code-only guess (5 prior root causes on this exact shortcut already).
+- Falsify test proposed: `make install` (rebuilds with `3afb2297`'s os.Logger calls),
+  relaunch, press Cmd+\ immediately on launch (matching the reported habit), then
+  `log show --predicate 'subsystem == "com.vit129.kouen" AND category == "sidebar"' --last 5m`.
+  H1 predicts: `toggleSidebar()`'s log line fires with `didApplyInitialSidebarState` having
+  just flipped true inside the same call (visible in log ordering — `applySidebarVisibility`
+  logged twice back-to-back: once from `applyInitialSidebarState()`, once from the toggle's
+  own `setSidebarVisible`), and `totalWidth` in the `applySidebarVisibility`/`setSidebarWidth`
+  lines reads small (~480 region) rather than the real window width.
+- Next step: waiting on user to confirm rebuild + retest to capture real log evidence.

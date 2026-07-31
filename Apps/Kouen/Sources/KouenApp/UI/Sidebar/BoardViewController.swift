@@ -89,7 +89,10 @@ final class BoardViewController: NSViewController {
 
     @objc private func snapshotChanged(_ note: Notification) {
         guard note.userInfo?["payload"] is SnapshotChangedPayload else { return }
-        guard !note.snapshotPayload.metadataOnly else { return }
+        // Metadata-only pushes carry cwd/currentCommand updates (refreshCwdOnly /
+        // refreshSurfaceMetadata poll) — must still reload, or card.cwd never picks up
+        // a `z <dir>` cd once the shell regains foreground. `reload()` itself no-ops
+        // when the classified columns are unchanged, so this stays cheap.
         reload()
     }
 
