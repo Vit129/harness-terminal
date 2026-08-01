@@ -36,6 +36,8 @@
 | rl-lessons.md | AppKit/Swift6 | RL, zombie, NSSplitView, NSPanel, NSAlert, WKWebView, Task.detached, Observable, nonisolated, assumeIsolated | 0/0 | All RL-xxx lesson entries — grep target for bug pattern lookup |
 | bugs/notification-sound-and-click-routing.md | AppKit/UN | UNUserNotificationCenter, NotificationPresenter, willPresent, didReceive, sound, userInfo, surfaceID, notch, CASE-063 | 0/0 | Compound report split into 2: (a) foreground `willPresent` ignored the sound toggle — now gates `.sound` on `content.sound != nil`; (b) banner click never navigated like the notch/inbox does — no `didReceive` and no identity on the request at all. Added `surfaceID` through `content.userInfo`, `NotificationCoordinator.openSurface(_:)`, and the `didReceive` delegate method. |
 | architecture/decisions.md | Architecture | ACP, harness-mcp, keybindings, sidebar, worktree, browser, tab, config, IPC | 0/0 | Stable architecture decisions moved from MEMORY.md |
+| project_no-gimmick-feature-policy.md | Meta/Product | gimmick, competitive-position, GUI, cloud sync, plugins, GPU shader | 0/0 | User rejected remaining competitive gaps (cross-platform GUI, team sharing/cloud sync, plugin ecosystem, GPU shader customization) as gimmicks — Kouen only builds features that see real usage |
+| feedback_interview-gate-call-first.md | Process/Workflow | interview-gate.py, PreToolUse, Skill(interview) | 0/0 | Always call Skill(interview) as the very first tool call of any task that may need Edit/Write — avoids the interview-gate.py deny-then-retry cycle |
 
 ## Source Map
 
