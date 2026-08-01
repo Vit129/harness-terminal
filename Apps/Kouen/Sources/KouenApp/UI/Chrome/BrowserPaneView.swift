@@ -31,7 +31,7 @@ public final class BrowserPaneView: NSView {
     private let backButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     private let forwardButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     internal let reloadStopButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
-    internal let urlTextField = NSTextField()
+    internal let urlTextField = SelectAllOnClickTextField()
     internal let closePaneButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     internal let viewSourceButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     internal let darkModeButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
@@ -1039,6 +1039,18 @@ public final class BrowserPaneView: NSView {
             return false
         }
         return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// Selects the full text on every click, not just the first focus transition —
+/// `NSTextFieldDelegate.controlTextDidBeginEditing` only fires once per focus session,
+/// so a second click while already focused wouldn't reselect without this override.
+final class SelectAllOnClickTextField: NSTextField {
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        DispatchQueue.main.async { [weak self] in
+            self?.currentEditor()?.selectAll(nil)
+        }
     }
 }
 
