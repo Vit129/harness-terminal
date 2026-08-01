@@ -17,6 +17,7 @@ Kouen.dmg
 Kouen-notarize.zip
 *.notarize.zip
 .kouen-preview/
+.harness-preview/
 .dmg-staging/
 .icon-staging*/
 .env

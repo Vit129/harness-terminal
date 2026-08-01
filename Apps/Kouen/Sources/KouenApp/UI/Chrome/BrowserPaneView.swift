@@ -215,9 +215,9 @@ public final class BrowserPaneView: NSView {
         viewSourceButton.toolTip = "View Source"
         viewSourceButton.isHidden = true
 
-        configureNavigationButton(darkModeButton, symbolName: "moon.fill", action: #selector(toggleWebDarkMode))
-        darkModeButton.setAccessibilityIdentifier("browser-dark-mode-button")
-        darkModeButton.toolTip = "Toggle Force Dark Mode for Web Page"
+        configureNavigationButton(darkModeButton, symbolName: "doc.on.doc", action: #selector(copyURLClicked))
+        darkModeButton.setAccessibilityIdentifier("browser-copy-url-button")
+        darkModeButton.toolTip = "Copy URL"
 
         // URL Text Field container & configuration
         let urlContainer = NSView()
@@ -789,6 +789,13 @@ public final class BrowserPaneView: NSView {
     @objc private func viewSourceClicked() {
         guard let url = webView.url, url.isFileURL else { return }
         onViewSourceRequested?(url)
+    }
+
+    @objc private func copyURLClicked() {
+        guard let url = webView.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        Toast.show("URL copied", in: self)
     }
 
     /// Local .html/.htm files can round-trip to the file editor via `onViewSourceRequested`;

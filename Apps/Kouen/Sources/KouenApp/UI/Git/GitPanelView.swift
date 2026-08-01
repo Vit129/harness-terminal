@@ -1575,6 +1575,11 @@ final class GitPanelView: NSView {
         }
 
         // Changes
+        // CATransaction with actions disabled: without it, removeFromSuperview + addArrangedSubview
+        // implicitly animate, and a leftover badge layer can paint over the new row's label for one
+        // frame — clips the filename's first character (e.g. "README.md" renders as "EADME.md").
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         changesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if porcelain.isEmpty {
             changesStack.addArrangedSubview(makeLabel("Working tree clean"))
@@ -1587,6 +1592,8 @@ final class GitPanelView: NSView {
                 row.trailingAnchor.constraint(equalTo: changesStack.trailingAnchor).isActive = true
             }
         }
+        changesStack.layoutSubtreeIfNeeded()
+        CATransaction.commit()
 
         // History
         historyStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
