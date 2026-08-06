@@ -36,6 +36,10 @@ struct ToolPolicy: Sendable {
         "kouenAutomationPause",
         "kouenAutomationResume",
         "kouenAutomationRunNow",
+        "kouenRoutingRuleCreate",
+        "kouenRoutingRuleUpdate",
+        "kouenRoutingRuleDelete",
+        "kouenRoutingRuleReorder",
     ]
 
     private let allowControl: Bool
