@@ -335,10 +335,33 @@ struct KouenDaemonTools: Sendable {
             resolvedWorkspaceId = first.id
         }
 
+        // "auto" resolves via Agent Routing Rules (M2) before the CLI-command switch below —
+        // every other value's behavior is unchanged.
+        let resolvedAgent: String
+        if agent.lowercased() == "auto" {
+            var ruleModels: [AgentRoutingRule] = []
+            if let response = await send(.routingRuleList), case let .routingRules(list) = response {
+                ruleModels = list.compactMap { summary in
+                    guard let kind = AgentRoutingRule.Kind(rawValue: summary.kind),
+                          let target = AgentKind(rawValue: summary.targetAgent)
+                    else { return nil }
+                    return AgentRoutingRule(
+                        id: summary.id, order: summary.order, kind: kind, pattern: summary.pattern,
+                        targetAgent: target, enabled: summary.enabled
+                    )
+                }
+            }
+            resolvedAgent = AgentRoutingResolver.resolve(
+                cwd: cwd, rules: ruleModels, defaultAgent: KouenSettings.load().defaultAgentKind
+            ).rawValue
+        } else {
+            resolvedAgent = agent
+        }
+
         // Map agent name → CLI launch command
         let agentLabel: String
         let agentCommand: String
-        switch agent.lowercased() {
+        switch resolvedAgent.lowercased() {
         case "claude", "claude-code":
             agentLabel = "Claude"; agentCommand = "claude\n"
         case "codex":
@@ -352,7 +375,7 @@ struct KouenDaemonTools: Sendable {
             agentCommand = cwd.map { "cursor \($0)\n" } ?? "cursor .\n"
         default:
             return (nil, JSONRPCError(code: -32602,
-                message: "Unknown agent '\(agent)'. Valid values: claude, codex, kiro, gemini, cursor"))
+                message: "Unknown agent '\(resolvedAgent)'. Valid values: claude, codex, kiro, gemini, cursor"))
         }
 
         // Spawn the session
@@ -394,7 +417,7 @@ struct KouenDaemonTools: Sendable {
         var result: [String: AnyCodable] = [
             "sessionId": .string(sessionID.uuidString),
             "surfaceId": .string(sid),
-            "agent": .string(agent),
+            "agent": .string(resolvedAgent),
             "launched": .string(agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)),
         ]
         // Signal-file stack guess — the CLI just launched bare with no prompt typed, so this
@@ -812,6 +835,99 @@ struct KouenDaemonTools: Sendable {
             "nextRunAt": automation.nextRunAt.map { AnyCodable.string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
             "createdAt": .string(ISO8601DateFormatter().string(from: automation.createdAt)),
             "updatedAt": .string(ISO8601DateFormatter().string(from: automation.updatedAt)),
+        ])
+    }
+
+    // MARK: - Agent Routing Rules (M2)
+
+    func routingRuleList() async -> (AnyCodable?, JSONRPCError?) {
+        guard let response = await send(.routingRuleList) else {
+            return (nil, Self.daemonUnavailableError)
+        }
+        guard case let .routingRules(list) = response else {
+            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleList"))
+        }
+        return (toolResult(json: .array(list.map(Self.routingRuleJSON))), nil)
+    }
+
+    func routingRuleCreate(
+        kind: String, pattern: String, targetAgent: String, enabled: Bool
+    ) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenRoutingRuleCreate") else { return (nil, disabledError("kouenRoutingRuleCreate")) }
+        guard let response = await send(.routingRuleCreate(
+            kind: kind, pattern: pattern, targetAgent: targetAgent, enabled: enabled
+        )) else {
+            return (nil, Self.daemonUnavailableError)
+        }
+        switch response {
+        case let .routingRuleInfo(rule):
+            guard let rule else {
+                return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleCreate"))
+            }
+            return (toolResult(json: Self.routingRuleJSON(rule)), nil)
+        case let .error(message):
+            return (nil, JSONRPCError(code: -32000, message: message))
+        default:
+            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleCreate"))
+        }
+    }
+
+    func routingRuleUpdate(
+        id: String, pattern: String?, targetAgent: String?, enabled: Bool?
+    ) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenRoutingRuleUpdate") else { return (nil, disabledError("kouenRoutingRuleUpdate")) }
+        guard let uuid = UUID(uuidString: id) else {
+            return (nil, JSONRPCError(code: -32602, message: "'id' is not a valid UUID"))
+        }
+        guard let response = await send(.routingRuleUpdate(
+            id: uuid, kind: nil, pattern: pattern, targetAgent: targetAgent, enabled: enabled
+        )) else {
+            return (nil, Self.daemonUnavailableError)
+        }
+        switch response {
+        case let .routingRuleInfo(rule):
+            guard let rule else {
+                return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleUpdate"))
+            }
+            return (toolResult(json: Self.routingRuleJSON(rule)), nil)
+        case let .error(message):
+            return (nil, JSONRPCError(code: -32000, message: message))
+        default:
+            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleUpdate"))
+        }
+    }
+
+    func routingRuleDelete(id: String) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenRoutingRuleDelete") else { return (nil, disabledError("kouenRoutingRuleDelete")) }
+        guard let uuid = UUID(uuidString: id) else {
+            return (nil, JSONRPCError(code: -32602, message: "'id' is not a valid UUID"))
+        }
+        return await okResponse(for: .routingRuleDelete(id: uuid), expected: "routingRuleDelete")
+    }
+
+    func routingRuleReorder(kind: String, orderedIds: [String]) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenRoutingRuleReorder") else { return (nil, disabledError("kouenRoutingRuleReorder")) }
+        let uuids = orderedIds.compactMap { UUID(uuidString: $0) }
+        guard uuids.count == orderedIds.count else {
+            return (nil, JSONRPCError(code: -32602, message: "'orderedIds' must all be valid UUIDs"))
+        }
+        guard let response = await send(.routingRuleReorder(kind: kind, orderedIDs: uuids)) else {
+            return (nil, Self.daemonUnavailableError)
+        }
+        guard case let .routingRules(list) = response else {
+            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to routingRuleReorder"))
+        }
+        return (toolResult(json: .array(list.map(Self.routingRuleJSON))), nil)
+    }
+
+    private static func routingRuleJSON(_ rule: AgentRoutingRuleSummary) -> AnyCodable {
+        .object([
+            "id": .string(rule.id.uuidString),
+            "order": .int(rule.order),
+            "kind": .string(rule.kind),
+            "pattern": .string(rule.pattern),
+            "targetAgent": .string(rule.targetAgent),
+            "enabled": .bool(rule.enabled),
         ])
     }
 
