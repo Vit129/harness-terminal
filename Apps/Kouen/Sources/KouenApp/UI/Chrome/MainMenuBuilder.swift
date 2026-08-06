@@ -96,6 +96,30 @@ enum MainMenuBuilder {
 
         let splitVItem = menuItem("Split Down", action: #selector(MenuTarget.splitV), binding: BannerShortcutRegistry.splitDown)
         view.submenu?.addItem(splitVItem)
+
+        // M4: branch the active pane's running agent conversation into a new split, in the
+        // same cwd, continuing from where it is now. Only enabled for agents with a real,
+        // CLI-native fork mechanism (validateMenuItem below) — Kouen wraps opaque CLI
+        // subprocesses and has no visibility into an agent's conversation state on its own,
+        // so this can't be a generic feature the way it might be in a tool that owns its
+        // own LLM orchestration.
+        let forkConversationItem = NSMenuItem(title: "Fork Conversation", action: #selector(MenuTarget.forkConversation), keyEquivalent: "")
+        forkConversationItem.target = MenuTarget.shared
+        view.submenu?.addItem(forkConversationItem)
+
+        // M5: named, reusable split arrangements — shape only (directions/ratios/leaf
+        // positions), never running processes. Distinct from the pre-existing daemon
+        // session-restore (which snapshots one specific session's live state).
+        let saveLayoutItem = NSMenuItem(title: "Save Current Layout as Template…", action: #selector(MenuTarget.saveCurrentLayout), keyEquivalent: "")
+        saveLayoutItem.target = MenuTarget.shared
+        view.submenu?.addItem(saveLayoutItem)
+        let applyLayoutItem = NSMenuItem(title: "Apply Saved Layout…", action: #selector(MenuTarget.applySavedLayout), keyEquivalent: "")
+        applyLayoutItem.target = MenuTarget.shared
+        view.submenu?.addItem(applyLayoutItem)
+
+        let peerReviewItem = NSMenuItem(title: "Request Peer Review", action: #selector(MenuTarget.requestPeerReview), keyEquivalent: "")
+        peerReviewItem.target = MenuTarget.shared
+        view.submenu?.addItem(peerReviewItem)
         view.submenu?.addItem(.separator())
 
         let prevPane = menuItem("Previous Pane", action: #selector(MenuTarget.previousPane), binding: BannerShortcutRegistry.previousPane)
@@ -283,6 +307,9 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
             let right = SessionCoordinator.shared.settings.sidebarOnRight
             menuItem.title = right ? "Move Sidebar to Left" : "Move Sidebar to Right"
             return true
+        case #selector(forkConversation):
+            guard let kind = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.effectiveAgentKind else { return false }
+            return MenuTarget.forkCommand(for: kind) != nil
         default: return true
         }
     }
@@ -461,6 +488,152 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
 
     @objc func splitV() {
         SessionCoordinator.shared.splitActivePane(direction: .vertical)
+    }
+
+    /// M4: per-agent-kind CLI-native fork command. Verified against each CLI's own
+    /// `--help` (2026-08-05) — `claude --continue --fork-session` continues the most recent
+    /// conversation in the current directory as a new session; `codex fork --last` forks the
+    /// most recently recorded session the same way. Neither needs Kouen to discover/track a
+    /// session ID itself. Every other AgentKind returns nil (menu item disabled instead —
+    /// see `validateMenuItem`) rather than silently doing something that only looks like a
+    /// fork (e.g. a fresh session in the same cwd, with no conversation history at all).
+    static func forkCommand(for kind: AgentKind) -> String? {
+        switch kind {
+        case .claudeCode: return "claude --continue --fork-session"
+        case .codex: return "codex fork --last"
+        default: return nil
+        }
+    }
+
+    @objc func forkConversation() {
+        guard let kind = SessionCoordinator.shared.snapshot.activeWorkspace?.activeTab?.effectiveAgentKind,
+              let command = Self.forkCommand(for: kind)
+        else { return }
+        SessionCoordinator.shared.splitActivePaneAndRun(direction: .horizontal, command: command)
+    }
+
+    // MARK: - Workgroup Review (M7)
+
+    /// First surface in `candidates` that isn't `excluding` and passes `hasAgent`. Pure,
+    /// no AppKit/daemon dependency — testable in isolation from the actual pane lookup.
+    static func firstPeerSurfaceID(
+        among candidates: [SurfaceID], excluding activeSurfaceID: SurfaceID, hasAgent: (SurfaceID) -> Bool
+    ) -> SurfaceID? {
+        candidates.first { $0 != activeSurfaceID && hasAgent($0) }
+    }
+
+    /// Human-triggered, not automatic-on-idle (the competitive-doc description) — reliably
+    /// detecting "peer went idle" + capturing its response text + auto-pasting it back into
+    /// the requesting pane needs an async wait/poll + text-extraction round trip this
+    /// session didn't have time to build and verify against a real running agent. v1
+    /// automates the ASKING step only (a real, cited manual habit) — the human reads the
+    /// peer's review themselves. Documented cut, not an oversight.
+    @objc func requestPeerReview() {
+        let coord = SessionCoordinator.shared
+        guard let tab = coord.snapshot.activeWorkspace?.activeTab else {
+            let alert = NSAlert()
+            alert.messageText = "No Active Tab"
+            alert.informativeText = "Open a tab with a split pane running an agent to request a review."
+            alert.runModal()
+            return
+        }
+
+        // Bug found live (2026-08-06), 1st pass: originally gated peer-eligibility on
+        // `AgentDetector.snapshot(...) != nil`, but that cache is populated ONLY by OSC 26
+        // `waiting_input` status events (SessionCoordinator.swift's onAgentStatus handler) —
+        // a narrow, CLI-cooperative signal. Claude Code emits it; other CLIs (confirmed:
+        // Antigravity/"agy") may not, even though their pane correctly shows an agent icon
+        // elsewhere via a *different*, daemon-sourced signal (Tab.effectiveAgentKind) with
+        // no per-pane equivalent for a split tab. Fix: accept any other pane in the tab as a
+        // peer — sending the review prompt to a plain idle shell is harmless.
+        //
+        // Bug found live, 2nd pass: after the above fix, "nothing happens" (no alert either)
+        // — `coord.activeSurfaceID` is a KNOWN-stale GUI-side cache, not reliably reset on
+        // tab/pane switches (see agent-memory/knowledge/focus-persistence.md, RL-043). Two
+        // failure modes, both silent: nil → the old top-level guard returned bare with zero
+        // feedback; stale-to-a-different-tab's-surface → `excluding:` never matched either
+        // candidate, so `.first` silently picked candidate[0] (possibly the REQUESTING pane
+        // itself) instead of erroring. Fix: resolve "who is asking" from the
+        // daemon-authoritative `tab.activePaneID` (same source `focus-persistence.md`
+        // recommends) instead of the GUI cache, and never return bare — every failure path
+        // alerts now, so the next bug in this function (if any) reports itself instead of
+        // requiring a 3rd guess-and-rebuild cycle.
+        let leaves = tab.rootPane.allLeaves()
+        guard let activePaneID = tab.activePaneID,
+              let activeLeaf = leaves.first(where: { $0.id == activePaneID })
+        else {
+            // `allLeaves()` excludes browser leaves — an active browser pane legitimately
+            // can't resolve here; that's a real "can't do this" case, not a bug to silence.
+            let alert = NSAlert()
+            alert.messageText = "Can't Determine Active Pane"
+            alert.informativeText = "Click directly inside a terminal pane (not a browser pane), then try again."
+            alert.runModal()
+            return
+        }
+        let activeSurfaceID = activeLeaf.activeSurfaceID ?? activeLeaf.surfaceID
+
+        let candidates = leaves.map { $0.activeSurfaceID ?? $0.surfaceID }
+        let peerSurfaceID = Self.firstPeerSurfaceID(among: candidates, excluding: activeSurfaceID) { _ in true }
+
+        NSLog("PEER_REVIEW_DEBUG: activePaneID=%@ activeSurfaceID=%@ candidates=%@ peer=%@",
+              activePaneID.uuidString, activeSurfaceID.uuidString,
+              candidates.map(\.uuidString).joined(separator: ","), peerSurfaceID?.uuidString ?? "nil")
+
+        guard let peerSurfaceID else {
+            let alert = NSAlert()
+            alert.messageText = "No Peer Agent Found"
+            alert.informativeText = "Open another split/tab with an agent running in this repo to request a review."
+            alert.runModal()
+            return
+        }
+
+        let prompt = "Please run `git diff` in the current repo, review the changes, and summarize any issues you find."
+        Task {
+            await coord.requestDaemon(.sendData(surfaceID: peerSurfaceID.uuidString, data: Data((prompt + "\n").utf8)))
+        }
+    }
+
+    // MARK: - Saved Layouts (M5)
+
+    @objc func saveCurrentLayout() {
+        let alert = NSAlert()
+        alert.messageText = "Save Current Layout"
+        alert.informativeText = "Captures this tab's split structure (shape only — no running processes) as a reusable template."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 22))
+        nameField.placeholderString = "Name (e.g. 3-pane dev)"
+        alert.accessoryView = nameField
+        alert.window.initialFirstResponder = nameField
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        SessionCoordinator.shared.saveCurrentLayout(name: name)
+    }
+
+    @objc func applySavedLayout() {
+        Task { @MainActor in
+            let layouts = await SessionCoordinator.shared.listSavedLayouts()
+            guard !layouts.isEmpty else {
+                let alert = NSAlert()
+                alert.messageText = "No Saved Layouts"
+                alert.informativeText = "Use \"Save Current Layout as Template…\" first."
+                alert.runModal()
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Apply Saved Layout"
+            alert.informativeText = "Creates a new tab with this layout's split structure (empty shells, no running processes)."
+            alert.addButton(withTitle: "Apply")
+            alert.addButton(withTitle: "Cancel")
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+            popup.addItems(withTitles: layouts.map(\.name))
+            alert.accessoryView = popup
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let index = popup.indexOfSelectedItem
+            guard layouts.indices.contains(index) else { return }
+            SessionCoordinator.shared.applySavedLayout(layouts[index])
+        }
     }
 
     @objc func runScript() {
