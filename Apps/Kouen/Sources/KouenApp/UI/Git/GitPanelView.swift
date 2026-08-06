@@ -11,10 +11,6 @@ final class GitPanelView: NSView {
     /// that a newer one has superseded it and discard its results.
     private var refreshGeneration = 0
     private var lastWorktreeOutput = ""
-    /// Own skip-rebuild cache key for the cross-repo Agents dashboard, kept separate from
-    /// `lastWorktreeOutput` (single-repo Worktrees tab) so the two tabs' rebuild guards can't
-    /// suppress each other's refresh.
-    private var lastAggregateSignature = ""
     /// Keyed by the **source** worktree path (the branch being merged), not the repo — a
     /// merge is something the user triggered from that specific row, so the conflict card
     /// renders in that row's place on the next render (see `makeWorktreeRow`'s early check).
@@ -29,11 +25,6 @@ final class GitPanelView: NSView {
     private var historyLimit = 25
     private let historyPageSize = 25
 
-    struct RepoEntry: Equatable {
-        let path: String
-        let branch: String
-        let sessionName: String
-    }
     private nonisolated(unsafe) var watchStream: FSEventStreamRef?
     private nonisolated(unsafe) var contextPointer: UnsafeMutableRawPointer?
     private nonisolated(unsafe) var watchDebounce: DispatchWorkItem?
@@ -57,18 +48,11 @@ final class GitPanelView: NSView {
         }
     }
 
-    // Top tabs: Changes | History | Worktrees | Agents
-    private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees", "Agents"], trackingMode: .selectOne, target: nil, action: nil)
+    // Top tabs: Changes | History | Worktrees
+    private let tabSelector = NSSegmentedControl(labels: ["Changes", "History", "Worktrees"], trackingMode: .selectOne, target: nil, action: nil)
     private let changesContainer = NSView()
     private let historyContainer = NSView()
     private let worktreesContainer = NSView()
-    /// Cross-repo "Agents" review dashboard (P38 Phase A) — repurposes what was a dormant,
-    /// half-wired "Repos" surface (only ever refreshed from one incidental call site inside
-    /// `applyState`, never reachable from the 3-segment `tabSelector`). Populated by
-    /// `refreshAgentReview`.
-    private let agentsContainer = NSView()
-    private let agentsScroll = NSScrollView()
-    private let agentsStack = NSStackView()
 
     // Changes view
     private let changesScroll = NSScrollView()
@@ -135,13 +119,6 @@ final class GitPanelView: NSView {
         invalidateWorktreeCaches()
         startWatching()
         Task { [weak self] in await self?.refresh() }
-    }
-
-    /// Switches to the Agents segment (index 3) and triggers a refresh — entry point for the
-    /// "Review Agent Work" command-palette action.
-    func showAgentReview() {
-        tabSelector.selectedSegment = 3
-        tabChanged()
     }
 
     /// Paths under `.git/` written on every auto-stage/commit that would
@@ -334,12 +311,6 @@ final class GitPanelView: NSView {
         addWorktreeButton.isHidden = true
         addWorktreeButton.translatesAutoresizingMaskIntoConstraints = false
 
-        // Agents container
-        agentsContainer.translatesAutoresizingMaskIntoConstraints = false
-        agentsContainer.isHidden = true
-        agentsStack.orientation = .vertical; agentsStack.alignment = .width; agentsStack.spacing = 0
-        setupScrollView(agentsScroll, with: agentsStack, in: agentsContainer)
-
         // Bottom bar
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         branchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
@@ -367,7 +338,6 @@ final class GitPanelView: NSView {
         addSubview(historyContainer)
         addSubview(addWorktreeButton)
         addSubview(worktreesContainer)
-        addSubview(agentsContainer)
         addSubview(bottomBar)
 
         NSLayoutConstraint.activate([
@@ -404,11 +374,6 @@ final class GitPanelView: NSView {
             worktreesContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             worktreesContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             worktreesContainer.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -4),
-
-            agentsContainer.topAnchor.constraint(equalTo: tabSelector.bottomAnchor, constant: 4),
-            agentsContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            agentsContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            agentsContainer.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -4),
 
             bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -464,12 +429,6 @@ final class GitPanelView: NSView {
         historyContainer.isHidden = selected != 1
         worktreesContainer.isHidden = selected != 2
         addWorktreeButton.isHidden = selected != 2
-        agentsContainer.isHidden = selected != 3
-        if selected == 3 {
-            // Mirrors toggleWorktreesSection: becoming visible doesn't retroactively populate
-            // itself, refresh() only renders sections that are visible at the time it runs.
-            Task { await refresh() }
-        }
     }
 
     // MARK: - Actions
@@ -740,7 +699,6 @@ final class GitPanelView: NSView {
     /// point so a future new cache can't be forgotten at one of the sites.
     private func invalidateWorktreeCaches() {
         lastWorktreeOutput = ""
-        lastAggregateSignature = ""
     }
 
     /// Resolves the repo's main worktree path by listing worktrees from `path` itself — this
@@ -1474,7 +1432,6 @@ final class GitPanelView: NSView {
         applyState(branch: branch, aheadBehind: aheadBehind, numstat: numstat, porcelain: porcelain, log: log)
         await reconcileMergeConflicts(generation: generation)
         await refreshWorktrees(generation: generation)
-        await refreshAgentReview(generation: generation)
 
         // Auto-stage unstaged changes that are not manually unstaged, then
         // repaint in the background if that changed anything.
@@ -1629,26 +1586,8 @@ final class GitPanelView: NSView {
     /// the Board/Notch HUD already read, just not previously surfaced next to the worktree list.
     /// `nonisolated static` + explicit `tabs` (mirrors `isNoisyGitInternalPath`) so this stays
     /// unit-testable without a live `SessionCoordinator`.
-    /// Collapses tabs into one `RepoEntry` per repo, keyed on `parentRepoPath ?? cwd` so that
-    /// multiple tabs on different auto-isolated worktrees of the same repo collapse to a single
-    /// candidate (unlike `refreshRepos`'s plain `cwd` key, which treats each worktree as its own
-    /// "repo" — correct for the flat Worktrees tab, wrong for the cross-repo Agents aggregate).
-    nonisolated static func repoCandidates(tabs: [(cwd: String, parentRepoPath: String?, gitBranch: String?, sessionName: String)]) -> [RepoEntry] {
-        var seen = Set<String>()
-        var entries: [RepoEntry] = []
-        for tab in tabs {
-            let key = tab.parentRepoPath ?? tab.cwd
-            guard !key.isEmpty, !seen.contains(key) else { continue }
-            seen.insert(key)
-            entries.append(RepoEntry(path: key, branch: tab.gitBranch ?? "", sessionName: tab.sessionName))
-        }
-        return entries
-    }
-
     /// Parses `git worktree list --porcelain` output (blank-line-separated blocks) plus
-    /// `git branch --merged main --format=%(refname:short)` output into entries. Pulled out of
-    /// `refreshWorktrees` so both the single-repo Worktrees tab and the cross-repo Agents tab
-    /// (`refreshAgentReview`) share one parser instead of two copies drifting apart.
+    /// `git branch --merged main --format=%(refname:short)` output into entries.
     nonisolated static func parseWorktreePorcelain(_ output: String, mergedBranchOutput: String) -> [WorktreeEntry] {
         let entries = output.components(separatedBy: "\n\n").enumerated().compactMap { index, block -> WorktreeEntry? in
             let lines = block.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -1950,12 +1889,6 @@ final class GitPanelView: NSView {
         } else {
             metaText = worktree.branch
         }
-        // Only populated by the cross-repo Agents dashboard (refreshAgentReview) — nil on the
-        // single-repo Worktrees tab, which doesn't pay for the extra git calls.
-        if !worktree.isMerged, let filesChanged = worktree.filesChanged, let lastCommit = worktree.lastCommit {
-            let fileWord = filesChanged == 1 ? "file" : "files"
-            metaText += " · \(filesChanged) \(fileWord) · \(lastCommit)"
-        }
         let meta = NSTextField(labelWithString: metaText)
         meta.font = .systemFont(ofSize: 10)
         meta.textColor = worktree.isMerged ? NSColor.systemGreen : KouenDesign.chrome.textTertiary
@@ -2183,134 +2116,6 @@ final class GitPanelView: NSView {
 
     // MARK: - Agents review dashboard
 
-    /// Repo-grouping header for the Agents dashboard — adapted from the old (dormant) Repos
-    /// tab's per-repo row, minus the branch/session columns (a repo group can span multiple
-    /// worktrees on different branches, so a single branch label no longer applies).
-    private func makeRepoGroupHeader(repoPath: String, worktreeCount: Int) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.wantsLayer = true
-
-        let label = NSTextField(labelWithString: (repoPath as NSString).lastPathComponent.uppercased())
-        label.font = KouenDesign.Typography.sectionLabel
-        label.textColor = KouenDesign.chrome.textTertiary
-        label.toolTip = repoPath
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        let countLabel = NSTextField(labelWithString: "\(worktreeCount)")
-        countLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        countLabel.textColor = KouenDesign.chrome.textTertiary
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        row.addSubview(label)
-        row.addSubview(countLabel)
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 26),
-            label.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
-            label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            countLabel.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
-            countLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
-            countLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-        ])
-        return row
-    }
-
-    /// Cross-repo worktree review: every repo across all workspace tabs, grouped, each
-    /// non-main worktree enriched with files-changed/last-commit stats. Only does work when
-    /// the Agents segment is actually visible — driven by `refresh()`'s single generation
-    /// authority, never a parallel entry point (segment selection triggers `refresh()`, it
-    /// does not call this directly).
-    private func refreshAgentReview(generation: Int) async {
-        guard !agentsContainer.isHidden else { return }
-
-        let snapshot = SessionCoordinator.shared.snapshot
-        let tabTuples = snapshot.workspaces.flatMap { ws in
-            ws.sessions.flatMap { session in
-                session.tabs.map { tab in
-                    (cwd: tab.cwd, parentRepoPath: tab.parentRepoPath, gitBranch: tab.gitBranch, sessionName: session.name)
-                }
-            }
-        }
-        let candidates = Self.repoCandidates(tabs: tabTuples)
-        guard generation == refreshGeneration else { return }
-
-        // Resolve each candidate to its actual repo root and dedupe again — two candidates
-        // (e.g. a worktree path and its parentRepoPath) can resolve to the same root.
-        var seenRoots = Set<String>()
-        var repoRoots: [String] = []
-        for candidate in candidates {
-            let root = await runGit(["rev-parse", "--show-toplevel"], in: candidate.path)
-            guard generation == refreshGeneration else { return }
-            guard !root.isEmpty, !seenRoots.contains(root) else { continue }
-            seenRoots.insert(root)
-            repoRoots.append(root)
-        }
-
-        var perRepoEntries: [(repoRoot: String, entries: [WorktreeEntry])] = []
-        var signatureParts: [String] = []
-        for root in repoRoots {
-            let (entries, rawOutput) = await fetchWorktreeEntries(repoPath: root)
-            guard generation == refreshGeneration else { return }
-            perRepoEntries.append((root, entries))
-            signatureParts.append("\(root)|\(rawOutput)")
-        }
-
-        // Skip rebuild if nothing changed (own cache key — never shares lastWorktreeOutput,
-        // see its declaration for why). Only checked here, not committed yet — committing
-        // before the withTaskGroup await below would let a superseded refresh's signature
-        // "poison" the cache: it commits, gets discarded by the generation guard after the
-        // await without ever rendering, and the next (unchanged-git-state) refresh then sees
-        // its signature already matches and skips too, leaving the tab stuck stale until git
-        // state actually changes again. Commit only once we're actually about to render.
-        let signature = signatureParts.joined(separator: ";;")
-        if signature == lastAggregateSignature { return }
-
-        let worktreesNeedingStats = perRepoEntries.flatMap { $0.entries.filter { !$0.isMain } }
-        var statsByPath: [String: (filesChanged: Int, lastCommit: String)] = [:]
-        await withTaskGroup(of: (String, (filesChanged: Int, lastCommit: String)).self) { group in
-            for entry in worktreesNeedingStats {
-                group.addTask {
-                    (entry.path, await Self.worktreeReviewStats(worktreePath: entry.path))
-                }
-            }
-            for await (path, stats) in group {
-                statsByPath[path] = stats
-            }
-        }
-        guard generation == refreshGeneration else { return }
-        lastAggregateSignature = signature
-
-        agentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        let reviewGroups = perRepoEntries.map { (repoRoot: $0.repoRoot, entries: $0.entries.filter { !$0.isMain }) }
-            .filter { !$0.entries.isEmpty }
-
-        if reviewGroups.isEmpty {
-            agentsStack.addArrangedSubview(makeLabel("No agent worktrees"))
-            return
-        }
-
-        for group in reviewGroups {
-            let header = makeRepoGroupHeader(repoPath: group.repoRoot, worktreeCount: group.entries.count)
-            agentsStack.addArrangedSubview(header)
-            header.leadingAnchor.constraint(equalTo: agentsStack.leadingAnchor).isActive = true
-            header.trailingAnchor.constraint(equalTo: agentsStack.trailingAnchor).isActive = true
-
-            for entry in group.entries {
-                let stats = statsByPath[entry.path]
-                let enriched = WorktreeEntry(
-                    path: entry.path, head: entry.head, branch: entry.branch,
-                    isMain: entry.isMain, isLocked: entry.isLocked, isMerged: entry.isMerged,
-                    filesChanged: stats?.filesChanged, lastCommit: stats?.lastCommit
-                )
-                let row = makeWorktreeRow(enriched)
-                agentsStack.addArrangedSubview(row)
-                row.leadingAnchor.constraint(equalTo: agentsStack.leadingAnchor).isActive = true
-                row.trailingAnchor.constraint(equalTo: agentsStack.trailingAnchor).isActive = true
-            }
-        }
-    }
-
     // MARK: - Git
 
     private func runGit(_ args: [String], in directory: String) async -> String {
@@ -2376,26 +2181,6 @@ final class GitPanelView: NSView {
         }
     }
 
-    /// Files-changed count + relative last-commit time for the cross-repo Agents review
-    /// dashboard. Not called on the hot, frequently-refreshed single-repo Worktrees tab —
-    /// only `refreshAgentReview` pays for these two extra git calls per worktree. Uses the
-    /// same `main...HEAD` range as `fetchWorktreeDiff` so the count always matches what the
-    /// diff button shows.
-    nonisolated static func worktreeReviewStats(worktreePath: String) async -> (filesChanged: Int, lastCommit: String) {
-        async let shortstat = runGitDiff(["diff", "--shortstat", "main...HEAD"], in: worktreePath)
-        async let log = runGitDiff(["log", "-1", "--format=%cr"], in: worktreePath)
-        let (shortstatOutput, lastCommit) = await (shortstat, log)
-        return (parseShortstatFileCount(shortstatOutput), lastCommit)
-    }
-
-    /// Parses `git diff --shortstat` output, e.g. " 3 files changed, 12 insertions(+), 4
-    /// deletions(-)" or " 1 file changed, 2 insertions(+)". Empty/unmatched output means no
-    /// changes.
-    nonisolated static func parseShortstatFileCount(_ output: String) -> Int {
-        guard let range = output.range(of: #"(\d+)\s+files? changed"#, options: .regularExpression) else { return 0 }
-        let digits = output[range].prefix(while: { $0.isNumber })
-        return Int(digits) ?? 0
-    }
 }
 
 struct WorktreeEntry {
@@ -2405,21 +2190,6 @@ struct WorktreeEntry {
     let isMain: Bool
     let isLocked: Bool
     let isMerged: Bool
-    /// Populated only on the cross-repo Agents review path (`refreshAgentReview`) — nil on the
-    /// single-repo Worktrees tab, which doesn't pay for the extra git calls on its hot refresh path.
-    let filesChanged: Int?
-    let lastCommit: String?
-
-    init(path: String, head: String, branch: String, isMain: Bool, isLocked: Bool, isMerged: Bool, filesChanged: Int? = nil, lastCommit: String? = nil) {
-        self.path = path
-        self.head = head
-        self.branch = branch
-        self.isMain = isMain
-        self.isLocked = isLocked
-        self.isMerged = isMerged
-        self.filesChanged = filesChanged
-        self.lastCommit = lastCommit
-    }
 }
 
 private final class StageToggleButton: NSButton {
