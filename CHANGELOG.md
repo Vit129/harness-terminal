@@ -8,7 +8,63 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.10.0] - 2026-08-06
 
 ### Added
-- Release version bump to v4.10.0.
+- Select all URL text on click ([`758481b`](https://github.com/Vit129/kouen-terminal/commit/758481b7a5888ab0e8acfa382d7dd35dde5e4526))
+- Add AgentRoutingRule model for agent:"auto" spawn-time CLI routing ([`9273a62`](https://github.com/Vit129/kouen-terminal/commit/9273a627c0690cd38303c304f7a9b76d592091f4))
+- Add AgentRoutingRuleStore persistence for routing rules ([`85b6702`](https://github.com/Vit129/kouen-terminal/commit/85b6702695adbaf67dae21af31968aad3f452de1))
+- Add AgentRoutingResolver, first-match rule resolution to AgentKind ([`653d0b5`](https://github.com/Vit129/kouen-terminal/commit/653d0b5bc9ead8de08fa03c568dd8ccfaad8fe6e))
+- Add IPC-safe AgentRoutingRuleSummary type ([`72ee1ca`](https://github.com/Vit129/kouen-terminal/commit/72ee1cabab9edf0150d26195119826fb35ae51bb))
+- Add defaultAgentKind fallback for unmatched auto-routing ([`a981c64`](https://github.com/Vit129/kouen-terminal/commit/a981c6495329a75dac61727ec26ec08fed7829f2))
+- Gate routing-rule mutate tools behind MCP control policy ([`f7347ed`](https://github.com/Vit129/kouen-terminal/commit/f7347edd6574abd712479d0212a288b4918bd1e6))
+- Register kouenRoutingRule* MCP tools ([`39c19fa`](https://github.com/Vit129/kouen-terminal/commit/39c19fa9fd22036424dec0f241179c12bc5d6f70))
+- Resolve agent:"auto" via routing rules in kouenSpawnAgent ([`87c99e7`](https://github.com/Vit129/kouen-terminal/commit/87c99e7c327fbdaf6265c17f1952f63b5c0ac884))
+- Add routing-rule and saved-layout IPC request/response cases ([`1cf3d4a`](https://github.com/Vit129/kouen-terminal/commit/1cf3d4a62248715b020b5aa6df5c0625b2fee68e))
+- Wire AgentRoutingRuleStore and SavedLayoutStore into the daemon ([`764fa60`](https://github.com/Vit129/kouen-terminal/commit/764fa60b7299b4ad35acf06f6696f243482ec258))
+- Add agent-routing-rules.json and saved-layouts.json paths ([`286a26c`](https://github.com/Vit129/kouen-terminal/commit/286a26c9f888d47901436496856f4eec0fdadd7f))
+- Add browser design mode — hover-highlight, click-select, style preview, Copy CSS ([`d6346ba`](https://github.com/Vit129/kouen-terminal/commit/d6346baa8b4224e46b86ec95b77d9e1384e19d19))
+- Add SavedLayout/PaneLayoutShape model, distinct from LayoutTemplate ([`5c6c96e`](https://github.com/Vit129/kouen-terminal/commit/5c6c96e8281692c31e03937f603067ce4fce27ee))
+- Add IPC-safe SavedLayout type ([`e768dea`](https://github.com/Vit129/kouen-terminal/commit/e768dea3423d75369c0df56916e000ff4aa00f22))
+- Apply saved layout shape via recursive client-side split ([`bf98703`](https://github.com/Vit129/kouen-terminal/commit/bf987036b46faeffffa795299c0fa5246963cb68))
+- Add RiskyCommandClassifier regex heuristic for risky-shell-command detection ([`f3f3dbd`](https://github.com/Vit129/kouen-terminal/commit/f3f3dbd89341ec680fe89520fd318a3983219ceb))
+- Saved-layout facade methods + risky-command advisory toast on command finish ([`e99d26b`](https://github.com/Vit129/kouen-terminal/commit/e99d26b918c6f3da674afa427e13c4c4c80454c9))
+- Add Fork Conversation, Save/Apply Layout, Request Peer Review menu actions ([`0909fb3`](https://github.com/Vit129/kouen-terminal/commit/0909fb3154689ae8015ab59ad786fa64423d11a4))
+- Parse PR reviewDecision from gh CLI output ([`8a1d6fc`](https://github.com/Vit129/kouen-terminal/commit/8a1d6fceb9be6d535f3b005379d922b649557203))
+- Thread prReviewDecision through RepoGitMetadata ([`6e9b5b6`](https://github.com/Vit129/kouen-terminal/commit/6e9b5b668c71981aa0c43be3cf4fdb3bd875cec7))
+- Offer checks-waiver merge when PR is approved, never waive mergeable ([`1b1af54`](https://github.com/Vit129/kouen-terminal/commit/1b1af548e7799a598771f7785cced65ef9e539a8))
+- Add slash-command discoverability picker; fix(composer): reassert typingAttributes before every keystroke, not just once, so typed text is never black ([`95c8f1c`](https://github.com/Vit129/kouen-terminal/commit/95c8f1cf16a438109dbd3aa2a73e27ac953fd0a7))
+
+### Changed
+- Drop Agents cross-repo review dashboard, redundant with Board+Worktrees ([`c9e6989`](https://github.com/Vit129/kouen-terminal/commit/c9e69896675b0214d898bda62236837acaf2a0fd))
+- Drop selectAgentsTab notification handling, Agents tab removed ([`46da53b`](https://github.com/Vit129/kouen-terminal/commit/46da53bfce8c4527896612210b138208383a959f))
+- Drop Review Agent Work action, Agents tab removed ([`dc44cc0`](https://github.com/Vit129/kouen-terminal/commit/dc44cc003c9663100942492eab338b3f8d1141d3))
+
+### Documentation
+- Migrate stale Claude Code auto-memory into portable agent-memory ([`8ce6b61`](https://github.com/Vit129/kouen-terminal/commit/8ce6b61d466be2316608464f5706c4a41a51db1b))
+- Update parseWorktreePorcelain comment after Agents tab removal ([`d764b95`](https://github.com/Vit129/kouen-terminal/commit/d764b9502a6644dc05a3a209af9e4fdc6c88c1b8))
+- Record Agents tab removal decision (redundant with Board/Worktrees, 2026-08-06) ([`c8208fc`](https://github.com/Vit129/kouen-terminal/commit/c8208fcaace55b0616bc628d173ee7f1a389eea5))
+- Design doc — session-spawn CLI routing (scope-corrected from Warp's model router) ([`7dd1521`](https://github.com/Vit129/kouen-terminal/commit/7dd1521a48b0472c36c44eb33d389c0fdf3f9e75))
+- Task progress — closed, build/test/robot green, live-check owed ([`8b09020`](https://github.com/Vit129/kouen-terminal/commit/8b09020af4abeef1e8420525bc0562360d0dd325))
+- Design doc — visual-preview-only, no source-file round-trip (scope cut) ([`288641e`](https://github.com/Vit129/kouen-terminal/commit/288641e19872c09f54c91f5a07bab9f8790872b4))
+- Task progress — closed, build/test/robot green, live-check owed ([`7c2d4f8`](https://github.com/Vit129/kouen-terminal/commit/7c2d4f82da806358947e62a5027eb3805ae44334))
+- Task progress — closed, shape-only (no ratio/process restore) ([`59a5657`](https://github.com/Vit129/kouen-terminal/commit/59a5657e577f291dec28d3a6a020b9f03e4c0279))
+- Task progress — closed, advisory-only (fires after command finishes) ([`85b1cfe`](https://github.com/Vit129/kouen-terminal/commit/85b1cfe63c68d132623685a9426f6b63502117f3))
+- Design doc — reuses each CLI's own native fork flag, claude-code/codex only ([`88271cd`](https://github.com/Vit129/kouen-terminal/commit/88271cdaf6619472501936edfec457ece79a8164))
+- Task progress — closed, build/test green, live-check owed ([`699b0ec`](https://github.com/Vit129/kouen-terminal/commit/699b0ec7dc952df796d520b76842b485771cbf23))
+- Task progress — closed, human-triggered ask-only (no auto-capture/paste-back) ([`8cce333`](https://github.com/Vit129/kouen-terminal/commit/8cce3334f9522c916141543861e3132488bc9864))
+- Task progress — closed, extends existing P39 G3 merge picker ([`d93237c`](https://github.com/Vit129/kouen-terminal/commit/d93237c9ffd68e899df1c207c3f6297189c84f2d))
+- Task progress — closed, @file mention cut (documented, not built) ([`049d15e`](https://github.com/Vit129/kouen-terminal/commit/049d15e78c264fa9edeef0cff40c42a6503ecfd9))
+- Define M2-M9 vocabulary (Agent Routing Rule, Design Mode, Fork Conversation, Saved Layout, Risky Command Advisory, Request Peer Review, Merge Waiver, Slash Command Picker) ([`eacf7c5`](https://github.com/Vit129/kouen-terminal/commit/eacf7c5f7100d90cf180a6d448af30e1081cedc4))
+- Wayfinder map — M2-M9 competitive-gap features, all 8 tickets closed 2026-08-05 ([`1a003ac`](https://github.com/Vit129/kouen-terminal/commit/1a003acb317a9e39b994974350cfcafa13fedf4a))
+- Record user approval to build all 8 M2-M9 gaps despite no per-feature usage signal ([`dda8086`](https://github.com/Vit129/kouen-terminal/commit/dda8086430177a515c8cfcfa82f5da4b245cd892))
+- Index M2-M9 plan files and wayfinder map ([`3bf851f`](https://github.com/Vit129/kouen-terminal/commit/3bf851f5dc029a5042e2755d5df5c574627e522d))
+- Index m2-m9-competitive-build-decision and agents-tab-removed memory files ([`6f3f08b`](https://github.com/Vit129/kouen-terminal/commit/6f3f08b499467e706187f8c1088267582f7182e8))
+- Flag broken [[review-new-features-against-lessons]] link for follow-up ([`9368729`](https://github.com/Vit129/kouen-terminal/commit/936872913988e07a0087cb49395c70cf99c6435f))
+- Flag broken [[feedback_review-new-features-against-lessons]] link for follow-up ([`669858b`](https://github.com/Vit129/kouen-terminal/commit/669858bc37d970320492e50583566f2125e602ff))
+- Record 2026-08-02 scheduled memory-maintenance run results ([`f505e96`](https://github.com/Vit129/kouen-terminal/commit/f505e9664ad398f2a8e210ab4863f72d91f877b9))
+- Open gate for kouen-browser-mcp-intermittent-unresponsive investigation ([`a712142`](https://github.com/Vit129/kouen-terminal/commit/a7121424a089b288aecc3975fc7766f029c0cb7f))
+- Forbid nested git worktrees inside .kouen-worktrees/ ([`b2c2ae8`](https://github.com/Vit129/kouen-terminal/commit/b2c2ae8139a9943c89df8a8ed43b0133d23f0043))
+
+### Fixed
+- Guard stale file-tree scan from clobbering active session's root ([`3b7b78e`](https://github.com/Vit129/kouen-terminal/commit/3b7b78ec6cbc9d42fc7f30cee8a513fd8a393a39))
 
 ## [4.9.3] - 2026-07-31
 
