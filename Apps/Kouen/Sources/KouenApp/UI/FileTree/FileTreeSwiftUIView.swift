@@ -439,11 +439,18 @@ struct FileTreeSwiftUIView: View {
     }
 
     private func loadRoot() async {
+        let taskRootPath = rootPath
+        let taskSessionID = sessionID
         refreshGitBranch()
         let statusProvider = GitStatusProvider()
         async let gitStatusTask  = statusProvider.status(rootPath: rootPath)
         async let rawNodesTask   = (try? watcher.scan(rootPath: rootPath, options: scanOptions)) ?? []
         let (status, rawNodes)   = await (gitStatusTask, rawNodesTask)
+
+        // scanDirectory() has no cancellation checks, so a stale scan for a root/session
+        // we've since switched away from can still finish and land here. Drop it instead
+        // of clobbering whatever the current root's own loadRoot() already wrote.
+        guard rootPath == taskRootPath, sessionID == taskSessionID else { return }
 
         currentGitStatus = status
         let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
