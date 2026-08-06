@@ -19,7 +19,16 @@ import Foundation
 /// to bring the Mac window forward (Feature A). Both are additive/graceful (an old peer
 /// ignores them), but a bump forces the daemon to restart into the new binary on
 /// `install-graceful.sh` so the new push path is actually served.
-public let ipcProtocolVersion: Int = 4
+///
+/// Bumped 2026-08-06 (M2/M5 daemon-side gap, found live in v4.10.0): the M2 Agent Routing
+/// Rule (`.routingRuleList`/`Get`/`Create`/`Update`/`Delete`/`Reorder`) and M5 Saved Layouts
+/// (`.savedLayoutList`/`Save`/`Delete`) `IPCRequest`/`IPCResponse` cases shipped in v4.10.0
+/// without bumping this constant — `install-graceful.sh` read "protocol unchanged" and kept
+/// the pre-release daemon running, so those two features' daemon-side handlers
+/// (`SurfaceRegistry`) never actually loaded in the live install despite the new GUI binary
+/// being in place. Same failure class the 2026-07-08 bump note above already warns about;
+/// missed here because the new cases were additive syntactically, not functionally.
+public let ipcProtocolVersion: Int = 5
 
 public enum IPCRequest: Codable, Sendable {
     case ping
