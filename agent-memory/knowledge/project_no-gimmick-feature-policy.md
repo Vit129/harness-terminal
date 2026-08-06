@@ -19,3 +19,5 @@ Closed explicitly (moved from "open gap" to "deliberate positioning difference, 
 **Why:** user's standing product philosophy for this project is usage-driven feature selection, not competitor-checkbox parity. A feature only earns a build slot if it solves something Kouen's own actual workflow needs — matching a competitor's marketing bullet is not sufecient justification on its own.
 
 **How to apply:** in future competitive-gap sweeps (`p3x-competitive-feature-gaps.md`-style plans) or when [[review-new-features-against-lessons]]-style review surfaces "competitor X has feature Y", don't propose building it just because a competitor has it. Only propose if there's an independent signal of real user need (an actual friction point hit during real use, not "parity for parity's sake"). Community-size and similar non-feature gaps were never actionable and stay out of scope regardless.
+
+<!-- TODO(maintenance 2026-08-02): [[review-new-features-against-lessons]] is a broken link — no such memory file exists under agent-memory/. Write it if this "lessons-check pass after new-feature work" concept is still wanted, or drop the link if it was never created. -->
