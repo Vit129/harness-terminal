@@ -115,6 +115,9 @@ public struct KouenSettings: Codable, Sendable, Equatable {
     /// Per-agent brand color overrides keyed by `AgentKind.rawValue`.
     /// Missing keys use the built-in agent default.
     public var agentColorOverrides: [String: String]
+    /// Fallback `AgentKind` for `agent: "auto"` spawn requests (M2 Agent Routing Rule)
+    /// when no configured rule matches the target cwd.
+    public var defaultAgentKind: AgentKind
     /// Color of the 1px hairline divider between sidebar and content (and any
     /// other in-window divider line). nil → derive from the theme.
     public var dividerHex: String?
@@ -356,6 +359,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         cursorTextHex: String? = nil,
         paletteHex: [String?] = Array(repeating: nil, count: 16),
         agentColorOverrides: [String: String] = [:],
+        defaultAgentKind: AgentKind = .claudeCode,
         // nil = derive from theme (dark themes resolve to a quiet #1E1E1E hairline; see
         // MainSplitViewController.resolvedDividerColor). A pinned value would override that
         // on every theme, so leave it unset.
@@ -435,6 +439,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         self.cursorTextHex = cursorTextHex
         self.paletteHex = KouenSettings.normalizedPalette(paletteHex)
         self.agentColorOverrides = KouenSettings.normalizedAgentColorOverrides(agentColorOverrides)
+        self.defaultAgentKind = defaultAgentKind
         self.dividerHex = dividerHex
         self.statusLineHex = statusLineHex
         self.windowBorderHex = windowBorderHex
@@ -595,6 +600,7 @@ public struct KouenSettings: Codable, Sendable, Equatable {
         paletteHex = KouenSettings.normalizedPalette(try container.decodeIfPresent([String?].self, forKey: .paletteHex) ?? fallback.paletteHex)
         let agentColors = try container.decodeIfPresent([String: String].self, forKey: .agentColorOverrides) ?? fallback.agentColorOverrides
         agentColorOverrides = KouenSettings.normalizedAgentColorOverrides(agentColors)
+        defaultAgentKind = try container.decodeIfPresent(AgentKind.self, forKey: .defaultAgentKind) ?? fallback.defaultAgentKind
         dividerHex = try container.decodeIfPresent(String.self, forKey: .dividerHex)
         statusLineHex = try container.decodeIfPresent(String.self, forKey: .statusLineHex)
         windowBorderHex = try container.decodeIfPresent(String.self, forKey: .windowBorderHex)
