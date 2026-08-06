@@ -249,12 +249,6 @@ enum CommandPaletteController {
             "action.installCLI": { CLIInstaller.install() },
             "action.settings": { SettingsWindowController.show() },
             "action.reimport": { coordinator.reimportTerminalConfig() },
-            "action.reviewAgentWork": {
-                // Reuses the existing .kouenOpenGitPanel reveal pathway (already how the daemon
-                // opens the sidebar's Git panel) instead of a new controller reference — this
-                // controller has no direct link to the sidebar/split view, only the coordinator.
-                NotificationCenter.default.post(name: .kouenOpenGitPanel, object: nil, userInfo: ["selectAgentsTab": true])
-            },
             "nav.jumpNotification": { coordinator.jumpToLatestNotification() },
             "nav.prevSession": { coordinator.selectAdjacentSession(offset: -1) },
             "nav.nextSession": { coordinator.selectAdjacentSession(offset: 1) },
@@ -295,7 +289,6 @@ enum CommandPaletteController {
             .init(id: "action.installCLI",    title: "Install kouen-cli to PATH", subtitle: "Copy the CLI to Application Support",          symbol: "arrow.down.app",                     shortcut: "",          section: "actions"),
             .init(id: "action.settings",      title: "Open Settings",             subtitle: "Theme, font, agents, key bindings",              symbol: "gearshape",                          shortcut: "⌘,",       section: "actions"),
             .init(id: "action.reimport",      title: "Re-import Terminal Config", subtitle: "Reload theme, colors & font from your terminal config", symbol: "arrow.triangle.2.circlepath", shortcut: "Prefix r",  section: "actions"),
-            .init(id: "action.reviewAgentWork", title: "Review Agent Work",       subtitle: "Cross-repo dashboard of every isolated agent worktree", symbol: "person.2.square.stack",       shortcut: "",          section: "actions"),
             .init(id: "nav.jumpNotification", title: "Jump to Notification",      subtitle: "Focus the next tab waiting on input",            symbol: "bell.badge",                         shortcut: "⇧⌘U",      section: "navigation"),
             .init(id: "nav.prevSession",      title: "Previous Session",          subtitle: "Cycle to the previous session",                  symbol: "chevron.left.square",                shortcut: "⌘⇧[",     section: "navigation"),
             .init(id: "nav.nextSession",      title: "Next Session",              subtitle: "Cycle to the next session",                      symbol: "chevron.right.square",               shortcut: "⌘⇧]",     section: "navigation"),
