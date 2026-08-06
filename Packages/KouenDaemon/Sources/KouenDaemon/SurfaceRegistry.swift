@@ -12,6 +12,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
     private let bufferStore = PasteBufferStore()
     private let taskStore = TaskStore()
     private let automationStore = AutomationStore()
+    private let routingRuleStore = AgentRoutingRuleStore()
+    private let savedLayoutStore = SavedLayoutStore()
     public let optionStore = OptionStore()
     public let environmentStore = EnvironmentStore()
     public let hookRegistry = HookRegistry()
@@ -955,6 +957,57 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 return .error("Automation not found")
             }
             return fireAutomationLocked(automation) ? .ok : .error("Automation spawn failed")
+        case .routingRuleList:
+            return .routingRules(routingRuleStore.list().map(Self.routingRuleSummary))
+        case let .routingRuleGet(id):
+            return .routingRuleInfo(routingRuleStore.get(id: id).map(Self.routingRuleSummary))
+        case let .routingRuleCreate(kind, pattern, targetAgent, enabled):
+            guard let ruleKind = AgentRoutingRule.Kind(rawValue: kind) else {
+                return .error("Unknown rule kind '\(kind)'. Valid values: path, stack")
+            }
+            guard let agentKind = AgentKind(rawValue: targetAgent) else {
+                return .error("Unknown agent '\(targetAgent)'")
+            }
+            let rule = routingRuleStore.create(kind: ruleKind, pattern: pattern, targetAgent: agentKind, enabled: enabled)
+            return .routingRuleInfo(Self.routingRuleSummary(rule))
+        case let .routingRuleUpdate(id, kind, pattern, targetAgent, enabled):
+            // `kind` is immutable once created (path vs stack rules order independently) —
+            // accepted here only so the wire shape matches Create's, but ignored on update.
+            _ = kind
+            var resolvedAgent: AgentKind?
+            if let targetAgent {
+                guard let k = AgentKind(rawValue: targetAgent) else {
+                    return .error("Unknown agent '\(targetAgent)'")
+                }
+                resolvedAgent = k
+            }
+            guard let updated = routingRuleStore.update(
+                id: id, pattern: pattern, targetAgent: resolvedAgent, enabled: enabled
+            ) else {
+                return .error("Routing rule not found")
+            }
+            return .routingRuleInfo(Self.routingRuleSummary(updated))
+        case let .routingRuleDelete(id):
+            return routingRuleStore.delete(id: id) ? .ok : .error("Routing rule not found")
+        case let .routingRuleReorder(kind, orderedIDs):
+            guard let ruleKind = AgentRoutingRule.Kind(rawValue: kind) else {
+                return .error("Unknown rule kind '\(kind)'. Valid values: path, stack")
+            }
+            let reordered = routingRuleStore.reorder(kind: ruleKind, orderedIDs: orderedIDs)
+            return .routingRules(reordered.map(Self.routingRuleSummary))
+        case .savedLayoutList:
+            return .savedLayouts(savedLayoutStore.list())
+        case let .savedLayoutSave(name, tabID):
+            guard let tab = editor.snapshot.workspaces
+                .flatMap({ $0.sessions.flatMap { $0.tabs } })
+                .first(where: { $0.id == tabID })
+            else {
+                return .error("Tab not found")
+            }
+            let saved = savedLayoutStore.create(name: name, shape: tab.rootPane.paneLayoutShape)
+            return .savedLayoutInfo(saved)
+        case let .savedLayoutDelete(id):
+            return savedLayoutStore.delete(id: id) ? .ok : .error("Saved layout not found")
         case let .pasteBuffer(surfaceID, name, bracketed):
             guard let session = sessions[surfaceID] else { return .error("Surface not found") }
             let buffer: PasteBufferStore.Buffer?
@@ -2120,7 +2173,16 @@ public final class SurfaceRegistry: @unchecked Sendable {
             return false
         }
         let surfaceID = (leaf.activeSurfaceID ?? leaf.surfaceID).uuidString
-        sessions[surfaceID]?.write(Self.automationLaunchCommand(for: automation.agent))
+        let resolvedAgent: String
+        if automation.agent.lowercased() == "auto" {
+            resolvedAgent = AgentRoutingResolver.resolve(
+                cwd: automation.repoPath, rules: routingRuleStore.list(),
+                defaultAgent: KouenSettings.load().defaultAgentKind
+            ).rawValue
+        } else {
+            resolvedAgent = automation.agent
+        }
+        sessions[surfaceID]?.write(Self.automationLaunchCommand(for: resolvedAgent))
 
         // ponytail: fixed 3s delay before typing the prompt — heuristic for CLI
         // cold-start, not a readiness check. Ceiling: a slow/cold CLI start could still
@@ -2152,6 +2214,13 @@ public final class SurfaceRegistry: @unchecked Sendable {
             agent: automation.agent, prompt: automation.prompt, intervalMinutes: automation.intervalMinutes,
             enabled: automation.enabled, lastRunAt: automation.lastRunAt, lastRunStatus: automation.lastRunStatus,
             nextRunAt: automation.nextRunAt, createdAt: automation.createdAt, updatedAt: automation.updatedAt
+        )
+    }
+
+    private static func routingRuleSummary(_ rule: AgentRoutingRule) -> AgentRoutingRuleSummary {
+        AgentRoutingRuleSummary(
+            id: rule.id, order: rule.order, kind: rule.kind.rawValue, pattern: rule.pattern,
+            targetAgent: rule.targetAgent.rawValue, enabled: rule.enabled
         )
     }
 }
