@@ -13,6 +13,9 @@ struct RepoGitMetadata: Sendable, Equatable {
     /// `nil` when there's no PR at all; `false` covers both real conflicts and GitHub still
     /// computing merge state — P39 G3's merge action treats both the same (don't offer to merge).
     let prMergeable: Bool?
+    /// M8: `"APPROVED"` lets `mergePR` offer a checks-waiver — `prMergeable` (no conflicts)
+    /// is still always required, never waived.
+    let prReviewDecision: String?
     let aheadCount: Int?
     let behindCount: Int?
 }
@@ -324,7 +327,7 @@ final class SidebarListModel {
     }
 
     private func fetchGitMetadata(for path: String, branch: String) async -> RepoGitMetadata {
-        let empty = RepoGitMetadata(prNumber: nil, prURL: nil, prTitle: nil, prBaseBranch: nil, prChecksStatus: nil, prMergeable: nil, aheadCount: nil, behindCount: nil)
+        let empty = RepoGitMetadata(prNumber: nil, prURL: nil, prTitle: nil, prBaseBranch: nil, prChecksStatus: nil, prMergeable: nil, prReviewDecision: nil, aheadCount: nil, behindCount: nil)
         guard Self.cachedGhPath != nil, await fetchHasRemote(for: path) else { return empty }
 
         return await Task.detached(priority: .utility) {
@@ -335,6 +338,7 @@ final class SidebarListModel {
             let prBaseBranch = pr?.baseRefName
             let prChecksStatus = pr?.checksStatus
             let prMergeable = pr.map { $0.mergeable }
+            let prReviewDecision = pr?.reviewDecision
 
             var aheadCount: Int? = nil
             var behindCount: Int? = nil
@@ -356,7 +360,7 @@ final class SidebarListModel {
                 }
             } catch {}
 
-            return RepoGitMetadata(prNumber: prNumber, prURL: prURL, prTitle: prTitle, prBaseBranch: prBaseBranch, prChecksStatus: prChecksStatus, prMergeable: prMergeable, aheadCount: aheadCount, behindCount: behindCount)
+            return RepoGitMetadata(prNumber: prNumber, prURL: prURL, prTitle: prTitle, prBaseBranch: prBaseBranch, prChecksStatus: prChecksStatus, prMergeable: prMergeable, prReviewDecision: prReviewDecision, aheadCount: aheadCount, behindCount: behindCount)
         }.value
     }
 
