@@ -265,6 +265,25 @@ public enum IPCRequest: Codable, Sendable {
     case automationDelete(id: UUID)
     case automationSetEnabled(id: UUID, enabled: Bool)
     case automationRunNow(id: UUID)
+
+    // Agent Routing Rules (M2): ordered rules resolving `agent: "auto"` to a concrete
+    // AgentKind at spawn time (kouenSpawnAgent, Automation fire). `kind` is "path" or
+    // "stack"; `pattern` is the glob (path) or SignalFileRouter stack name (stack).
+    case routingRuleList
+    case routingRuleGet(id: UUID)
+    case routingRuleCreate(kind: String, pattern: String, targetAgent: String, enabled: Bool)
+    case routingRuleUpdate(id: UUID, kind: String?, pattern: String?, targetAgent: String?, enabled: Bool?)
+    case routingRuleDelete(id: UUID)
+    case routingRuleReorder(kind: String, orderedIDs: [UUID])
+
+    // Saved Layouts (M5): named, reusable pane-arrangement templates. `savedLayoutSave`
+    // captures `tabID`'s current pane tree SHAPE only (split directions/ratios/leaf
+    // positions) — no running processes, no cwd. Applying a layout is entirely client-side
+    // (repeated `.newTab` + `.newSplit` requests walking the saved shape), so there is no
+    // `.savedLayoutApply` request here.
+    case savedLayoutList
+    case savedLayoutSave(name: String, tabID: UUID)
+    case savedLayoutDelete(id: UUID)
 }
 
 public enum BrowserRequestPayload: Codable, Sendable {
@@ -436,6 +455,14 @@ public enum IPCResponse: Codable, Sendable {
     // Automations (P41)
     case automationInfo(AutomationSummary?)
     case automations([AutomationSummary])
+
+    // Agent Routing Rules (M2)
+    case routingRuleInfo(AgentRoutingRuleSummary?)
+    case routingRules([AgentRoutingRuleSummary])
+
+    // Saved Layouts (M5)
+    case savedLayoutInfo(SavedLayout?)
+    case savedLayouts([SavedLayout])
 }
 
 public struct OptionEntry: Codable, Sendable, Equatable {
