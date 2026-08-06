@@ -1,17 +1,24 @@
-# Competitive Position (as of v4.9.0, 2026-07-26)
+# Competitive Position (as of v4.10.0, 2026-08-06)
 
 > Merged from the 2026-07-02 baseline (then named "Harness") + the P39 refresh
 > (2026-07-11, added Zed/Superset/tmux, re-verified every claim against current
-> source) + the 2026-07-26 monthly refresh (see new section near the bottom —
-> 3 parallel web-research passes covering Warp/Supacode/cmux, iTerm2/Ghostty/
-> WezTerm, Zed/Superset/tmux, last ~30 days only). See
-> `agent-memory/plans/p39-competitive-feature-gaps.md` for the per-gap evidence
-> trail and phase-by-phase implementation notes from the earlier pass.
+> source) + the 2026-07-26 monthly refresh (3 parallel web-research passes
+> covering Warp/Supacode/cmux, iTerm2/Ghostty/WezTerm, Zed/Superset/tmux, last
+> ~30 days only) + the 2026-08-05/06 M2-M9 build pass (see updated section near
+> the bottom — all 8 scoped gaps from the July refresh built, tested, shipped
+> in v4.10.0). See `agent-memory/plans/p39-competitive-feature-gaps.md` for the
+> per-gap evidence trail from the earlier pass, and
+> `agent-memory/plans/m2-m9-competitive-features/wayfinder-map.md` +
+> `agent-memory/knowledge/project_m2-m9-competitive-build-decision.md` for the
+> M2-M9 build's own ticket-by-ticket scope notes and approval record.
 >
 > **Policy (2026-07-26, user decision — see "Not gaps" section below):** Kouen
 > only builds features with real usage justification, not competitor-checkbox
-> parity. New gaps found in this refresh are logged for user review, not
-> auto-scoped into a plan.
+> parity. The M2-M9 build was a scoped, explicit exception to that policy (user
+> approved building all 8 despite no individually-validated usage friction —
+> see the build-decision doc above); it does not reverse the policy for future
+> refreshes. New gaps found in later refreshes are logged for user review, not
+> auto-scoped into a plan, same as before.
 
 ## Kouen Wins
 
@@ -97,6 +104,23 @@
 | Open source | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ |
 | Cross-platform GUI | ✗ | ✓ | ✗ | partial | ✗ | ✗ | ✓ | ✗ | ✓ (terminal-native) |
 | Block-based terminal | ✓ (P34, shipped 2026-07-02) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+## Feature Matrix — M2-M9 additions (2026-08-06)
+
+Deliberately kept separate from the 2026-07-11 matrix above — every ✓ here is a
+narrower slice than the competitor cell it's compared against (see the
+"Resolution note" above), so merging them into one table would overstate parity.
+
+| Feature | Kouen (v4.10.0) | Who's fuller | Kouen's gap vs. them |
+|---------|:----------------:|---------------|-----------------------|
+| Agent routing rule (auto-select on spawn) | ✓ path/stack rules → CLI binary | Warp (per-request model router) | Kouen routes at session-spawn time only; Warp routes individual LLM calls mid-session |
+| Browser design mode (human visual edit) | ✓ preview + Copy CSS | cmux | No source-file round-trip — edits never persist past reload |
+| Fork conversation | ✓ claude-code, codex | cmux (broader agent support, if any) | Every other `AgentKind` gets a disabled menu item |
+| Saved workspace layouts | ✓ shape-only | cmux | No ratio restore, no process restore |
+| Risky command advisory | ✓ after-the-fact toast | iTerm2 (pre-run hold+approve) | Never blocks — PTY-input interception not built |
+| Request peer review | ✓ human-triggered ask | iTerm2 (auto-idle + auto-paste-back) | No auto-trigger, no response capture |
+| PR merge checks-waiver | ✓ on `reviewDecision:"APPROVED"` | Supacode (comparable) | Near parity — smallest gap of this batch |
+| Slash command picker | ✓ fixed command list | Superset (adds `@file` mention) | `@file` autocomplete not built |
 
 ## Positioning Statement
 
@@ -345,26 +369,31 @@ per `INDEX.md`), not a brand-new gap. Worth a glance at P37's remaining scope
 (F5/F6) against these two feature sets before calling P37 "done," but this is
 in-flight work, not a new item.
 
-**Genuine new gaps found this pass (not yet in any plan, unscoped, flagged for
-user review — not auto-built per the no-gimmick policy above)**:
+**Gaps found in the 2026-07-26 pass — resolved 2026-08-05/06 (M2-M9 built, M1 rejected)**:
 
-| # | Gap | Source | Why it's not a gimmick (real workflow value) |
-|---|-----|--------|-----------------------------------------------|
-| M1 | **Warp Cloud Agent Runners** — hosted/cloud execution tier for agents, GA'd to all users 2026-07-23 | docs.warp.dev/changelog/2026 | Different architecture (cloud vs local-daemon) — same class as Claude Code Desktop's Remote mode already noted above as "worth tracking, not yet a gap to close" |
-| M2 | **Warp custom model routers** — per-request rules routing agent calls to different LLMs, UI editor added 2026-07-03 | same | Real cost/quality control lever for heavy agent users, not cosmetic |
-| M3 | **cmux Browser Design Mode** — visually edit/annotate pages inside the browser pane, 2026-07-19 | cmux.com/docs/changelog | Kouen's browser pane has an agent API but no human-facing visual edit mode — plausible real workflow gap for a human doing quick UI tweaks alongside an agent |
-| M4 | **cmux Fork Conversation** — branch a running agent session into a new split/tab/workspace, 2026-07-14/19 | same | Directly useful for "try two approaches from the same point" — a real multi-agent workflow pattern, not decoration |
-| M5 | **cmux saved workspace layouts** — named, reusable split-arrangement templates, 2026-07-14 | same | Distinct from Kouen's daemon *restore* (state snapshot) — this is a *reusable template* you apply to a fresh workspace; real repeat-workflow value |
-| M6 | **iTerm2 (beta) per-action AI safety-checking** — every agent command/keystroke individually judged against the original request, risky ones held for one-tap approval, 3.7.0beta7, 2026-07-15 | iterm2.com/appcasts/testing_changes3.txt | Safety/trust feature, not a gimmick — relevant given Kouen's agents already run arbitrary shell commands unsupervised |
-| M7 | **iTerm2 (beta) Claude Code "workgroup" review automation** — auto-request peer-session code review on idle, auto-paste results back, 3.7.0beta7, 2026-07-15 | same | Real automation of an already-common manual habit (ask a second agent to review) |
-| M8 | **Supacode PR worktree status inspector + PR policy waiver on maintainer approval**, v0.10.6, 2026-07-12 | github.com/supabitapp/supacode/releases | Smaller than M1-M7, but a real gap next to Kouen's existing merge-strategy picker (adds an approval-waiver step Kouen's picker doesn't have) |
-| M9 | **Superset rich terminal-input composer** (multi-line, @file mentions, slash commands) for CLI agents, 2026-07-12 | superset.sh/changelog/2026-07-12-... | Minor, nice-to-have prompt-composition UX, not core — lowest priority of this list |
+| # | Gap | Source | Status (2026-08-06) |
+|---|-----|--------|----------------------|
+| M1 | **Warp Cloud Agent Runners** — hosted/cloud execution tier for agents, GA'd to all users 2026-07-23 | docs.warp.dev/changelog/2026 | **Rejected.** Different architecture (cloud vs local-daemon) — same class as Claude Code Desktop's Remote mode, not revisited. See wayfinder-map.md "Out of scope." |
+| M2 | **Warp custom model routers** — per-request rules routing agent calls to different LLMs, UI editor added 2026-07-03 | same | **Closed, scope-corrected.** Warp's version routes individual LLM calls inside its own owned agent runtime — not buildable in Kouen, which wraps opaque CLI subprocesses. Rebuilt as **spawn-time CLI-binary routing** instead: ordered rules (`AgentRoutingRule`, path-glob or detected-stack match) resolve `agent:"auto"` to a concrete `AgentKind` when spawning a session. Narrows the gap (routing exists now), does not match Warp's per-request granularity. MCP-only (5 `kouenRoutingRule*` tools), no Settings UI yet. |
+| M3 | **cmux Browser Design Mode** — visually edit/annotate pages inside the browser pane, 2026-07-19 | cmux.com/docs/changelog | **Closed, scope-cut.** Hover-highlight + click-to-select + live style-preview popover + "Copy CSS" clipboard export, built into `BrowserPaneView`. v1 is **visual-preview-only** — JS style edits never persist, no source-file round-trip. cmux's scope may go further; that's a distinct, larger, unbuilt feature. |
+| M4 | **cmux Fork Conversation** — branch a running agent session into a new split/tab/workspace, 2026-07-14/19 | same | **Closed, narrower support.** "View → Fork Conversation" reuses each CLI's own native fork flag (`claude --continue --fork-session`, `codex fork --last`) in a new split. Only enabled for Claude Code and Codex (verified real `--help` flags) — every other `AgentKind` gets a disabled menu item, not a fake fork. |
+| M5 | **cmux saved workspace layouts** — named, reusable split-arrangement templates, 2026-07-14 | same | **Closed, shape-only.** "Save Current Layout as Template…" / "Apply Saved Layout…" captures split directions/ratios/leaf positions (`SavedLayout`/`PaneLayoutShape`) — applying creates fresh empty shells, no running processes restored, no ratio restore in v1. Distinct from Kouen's pre-existing daemon session-restore (state snapshot, not a reusable template). |
+| M6 | **iTerm2 (beta) per-action AI safety-checking** — every agent command/keystroke individually judged against the original request, risky ones held for one-tap approval, 3.7.0beta7, 2026-07-15 | iterm2.com/appcasts/testing_changes3.txt | **Closed, materially weaker.** `RiskyCommandClassifier` (local regex heuristic) flags a just-finished risky command in an agent-active pane with a warning Toast — fires on OSC 133 `D` (command already ran), **advisory only, never blocks or holds anything**. iTerm2's real mechanism needs PTY-input interception *before* Enter reaches the shell — judged too risky to build/verify unsafely in one session. Narrows the trust gap, does not close it; revisit if the PTY-interception approach gets scoped later. |
+| M7 | **iTerm2 (beta) Claude Code "workgroup" review automation** — auto-request peer-session code review on idle, auto-paste results back, 3.7.0beta7, 2026-07-15 | same | **Closed, human-triggered only.** "View → Request Peer Review" finds another agent-running pane in the active tab and types a review-request prompt into it. No auto-trigger-on-idle, no auto-capture/paste-back of the peer's response — those need reliable idle-detection + cross-pane text extraction not verified against a real running agent this session. v1 automates the *asking* step only. |
+| M8 | **Supacode PR worktree status inspector + PR policy waiver on maintainer approval**, v0.10.6, 2026-07-12 | github.com/supabitapp/supacode/releases | **Closed, smallest/cleanest of the 8.** Extends the existing PR merge-strategy picker: a PR with GitHub's `reviewDecision == "APPROVED"` can merge with checks not yet green (explicit "Merge Anyway" confirmation). `mergeable` (no conflicts) is never waived regardless of approval. |
+| M9 | **Superset rich terminal-input composer** (multi-line, @file mentions, slash commands) for CLI agents, 2026-07-12 | superset.sh/changelog/2026-07-12-... | **Closed, half scope.** Typing `/` in the Composer (⌘⇧E) shows a filtered slash-command picker (reuses the file editor's `CompletionPopupView`) over a fixed list (`/clear`, `/compact`, `/model`, `/agents`, `/continue`, `/resume`, `/help`, `/cost`) — discoverability only, commands already passed through to the CLI before. `@file` mention autocomplete (the other half of Superset's scope) was **cut, not built** — same UI pattern would extend to it. |
 
-**Note on M-numbering**: these are refresh-pass findings, not yet triaged into gap
-vs. rejected — unlike the G-numbered items from the 2026-07-11 pass (all resolved
-into Closed/Rejected above), none of M1-M9 has a user decision yet. Don't silently
-promote these into a plan; surface the list and let the user pick what (if anything)
-is worth scoping.
+**Resolution note**: all 8 (M2-M9) were built, tested (build/test/robot green
+throughout; final combined regression: KouenCoreTests 681/5 known-baseline,
+KouenDaemonTests 222/0, KouenMCPTests 32/0, KouenAppTests 261/0, robot 27/27),
+and shipped in **v4.10.0** (2026-08-06). M1 was rejected outright (architecture
+mismatch, not a build-effort call). Every ticket above intentionally shipped a
+**narrower** slice than the competitor feature that motivated it — read the
+"Closed" notes as "gap narrowed," not "gap closed to full parity," except M8
+which is close to full parity. Live-check (real running agent/app, not just
+unit tests) is still owed on every ticket — see wayfinder-map.md's "What to
+check first" note. Full per-ticket scope-cut rationale:
+`agent-memory/plans/m2-m9-competitive-features/wayfinder-map.md`.
 
 **Nothing new found**: Ghostty (still 1.3.1, Mar 2026 — commits since are Xcode 27
 SDK/packaging only, no user-facing feature), WezTerm (no tagged release since Feb
