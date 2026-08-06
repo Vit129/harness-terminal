@@ -277,6 +277,12 @@ final class SessionCoordinator: NSObject {
     }
     func splitTab(workspaceID: WorkspaceID, tabID: TabID, direction: SplitDirection) { splitPaneCoordinator.splitTab(workspaceID: workspaceID, tabID: tabID, direction: direction) }
     func splitSession(workspaceID: WorkspaceID, sessionID: SessionID, direction: SplitDirection) { splitPaneCoordinator.splitSession(workspaceID: workspaceID, sessionID: sessionID, direction: direction) }
+
+    // MARK: - Saved Layouts (M5, facade → SplitPaneCoordinator)
+    func listSavedLayouts() async -> [SavedLayout] { await splitPaneCoordinator.listSavedLayouts() }
+    func saveCurrentLayout(name: String) { splitPaneCoordinator.saveCurrentLayout(name: name) }
+    func deleteSavedLayout(id: UUID) { splitPaneCoordinator.deleteSavedLayout(id: id) }
+    func applySavedLayout(_ layout: SavedLayout) { splitPaneCoordinator.applySavedLayout(layout) }
     func killActivePane() { splitPaneCoordinator.killActivePane() }
 
     /// Close active pane (⌘W behavior): if single pane → close tab; otherwise kill pane.
@@ -469,6 +475,15 @@ final class SessionCoordinator: NSObject {
             existingOnFinished?(duration, exitCode)
             guard let host else { return }
             PromptQueue.shared.dequeueAndRun(for: host.surfaceID, via: host)
+            // M6: advisory-only risky-command flag for agent-active panes — fires AFTER
+            // the command already ran (this hook is OSC 133 `D`, command-finished), so it
+            // can never block anything. See RiskyCommandClassifier's own doc comment for
+            // why this is a "heads up" not a gate.
+            if AgentDetector.snapshot(forSurfaceKey: host.surfaceID.uuidString) != nil,
+               let command = host.surfaceView.blocks.last?.command,
+               RiskyCommandClassifier.isRisky(command) {
+                Toast.show("⚠️ Agent ran a risky command: \(command.prefix(60))", in: host, hold: 3.0)
+            }
         }
         return host
     }
