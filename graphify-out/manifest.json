@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/KouenVersion.swift": {
-    "mtime": 1785510867.5562246,
-    "ast_hash": "a1e521298ed5fbe322d62e21cbd4a541",
+    "mtime": 1786009720.8629777,
+    "ast_hash": "d1eaed274dad6ffcd3599a4c6c930f68",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Layouts/LayoutTemplate.swift": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/GeneratedReleaseNotes.swift": {
-    "mtime": 1785510867.5602384,
-    "ast_hash": "39865e29f6e9983688dbcc09d7b076dc",
+    "mtime": 1786009722.2480364,
+    "ast_hash": "ea7972cbaece7fe463d2a2f3a1e13a6b",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/ReleaseNotes.swift": {
@@ -3395,8 +3395,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1785510867.5404782,
-    "ast_hash": "a048eea63adf65a7374017ddbf7cab98",
+    "mtime": 1785999813.0649574,
+    "ast_hash": "25425b07396ed8bccc9cd9aed3b7785d",
     "semantic_hash": ""
   },
   "GEMINI.md": {
@@ -3605,8 +3605,8 @@
     "semantic_hash": ""
   },
   "agent-memory/knowledge/meta/competitive-position.md": {
-    "mtime": 1785510867.6924253,
-    "ast_hash": "2702aff5b5a26d8b2c20b69aac14d338",
+    "mtime": 1786010670.7859006,
+    "ast_hash": "fe1573df1a1a2d14fe4a5260ae37a1f0",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/meta/project-history.md": {
