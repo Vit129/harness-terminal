@@ -246,6 +246,14 @@ public enum KouenPaths {
         applicationSupport.appendingPathComponent("automations.json")
     }
 
+    public static var agentRoutingRulesURL: URL {
+        applicationSupport.appendingPathComponent("agent-routing-rules.json")
+    }
+
+    public static var savedLayoutsURL: URL {
+        applicationSupport.appendingPathComponent("saved-layouts.json")
+    }
+
     public static var fishCompletionDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/fish/completions", isDirectory: true)
