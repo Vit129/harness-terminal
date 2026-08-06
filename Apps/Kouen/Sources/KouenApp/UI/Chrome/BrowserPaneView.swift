@@ -36,6 +36,13 @@ public final class BrowserPaneView: NSView {
     internal let viewSourceButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     internal let darkModeButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     private var isWebDarkModeForced = false
+    internal let designModeButton = SoftIconButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+    private var isDesignModeActive = false
+    private var designModePopover: NSPopover?
+    /// Style fields currently shown in the popover, keyed by CSS property — read back on
+    /// "Copy CSS", kept in sync as the user edits each field.
+    private var designModeCurrentStyles: [String: String] = [:]
+    private var designModeCurrentSelector = ""
     /// Called when user taps the close (×) button in the toolbar.
     public var onClosePaneRequested: (() -> Void)?
     /// Called when user taps "View Source" while showing a local .html/.htm file:// URL.
@@ -205,7 +212,7 @@ public final class BrowserPaneView: NSView {
         closePaneButton.setAccessibilityIdentifier("browser-close-button")
         closePaneButton.toolTip = "Close Browser Pane"
 
-        for btn in [backButton, forwardButton, reloadStopButton, closePaneButton, viewSourceButton, darkModeButton] {
+        for btn in [backButton, forwardButton, reloadStopButton, closePaneButton, viewSourceButton, darkModeButton, designModeButton] {
             btn.setContentHuggingPriority(.required, for: .horizontal)
             btn.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
@@ -218,6 +225,10 @@ public final class BrowserPaneView: NSView {
         configureNavigationButton(darkModeButton, symbolName: "doc.on.doc", action: #selector(copyURLClicked))
         darkModeButton.setAccessibilityIdentifier("browser-copy-url-button")
         darkModeButton.toolTip = "Copy URL"
+
+        configureNavigationButton(designModeButton, symbolName: "cursorarrow.rays", action: #selector(designModeClicked))
+        designModeButton.setAccessibilityIdentifier("browser-design-mode-button")
+        designModeButton.toolTip = "Design Mode — click an element to preview/edit its style"
 
         // URL Text Field container & configuration
         let urlContainer = NSView()
@@ -267,7 +278,7 @@ public final class BrowserPaneView: NSView {
         trailingSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
         trailingSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
 
-        let toolbarStack = NSStackView(views: [backButton, forwardButton, reloadStopButton, leadingSpacer, urlContainer, trailingSpacer, viewSourceButton, darkModeButton, closePaneButton])
+        let toolbarStack = NSStackView(views: [backButton, forwardButton, reloadStopButton, leadingSpacer, urlContainer, trailingSpacer, viewSourceButton, darkModeButton, designModeButton, closePaneButton])
         toolbarStack.orientation = .horizontal
         toolbarStack.spacing = 6
         toolbarStack.edgeInsets = NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 8)
@@ -284,6 +295,7 @@ public final class BrowserPaneView: NSView {
             forwardButton.widthAnchor.constraint(equalToConstant: 24),
             reloadStopButton.widthAnchor.constraint(equalToConstant: 24),
             darkModeButton.widthAnchor.constraint(equalToConstant: 24),
+            designModeButton.widthAnchor.constraint(equalToConstant: 24),
             closePaneButton.widthAnchor.constraint(equalToConstant: 24),
             urlContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
             urlContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
@@ -649,6 +661,12 @@ public final class BrowserPaneView: NSView {
         #endif
         controller0.addUserScript(WKUserScript(source: kickJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         controller0.add(WeakScriptMessageHandler(self), name: "kouenCompositorKick")
+
+        // Design Mode (M3) has no persistent WKUserScript — its overlay/listener script is
+        // injected on demand via evaluateJS when the human toggles it on (toggleDesignMode()),
+        // not at every document load like console/network capture. Only the message handler
+        // (native callback for a click-selection) is registered up front here.
+        controller0.add(WeakScriptMessageHandler(self), name: "kouenDesignModeSelect")
     }
 
     // WebKit's async scrolling thread doesn't build a scrolling-tree node for a nested
@@ -765,6 +783,69 @@ public final class BrowserPaneView: NSView {
         return (try? JSONDecoder().decode([BrowserNetworkEntry].self, from: data)) ?? []
     }
 
+    /// Design Mode (M3): hover-highlight + click-to-select. Injected on demand via
+    /// `evaluateJS` when the human toggles the mode on — not a persistent `WKUserScript`,
+    /// unlike console/network capture, since it should only run while the panel is open.
+    /// Selected element gets a `data-kouen-design-ref` marker so a later style edit can
+    /// re-find it without re-selecting (same technique `snapshot()` uses with
+    /// `data-kouen-ref`, scoped separately so the two features never collide).
+    private static let designModeEnableJS = """
+    (function(){
+      if (window.__kouenDesignModeActive) return;
+      window.__kouenDesignModeActive = true;
+      var overlay = document.createElement('div');
+      overlay.id = '__kouenDesignOverlay';
+      overlay.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;' +
+        'border:2px solid #2563eb;background:rgba(37,99,235,0.08);display:none;';
+      document.documentElement.appendChild(overlay);
+      function onMove(e) {
+        var r = e.target.getBoundingClientRect();
+        overlay.style.display = 'block';
+        overlay.style.left = r.x + 'px';
+        overlay.style.top = r.y + 'px';
+        overlay.style.width = r.width + 'px';
+        overlay.style.height = r.height + 'px';
+      }
+      function onClick(e) {
+        e.preventDefault(); e.stopPropagation();
+        document.querySelectorAll('[data-kouen-design-ref]').forEach(function(n){n.removeAttribute('data-kouen-design-ref');});
+        var el = e.target;
+        el.setAttribute('data-kouen-design-ref', '1');
+        var cs = getComputedStyle(el);
+        var props = ['color','backgroundColor','fontSize','fontWeight','padding','margin','border','width','height'];
+        var styles = {};
+        props.forEach(function(p){ styles[p] = cs[p]; });
+        window.webkit.messageHandlers.kouenDesignModeSelect.postMessage({
+          tag: el.tagName.toLowerCase(),
+          id: el.id || '',
+          className: el.getAttribute('class') || '',
+          styles: styles
+        });
+      }
+      document.addEventListener('mousemove', onMove, true);
+      document.addEventListener('click', onClick, true);
+      window.__kouenDesignModeCleanup = function(){
+        document.removeEventListener('mousemove', onMove, true);
+        document.removeEventListener('click', onClick, true);
+        document.querySelectorAll('[data-kouen-design-ref]').forEach(function(n){n.removeAttribute('data-kouen-design-ref');});
+        overlay.remove();
+        window.__kouenDesignModeActive = false;
+        delete window.__kouenDesignModeCleanup;
+      };
+    })();
+    """
+
+    private static let designModeStyleProps = [
+        "color", "backgroundColor", "fontSize", "fontWeight", "padding", "margin", "border", "width", "height",
+    ]
+
+    struct DesignModeElementInfo: Codable {
+        let tag: String
+        let id: String
+        let className: String
+        let styles: [String: String]
+    }
+
     private func configureNavigationButton(_ button: SoftIconButton, symbolName: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.setSymbol(symbolName, accessibilityDescription: nil, pointSize: 11, weight: .medium)
@@ -777,6 +858,7 @@ public final class BrowserPaneView: NSView {
     // MARK: - Actions
 
     @objc private func closePaneClicked() {
+        teardownDesignModeIfActive()
         NSLog("BROWSER_DEBUG: closePaneClicked, onClosePaneRequested=%d", onClosePaneRequested != nil ? 1 : 0)
         if let cb = onClosePaneRequested {
             cb()
@@ -796,6 +878,106 @@ public final class BrowserPaneView: NSView {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
         Toast.show("URL copied", in: self)
+    }
+
+    // MARK: - Design Mode (M3)
+
+    @objc private func designModeClicked() {
+        if isDesignModeActive {
+            teardownDesignModeIfActive()
+            return
+        }
+        isDesignModeActive = true
+        designModeButton.contentTintColor = KouenDesign.chrome.accent
+        Task { @MainActor [weak self] in
+            _ = try? await self?.evaluateJS(Self.designModeEnableJS)
+        }
+    }
+
+    /// Toggle-off, pane close, or tab switch — always safe to call even when already off.
+    private func teardownDesignModeIfActive() {
+        guard isDesignModeActive else { return }
+        isDesignModeActive = false
+        designModeButton.contentTintColor = KouenDesign.chrome.textSecondary
+        designModePopover?.close()
+        designModePopover = nil
+        Task { @MainActor [weak self] in
+            _ = try? await self?.evaluateJS("window.__kouenDesignModeCleanup && window.__kouenDesignModeCleanup()")
+        }
+    }
+
+    private func handleDesignModeSelection(_ body: Any) {
+        guard isDesignModeActive,
+              JSONSerialization.isValidJSONObject(body),
+              let data = try? JSONSerialization.data(withJSONObject: body),
+              let info = try? JSONDecoder().decode(DesignModeElementInfo.self, from: data)
+        else { return }
+        showDesignModePopover(for: info)
+    }
+
+    private func showDesignModePopover(for info: DesignModeElementInfo) {
+        designModeCurrentStyles = info.styles
+        designModeCurrentSelector = Self.cssSelector(for: info)
+        designModePopover?.close()
+
+        var title = info.tag
+        if !info.id.isEmpty { title += "#\(info.id)" }
+        else if let firstClass = info.className.split(separator: " ").first { title += ".\(firstClass)" }
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = DesignModePopoverViewController(
+            title: title, properties: Self.designModeStyleProps, styles: info.styles,
+            onStyleChanged: { [weak self] prop, value in self?.applyLiveStyle(prop: prop, value: value) },
+            onCopyCSS: { [weak self] in self?.copyDesignModeCSS() }
+        )
+        popover.show(relativeTo: designModeButton.bounds, of: designModeButton, preferredEdge: .maxY)
+        designModePopover = popover
+    }
+
+    private func applyLiveStyle(prop: String, value: String) {
+        designModeCurrentStyles[prop] = value
+        // Single-quoted JS string literal — escape backslash first, then the quote itself.
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        Task { @MainActor [weak self] in
+            _ = try? await self?.evaluateJS(
+                "var el=document.querySelector('[data-kouen-design-ref]'); if(el) el.style.\(prop) = '\(escaped)';"
+            )
+        }
+    }
+
+    private func copyDesignModeCSS() {
+        let body = Self.designModeStyleProps
+            .compactMap { prop -> String? in
+                guard let value = designModeCurrentStyles[prop] else { return nil }
+                return "  \(Self.cssPropertyName(prop)): \(value);"
+            }
+            .joined(separator: "\n")
+        let selector = designModeCurrentSelector.isEmpty ? ".selected-element" : designModeCurrentSelector
+        let block = "/* Kouen Design Mode — paste into your own stylesheet */\n\(selector) {\n\(body)\n}"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(block, forType: .string)
+        Toast.show("CSS copied", in: self)
+    }
+
+    /// Real selector for the clicked element — `#id` wins outright (IDs are unique, no tag
+    /// prefix needed), else `tag.class1.class2` (every class, for correct specificity), else
+    /// just the bare tag. Mirrors how a human would actually write this selector by hand.
+    static func cssSelector(for info: DesignModeElementInfo) -> String {
+        if !info.id.isEmpty { return "#\(info.id)" }
+        let classes = info.className.split(separator: " ").filter { !$0.isEmpty }
+        guard !classes.isEmpty else { return info.tag }
+        return info.tag + classes.map { ".\($0)" }.joined()
+    }
+
+    static func cssPropertyName(_ camelCase: String) -> String {
+        var result = ""
+        for char in camelCase {
+            if char.isUppercase { result += "-" + char.lowercased() } else { result.append(char) }
+        }
+        return result
     }
 
     /// Local .html/.htm files can round-trip to the file editor via `onViewSourceRequested`;
@@ -1325,6 +1507,10 @@ extension BrowserPaneView: WKScriptMessageHandler {
             if let wv = message.webView { kickCompositorRelayout(for: wv) }
             return
         }
+        if message.name == "kouenDesignModeSelect" {
+            handleDesignModeSelection(message.body)
+            return
+        }
         guard let body = message.body as? [String: Any],
               let level = body["level"] as? String,
               let text = body["message"] as? String else {
@@ -1379,5 +1565,81 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         handler?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+/// Design Mode (M3) popover content — one labeled text field per editable style property,
+/// plus a "Copy CSS" button. Every field edit calls back live (`onStyleChanged`); nothing
+/// here talks to WebKit directly, that's the owning `BrowserPaneView`'s job.
+@MainActor
+private final class DesignModePopoverViewController: NSViewController {
+    private let properties: [String]
+    private let onStyleChanged: (String, String) -> Void
+    private let onCopyCSS: () -> Void
+
+    init(
+        title: String, properties: [String], styles: [String: String],
+        onStyleChanged: @escaping (String, String) -> Void, onCopyCSS: @escaping () -> Void
+    ) {
+        self.properties = properties
+        self.onStyleChanged = onStyleChanged
+        self.onCopyCSS = onCopyCSS
+        self.styles = styles
+        super.init(nibName: nil, bundle: nil)
+        self.title = title
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private let styles: [String: String]
+
+    override func loadView() {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+
+        let titleLabel = NSTextField(labelWithString: title ?? "")
+        titleLabel.font = .boldSystemFont(ofSize: 12)
+        stack.addArrangedSubview(titleLabel)
+
+        for (index, prop) in properties.enumerated() {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.spacing = 6
+
+            let label = NSTextField(labelWithString: prop)
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .secondaryLabelColor
+            label.widthAnchor.constraint(equalToConstant: 90).isActive = true
+
+            let field = NSTextField(string: styles[prop] ?? "")
+            field.font = .systemFont(ofSize: 11)
+            field.tag = index
+            field.target = self
+            field.action = #selector(fieldChanged(_:))
+            field.widthAnchor.constraint(equalToConstant: 140).isActive = true
+
+            row.addArrangedSubview(label)
+            row.addArrangedSubview(field)
+            stack.addArrangedSubview(row)
+        }
+
+        let copyButton = NSButton(title: "Copy CSS", target: self, action: #selector(copyClicked))
+        copyButton.bezelStyle = .rounded
+        stack.addArrangedSubview(copyButton)
+
+        view = stack
+    }
+
+    @objc private func fieldChanged(_ sender: NSTextField) {
+        guard properties.indices.contains(sender.tag) else { return }
+        onStyleChanged(properties[sender.tag], sender.stringValue)
+    }
+
+    @objc private func copyClicked() {
+        onCopyCSS()
     }
 }
