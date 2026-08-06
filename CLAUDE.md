@@ -54,6 +54,7 @@ Full cycle: verify → bump → commit+push → prod → CHANGELOG → tag → G
 - **`CharacterWidthTable.swift`**: generated + committed. Regenerate via `Scripts/generate-width-table.swift` if `CharacterWidth.swift` changes.
 - **`themes.json`**: excluded from SwiftPM build. Regenerate `BundledThemesData.swift` with theme export test.
 - **Release packaging order**: `dmg`/`sign`/`finalize` operate on existing `Kouen.app` — wrong order rebuilds away signature.
+- **No worktree nested inside `.kouen-worktrees/`**: never `git worktree add` a path under an existing `.kouen-worktrees/<name>` checkout. Create new worktrees only from the main repo root (`~/Git/Personal/kouen-terminal/.kouen-worktrees/<new-name>`), never from inside another worktree.
 
 ## Graphify
 
