@@ -25,6 +25,40 @@ final class BrowserPaneViewTests: XCTestCase {
         XCTAssertEqual(paneView.urlTextField.stringValue, "https://example.com/finish")
     }
 
+    // MARK: - Design Mode (M3)
+
+    func testDesignModeButtonHasExpectedIdentifierAndTooltip() {
+        let testURL = URL(string: "https://example.com/test")!
+        let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        mockWebView.mockURL = testURL
+        let paneView = BrowserPaneView(url: testURL, paneID: UUID(), webView: mockWebView)
+
+        XCTAssertEqual(paneView.designModeButton.accessibilityIdentifier(), "browser-design-mode-button")
+        XCTAssertNotNil(paneView.designModeButton.toolTip)
+    }
+
+    func testCssPropertyNameConvertsCamelCaseToKebabCase() {
+        XCTAssertEqual(BrowserPaneView.cssPropertyName("backgroundColor"), "background-color")
+        XCTAssertEqual(BrowserPaneView.cssPropertyName("fontSize"), "font-size")
+        XCTAssertEqual(BrowserPaneView.cssPropertyName("color"), "color")
+        XCTAssertEqual(BrowserPaneView.cssPropertyName("border"), "border")
+    }
+
+    func testCssSelectorPrefersID() {
+        let info = BrowserPaneView.DesignModeElementInfo(tag: "button", id: "submit-btn", className: "btn btn-primary", styles: [:])
+        XCTAssertEqual(BrowserPaneView.cssSelector(for: info), "#submit-btn")
+    }
+
+    func testCssSelectorFallsBackToTagAndAllClasses() {
+        let info = BrowserPaneView.DesignModeElementInfo(tag: "button", id: "", className: "btn btn-primary", styles: [:])
+        XCTAssertEqual(BrowserPaneView.cssSelector(for: info), "button.btn.btn-primary")
+    }
+
+    func testCssSelectorFallsBackToBareTagWhenNoIdOrClass() {
+        let info = BrowserPaneView.DesignModeElementInfo(tag: "div", id: "", className: "", styles: [:])
+        XCTAssertEqual(BrowserPaneView.cssSelector(for: info), "div")
+    }
+
     func testViewSourceButtonVisibleOnlyForLocalHTML() {
         let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
         let testURL = URL(string: "https://example.com/test")!
