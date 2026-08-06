@@ -5,6 +5,15 @@
 | File | Title | Status |
 |------|-------|--------|
 | [p41-automations/dev-task-progress.md](p41-automations/dev-task-progress.md) | P41 — Automations (scheduled agent launches, `kouen-mcp`) | All tasks built, build/test/robot green, live-check pending |
+| [m2-m9-competitive-features/wayfinder-map.md](m2-m9-competitive-features/wayfinder-map.md) | M2-M9 — Competitive gap features (wayfinder map) | **All 8 tickets closed 2026-08-05** — build/test/robot green throughout (final: KouenCoreTests 681/5 known-baseline, KouenDaemonTests 222/0, KouenMCPTests 32/0, KouenAppTests 261/0, robot 27/27). Several scope corrections/cuts documented per-ticket (M2 model-router → session routing, M3/M6/M7/M9 conservative slices). Live-checks owed on every ticket (needs real running agents/CLIs) — first thing to verify by hand. |
+| [m2-agent-routing-rule/dev-task-progress.md](m2-agent-routing-rule/dev-task-progress.md) | M2 — Agent Routing Rule | Built + tested green (build/test/robot), MCP-only (no Settings UI, matches Automation precedent), live-check owed |
+| [m3-browser-design-mode/dev-task-progress.md](m3-browser-design-mode/dev-task-progress.md) | M3 — Browser Design Mode | Built + tested green (build/test/robot 27/27), v1 = visual-preview-only (no source round-trip), live-check owed |
+| [m4-fork-conversation/dev-task-progress.md](m4-fork-conversation/dev-task-progress.md) | M4 — Fork Conversation | Built + tested green, claude-code/codex only (verified CLI-native fork flags), live-check owed |
+| [m5-saved-layouts/dev-task-progress.md](m5-saved-layouts/dev-task-progress.md) | M5 — Saved Layouts | Built + tested green, shape-only (no ratio/process restore), robot run deferred to end-of-session batch |
+| [m6-risky-command-advisory/dev-task-progress.md](m6-risky-command-advisory/dev-task-progress.md) | M6 — Risky Command Advisory | Built + tested green (250/250), advisory-only (not a hold-gate — documented architecture reason), robot deferred |
+| [m7-request-peer-review/dev-task-progress.md](m7-request-peer-review/dev-task-progress.md) | M7 — Request Peer Review | Built + tested green (254/254), asks-only (no auto-trigger/auto-paste — documented cut), robot deferred |
+| [m8-merge-waiver/dev-task-progress.md](m8-merge-waiver/dev-task-progress.md) | M8 — Merge Waiver | Built + tested green, extends existing P39 G3 merge picker, robot deferred |
+| [m9-slash-command-picker/dev-task-progress.md](m9-slash-command-picker/dev-task-progress.md) | M9 — Slash Command Picker | Built + tested green (261/261), @file-mention cut (documented, P37's autocomplete was mobile-only) |
 
 ## Completed
 
