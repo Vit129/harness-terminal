@@ -365,9 +365,11 @@ private struct SidebarSessionItemRow: View {
         if let prNumber = metadata?.prNumber {
             Divider()
             Button("Merge PR #\(prNumber)…") {
-                mergePR(number: prNumber, cwd: cwd)
+                mergePR(number: prNumber, cwd: cwd, checksWaived: metadata?.prChecksStatus != .pass)
             }
-            .disabled(!(metadata?.prChecksStatus == .pass && metadata?.prMergeable == true))
+            .disabled(!Self.canOfferMerge(
+                checksStatus: metadata?.prChecksStatus, mergeable: metadata?.prMergeable, reviewDecision: metadata?.prReviewDecision
+            ))
         }
         Divider()
         Button("Split session right") {
@@ -402,15 +404,27 @@ private struct SidebarSessionItemRow: View {
     /// confirmation shows PR#/title/target branch, and the caller already gated this action on
     /// `checksStatus == .pass && mergeable == true` — `gh pr merge`'s own branch-protection
     /// refusal is the only additional safety backstop, no app-side force option.
-    private func mergePR(number: Int, cwd: String) {
+    /// M8: normally requires checks-pass + mergeable (P39 G3's original gate, unchanged).
+    /// Waiver path — a maintainer-approved PR can merge with checks not yet green, but
+    /// `mergeable` (no conflicts) is never waived regardless of approval.
+    static func canOfferMerge(
+        checksStatus: GitHubCLIClient.ChecksStatus?, mergeable: Bool?, reviewDecision: String?
+    ) -> Bool {
+        guard mergeable == true else { return false }
+        return checksStatus == .pass || reviewDecision == "APPROVED"
+    }
+
+    private func mergePR(number: Int, cwd: String, checksWaived: Bool = false) {
         let title = metadata?.prTitle ?? ""
         let target = metadata?.prBaseBranch ?? "the default branch"
 
         let alert = NSAlert()
         alert.messageText = "Merge PR #\(number)?"
-        alert.informativeText = "\(title)\n\nInto \(target)"
+        alert.informativeText = checksWaived
+            ? "\(title)\n\nInto \(target)\n\n⚠️ Checks haven't passed yet — merging on maintainer approval (waiver)."
+            : "\(title)\n\nInto \(target)"
         alert.alertStyle = .warning
-        let mergeButton = alert.addButton(withTitle: "Merge")
+        let mergeButton = alert.addButton(withTitle: checksWaived ? "Merge Anyway" : "Merge")
         alert.addButton(withTitle: "Cancel")
         mergeButton.keyEquivalent = ""
 
