@@ -132,3 +132,53 @@ user answers.
   own `setSidebarVisible`), and `totalWidth` in the `applySidebarVisibility`/`setSidebarWidth`
   lines reads small (~480 region) rather than the real window width.
 - Next step: waiting on user to confirm rebuild + retest to capture real log evidence.
+
+---
+
+## Gate: kouen-browser-mcp-intermittent-unresponsive
+
+- Status: OPEN
+- Skill: debug-mantra-workflow
+- Gate: hypothesis pick (mantra step 1, no reliable repro yet)
+- Bug: `mcp__kouen__kouenBrowser*` MCP tools (Claude calling them) sometimes
+  unresponsive. User unsure if it's a hang or an error after wait ("ไม่แน่ใจอาจจะ
+  2,3" — timeout error / other error, ruled out silent-hang-only). App
+  foreground/background state at time of failure also unconfirmed ("1,2").
+- Repro: NOT reliable. Live test this session (`kouenBrowserOpen` on
+  `https://example.com`) succeeded fast — could not reproduce on demand.
+- Confirmed precondition (user, live): routinely runs 4+ Kouen windows/sessions
+  simultaneously (matches `kouenList` output this session — 4 sessions across
+  1 workspace).
+- Leading hypothesis (H1, code-grounded, precondition confirmed live, not yet
+  falsified with a real failure capture): `DaemonSyncService` is per-window
+  (`Apps/Kouen/Sources/KouenApp/Services/DaemonSyncService.swift:10,20` —
+  `init(coordinator: SessionCoordinator)`), each window independently calls
+  `client.subscribeSnapshot(label: "KouenGUI", ...)` (line 37-38) with the
+  identical literal label. Daemon-side `guiBrowserFD`
+  (`Packages/KouenDaemon/Sources/KouenDaemon/DaemonServer.swift:66-69`) resolves
+  via `snapshotSubscribers.first(where: { clients[$0]?.label == "KouenGUI" })`
+  — `Set<Int32>` has no defined iteration order, so with N windows open, an
+  arbitrary one is picked per request. Normally harmless because
+  `BrowserPaneRegistry.shared` (`DaemonSyncService.swift` handler) is a
+  process-global singleton — whichever window's `onBrowserRequest` closure
+  fires can still resolve the target `paneID`. Suspected failure mode: the
+  picked window is mid-close/deinit exactly when routed to (race), or its
+  `Task { @MainActor in ... }` closure fires but the window's own state is
+  already torn down — daemon-side cleanup on a *clean* disconnect already
+  fails pending requests immediately with "GUI disconnected"
+  (`DaemonServer.swift:830-837`, confirmed correct), so a genuine 30s-then-error
+  ("Request timed out", `DaemonServer.swift:865-871`) implies the picked fd's
+  socket stayed open (no EOF detected) while nothing on that window's side
+  actually processed the request.
+- Weaker hypotheses: H2 App Nap-style scheduling delay when all windows are
+  backgrounded (no code gate found confirming this — unverified). H3 daemon
+  restarted and GUI hasn't resubscribed yet (`guiBrowserFD` nil →
+  immediate "Kouen GUI is not running or connected" error, not a 30s wait —
+  distinguishable from H1/H2 by whether the error is instant or ~30s later).
+- User declined adding diagnostic logging at `guiBrowserFD` proactively
+  ("รอซ้ำโดยไม่เพิ่ม log (แนะนำ)") — waiting for a real occurrence instead.
+- Next step: next time it happens, capture (a) exact error text or confirm
+  silent hang, (b) how many Kouen windows were open, (c) whether the failing
+  window was mid-close, (d) elapsed wait time (~instant vs ~30s) — this alone
+  disambiguates H1/H2 vs H3. Resume debug-mantra-workflow at this gate with
+  that capture; do not re-derive the hypothesis list from scratch.
