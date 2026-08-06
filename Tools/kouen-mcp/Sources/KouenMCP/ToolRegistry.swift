@@ -245,6 +245,26 @@ struct ToolRegistry: Sendable {
             toolDef("kouenAutomationRunNow", "Fire an Automation immediately, bypassing its schedule and enabled state (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
                 param("id", "string", "Automation UUID"),
             ]),
+            toolDef("kouenRoutingRuleList", "List Agent Routing Rules — resolve agent:\"auto\" to a concrete AgentKind at spawn time (kouenSpawnAgent, Automations)", []),
+            toolDef("kouenRoutingRuleCreate", "Create an Agent Routing Rule (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
+                param("kind", "string", "'path' (repo-path glob, checked first) or 'stack' (SignalFileRouter-detected stack name, checked only if no path rule matches)"),
+                param("pattern", "string", "Glob pattern (kind=path, e.g. '~/Git/Company/**') or stack name (kind=stack, e.g. 'swift', 'node', 'python')"),
+                param("targetAgent", "string", "AgentKind to route to: 'claude-code', 'codex', 'gemini', 'kiro', etc."),
+                param("enabled", "boolean", "Whether this rule is active (optional, default true)"),
+            ]),
+            toolDef("kouenRoutingRuleUpdate", "Update an Agent Routing Rule's pattern/targetAgent/enabled (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
+                param("id", "string", "Rule UUID"),
+                param("pattern", "string", "New pattern (optional)"),
+                param("targetAgent", "string", "New target AgentKind (optional)"),
+                param("enabled", "boolean", "New enabled state (optional)"),
+            ]),
+            toolDef("kouenRoutingRuleDelete", "Delete an Agent Routing Rule (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
+                param("id", "string", "Rule UUID"),
+            ]),
+            toolDef("kouenRoutingRuleReorder", "Reorder Agent Routing Rules within one kind (path or stack) — first match wins by this order (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
+                param("kind", "string", "'path' or 'stack' — the group being reordered"),
+                param("orderedIds", "array", "Rule UUIDs of this kind, in the desired priority order"),
+            ]),
         ])])
     }
 
@@ -316,6 +336,11 @@ struct ToolRegistry: Sendable {
         case "kouenAutomationPause": return await kouenAutomationPause(args)
         case "kouenAutomationResume": return await kouenAutomationResume(args)
         case "kouenAutomationRunNow": return await kouenAutomationRunNow(args)
+        case "kouenRoutingRuleList": return await daemonTools.routingRuleList()
+        case "kouenRoutingRuleCreate": return await kouenRoutingRuleCreate(args)
+        case "kouenRoutingRuleUpdate": return await kouenRoutingRuleUpdate(args)
+        case "kouenRoutingRuleDelete": return await kouenRoutingRuleDelete(args)
+        case "kouenRoutingRuleReorder": return await kouenRoutingRuleReorder(args)
         default:
             return (nil, JSONRPCError(code: -32602, message: "Unknown tool: \(name)"))
         }
@@ -525,6 +550,52 @@ struct ToolRegistry: Sendable {
             return (nil, JSONRPCError(code: -32602, message: "Missing 'id' parameter"))
         }
         return await daemonTools.automationRunNow(id: id)
+    }
+
+    // MARK: - Agent Routing Rule tools
+
+    private func kouenRoutingRuleCreate(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(kind)? = args["kind"],
+              case let .string(pattern)? = args["pattern"],
+              case let .string(targetAgent)? = args["targetAgent"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'kind', 'pattern', or 'targetAgent' parameter"))
+        }
+        let enabled = boolArg(args["enabled"], default: true)
+        return await daemonTools.routingRuleCreate(kind: kind, pattern: pattern, targetAgent: targetAgent, enabled: enabled)
+    }
+
+    private func kouenRoutingRuleUpdate(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(id)? = args["id"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'id' parameter"))
+        }
+        var enabled: Bool?
+        if case let .bool(e)? = args["enabled"] { enabled = e }
+        return await daemonTools.routingRuleUpdate(
+            id: id, pattern: optionalStringArg(args["pattern"]), targetAgent: optionalStringArg(args["targetAgent"]),
+            enabled: enabled
+        )
+    }
+
+    private func kouenRoutingRuleDelete(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(id)? = args["id"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'id' parameter"))
+        }
+        return await daemonTools.routingRuleDelete(id: id)
+    }
+
+    private func kouenRoutingRuleReorder(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(kind)? = args["kind"],
+              case let .array(orderedIdsValue)? = args["orderedIds"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'kind' or 'orderedIds' parameter"))
+        }
+        let orderedIds = orderedIdsValue.compactMap { value -> String? in
+            if case let .string(id) = value { return id }
+            return nil
+        }
+        guard orderedIds.count == orderedIdsValue.count else {
+            return (nil, JSONRPCError(code: -32602, message: "'orderedIds' must be an array of strings"))
+        }
+        return await daemonTools.routingRuleReorder(kind: kind, orderedIds: orderedIds)
     }
 
     private func setPaneLabel(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
