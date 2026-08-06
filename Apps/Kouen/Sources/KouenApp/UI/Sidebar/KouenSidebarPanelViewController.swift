@@ -556,9 +556,6 @@ final class KouenSidebarPanelViewController: NSViewController {
         if let path = repoPath {
             gitPanelView.updateRoot(path: path)
         }
-        if note.userInfo?["selectAgentsTab"] as? Bool == true {
-            gitPanelView.showAgentReview()
-        }
     }
 
 
