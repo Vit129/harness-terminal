@@ -53,6 +53,63 @@ final class SplitPaneCoordinator {
         }
     }
 
+    // MARK: - Saved Layouts (M5)
+
+    func listSavedLayouts() async -> [SavedLayout] {
+        guard case let .savedLayouts(list)? = await coord.requestDaemon(.savedLayoutList) else { return [] }
+        return list
+    }
+
+    func saveCurrentLayout(name: String) {
+        guard let tab = coord.snapshot.activeWorkspace?.activeTab else { return }
+        Task {
+            _ = await coord.requestDaemon(.savedLayoutSave(name: name, tabID: tab.id))
+        }
+    }
+
+    func deleteSavedLayout(id: UUID) {
+        Task {
+            _ = await coord.requestDaemon(.savedLayoutDelete(id: id))
+        }
+    }
+
+    /// Creates a new tab in the active workspace and rebuilds `layout.shape` inside it —
+    /// fresh empty shells at every leaf, matching only the split structure. Never restores
+    /// any running process; that's daemon session-restore's job, a separate feature.
+    func applySavedLayout(_ layout: SavedLayout) {
+        guard let workspaceID = coord.snapshot.activeWorkspace?.id else { return }
+        Task {
+            guard case let .tabID(newTabID)? = await coord.requestDaemon(
+                .newTab(workspaceID: workspaceID, cwd: nil, shell: nil)
+            ) else {
+                await coord.syncFromDaemon()
+                return
+            }
+            await coord.syncFromDaemon()
+            guard let rootPaneID = coord.snapshot.activeWorkspace?.sessions
+                .flatMap({ $0.tabs })
+                .first(where: { $0.id == newTabID })?
+                .rootPane.allPaneIDs().first
+            else { return }
+            await applyLayoutShape(layout.shape, at: rootPaneID, tabID: newTabID)
+        }
+    }
+
+    private func applyLayoutShape(_ shape: PaneLayoutShape, at paneID: PaneID, tabID: TabID) async {
+        guard case let .branch(direction, _, first, second) = shape else { return }
+        guard case let .paneID(newPaneID)? = await coord.requestDaemon(.newSplit(
+            tabID: tabID, paneID: paneID, direction: direction, shell: coord.settings.defaultShell
+        )) else {
+            await coord.syncFromDaemon()
+            return
+        }
+        await coord.syncFromDaemon()
+        // Ratio is not restored in v1 (documented cut, design.md) — every split lands at
+        // the daemon's default 0.5.
+        await applyLayoutShape(first, at: paneID, tabID: tabID)
+        await applyLayoutShape(second, at: newPaneID, tabID: tabID)
+    }
+
     func focusPaneDirectional(_ direction: DirectionalAxis) {
         guard let workspace = coord.snapshot.activeWorkspace,
               let tab = workspace.activeTab,
