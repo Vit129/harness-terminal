@@ -238,6 +238,59 @@ final class KouenDaemonToolsTests: XCTestCase {
         XCTAssertEqual(error, KouenDaemonTools.controlDisabledError)
     }
 
+    /// M2: List is read-only (never gated), Create/Update/Delete/Reorder mutate the rule
+    /// list and must be gated like sendPaneText/kouenAutomationCreate.
+    func testRoutingRuleToolsAreRegisteredWithCorrectGating() async {
+        let missingPolicyURL = temporaryDirectory().appendingPathComponent("missing-policy.json")
+        let policy = ToolPolicy.load(from: missingPolicyURL, environment: [:])
+        XCTAssertTrue(policy.isToolAllowed("kouenRoutingRuleList"))
+        XCTAssertFalse(policy.isToolAllowed("kouenRoutingRuleCreate"))
+        XCTAssertFalse(policy.isToolAllowed("kouenRoutingRuleUpdate"))
+        XCTAssertFalse(policy.isToolAllowed("kouenRoutingRuleDelete"))
+        XCTAssertFalse(policy.isToolAllowed("kouenRoutingRuleReorder"))
+
+        let registry = ToolRegistry(policy: { policy })
+        guard case let .object(root) = registry.listTools(),
+              case let .array(tools) = root["tools"]
+        else {
+            XCTFail("Expected listTools() to return { tools: [...] }")
+            return
+        }
+        let names: Set<String> = Set(tools.compactMap {
+            guard case let .object(tool) = $0, case let .string(name) = tool["name"] else { return nil }
+            return name
+        })
+        for expected in [
+            "kouenRoutingRuleList", "kouenRoutingRuleCreate", "kouenRoutingRuleUpdate",
+            "kouenRoutingRuleDelete", "kouenRoutingRuleReorder",
+        ] {
+            XCTAssertTrue(names.contains(expected), "Expected \(expected) to be registered")
+        }
+    }
+
+    func testKouenRoutingRuleUpdateRejectsInvalidUUID() async {
+        let tools = KouenDaemonTools(controlEnabled: { true })
+        let (result, error) = await tools.routingRuleUpdate(id: "not-a-uuid", pattern: nil, targetAgent: nil, enabled: nil)
+        XCTAssertNil(result)
+        XCTAssertEqual(error?.code, -32602)
+    }
+
+    func testKouenRoutingRuleCreateBlockedWhenGateClosed() async {
+        let tools = KouenDaemonTools(controlEnabled: { false })
+        let (result, error) = await tools.routingRuleCreate(
+            kind: "path", pattern: "/tmp/**", targetAgent: "codex", enabled: true
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(error, KouenDaemonTools.controlDisabledError)
+    }
+
+    func testKouenRoutingRuleReorderBlockedWhenGateClosed() async {
+        let tools = KouenDaemonTools(controlEnabled: { false })
+        let (result, error) = await tools.routingRuleReorder(kind: "path", orderedIds: [UUID().uuidString])
+        XCTAssertNil(result)
+        XCTAssertEqual(error, KouenDaemonTools.controlDisabledError)
+    }
+
     func testHostListReturnsConfiguredHosts() async throws {
         let previousHome = getenv("KOUEN_HOME").map { String(cString: $0) }
         let home = temporaryDirectory()
