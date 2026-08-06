@@ -38,6 +38,8 @@
 | architecture/decisions.md | Architecture | ACP, harness-mcp, keybindings, sidebar, worktree, browser, tab, config, IPC | 0/0 | Stable architecture decisions moved from MEMORY.md |
 | project_no-gimmick-feature-policy.md | Meta/Product | gimmick, competitive-position, GUI, cloud sync, plugins, GPU shader | 0/0 | User rejected remaining competitive gaps (cross-platform GUI, team sharing/cloud sync, plugin ecosystem, GPU shader customization) as gimmicks — Kouen only builds features that see real usage |
 | feedback_interview-gate-call-first.md | Process/Workflow | interview-gate.py, PreToolUse, Skill(interview) | 0/0 | Always call Skill(interview) as the very first tool call of any task that may need Edit/Write — avoids the interview-gate.py deny-then-retry cycle |
+| project_m2-m9-competitive-build-decision.md | Meta/Product | M2-M9, competitive-position, model-router, browser-design-mode, fork-conversation, saved-layouts, ai-safety-check, workgroup-review, pr-waiver, rich-composer | 0/0 | User approved building all 8 M2-M9 competitive gaps (2026-08-05) despite no individually-validated friction — scoped exception to no-gimmick policy, not a reversal |
+| project_agents-tab-removed.md | Meta/Product | Agents tab, GitPanelView, Board, Worktrees, redundancy, no-gimmick | 0/0 | Removed Git panel's "Agents" cross-repo worktree dashboard (2026-08-06) — fully redundant with Board + Worktrees tab, no unique value |
 
 ## Source Map
 
