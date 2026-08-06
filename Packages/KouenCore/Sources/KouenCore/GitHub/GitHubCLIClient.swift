@@ -28,6 +28,11 @@ public struct GitHubCLIClient: Sendable {
         /// G3's merge action gates on this: never offer to merge something GitHub itself hasn't
         /// confirmed is clean.
         public let mergeable: Bool
+        /// GitHub's `reviewDecision`: `"APPROVED"`, `"CHANGES_REQUESTED"`, `"REVIEW_REQUIRED"`,
+        /// or `nil` when no review is configured/recorded. M8: a maintainer-approved PR can
+        /// waive the checks-must-pass merge gate (see `SidebarSessionListView.mergePR`) —
+        /// `mergeable` (no conflicts) is never waived, only the checks-status requirement.
+        public let reviewDecision: String?
     }
 
     public enum PRState: String, Sendable, Equatable {
@@ -45,7 +50,7 @@ public struct GitHubCLIClient: Sendable {
 
     /// Get PR info for the current branch in the given repo directory.
     public func prForCurrentBranch(repoPath: String) -> PRInfo? {
-        let fields = "number,title,state,url,headRefName,baseRefName,isDraft,statusCheckRollup,mergeable"
+        let fields = "number,title,state,url,headRefName,baseRefName,isDraft,statusCheckRollup,mergeable,reviewDecision"
         guard let output = runGH(
             ["pr", "view", "--json", fields],
             in: repoPath
@@ -234,11 +239,13 @@ public struct GitHubCLIClient: Sendable {
         let checksStatus = parseChecksStatus(obj["statusCheckRollup"])
         let baseRef = obj["baseRefName"] as? String ?? ""
         let mergeable = (obj["mergeable"] as? String) == "MERGEABLE"
+        // gh CLI reports an empty string, not JSON null, when no review decision exists yet.
+        let reviewDecision = (obj["reviewDecision"] as? String).flatMap { $0.isEmpty ? nil : $0 }
 
         return PRInfo(
             number: number, title: title, state: state, url: url,
             headRefName: headRef, baseRefName: baseRef, isDraft: isDraft,
-            checksStatus: checksStatus, mergeable: mergeable
+            checksStatus: checksStatus, mergeable: mergeable, reviewDecision: reviewDecision
         )
     }
 
