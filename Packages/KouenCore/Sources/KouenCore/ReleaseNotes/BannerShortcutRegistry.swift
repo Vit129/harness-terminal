@@ -246,6 +246,7 @@ public enum BannerShortcutRegistry {
         .init(key: "ctrl+t", description: "fuzzy pick file → paste path (fzf)"),
         .init(key: "fd | fzf", description: "find → narrow — pipe anything into fzf"),
         .init(key: "kouen-cli ping", description: "script Kouen from any shell"),
+        .init(key: "kouen cc run", description: "run Claude Code headlessly, no pane needed"),
     ]
 
     /// Only shortcuts flagged for the banner.

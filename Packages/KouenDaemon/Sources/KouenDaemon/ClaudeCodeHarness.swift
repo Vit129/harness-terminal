@@ -60,6 +60,7 @@ public actor ClaudeCodeHarness {
         cwd: String,
         profile: Profile,
         model: String?,
+        effort: String?,
         resumeSessionID: UUID?
     ) async -> RunSummary {
         let summary = RunSummary(id: id, state: .running, cwd: cwd, startedAt: Date())
@@ -74,7 +75,7 @@ public actor ClaudeCodeHarness {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: claudePath)
         process.arguments = buildArguments(
-            id: id, prompt: prompt, profile: profile, model: model, resumeSessionID: resumeSessionID
+            id: id, prompt: prompt, profile: profile, model: model, effort: effort, resumeSessionID: resumeSessionID
         )
         process.currentDirectoryURL = URL(fileURLWithPath: cwd)
         var env = ProcessInfo.processInfo.environment
@@ -141,7 +142,7 @@ public actor ClaudeCodeHarness {
     /// CLAUDE.md + hooks (measured ~83% cache-creation-token cut) without touching OAuth
     /// auth the way `--bare` does — see design.md's "Cost/context overhead control".
     private func buildArguments(
-        id: UUID, prompt: String, profile: Profile, model: String?, resumeSessionID: UUID?
+        id: UUID, prompt: String, profile: Profile, model: String?, effort: String?, resumeSessionID: UUID?
     ) -> [String] {
         var args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--setting-sources", ""]
         if let resumeSessionID {
@@ -161,6 +162,7 @@ public actor ClaudeCodeHarness {
             ]
         }
         if let model { args += ["--model", model] }
+        if let effort { args += ["--effort", effort] }
         return args
     }
 

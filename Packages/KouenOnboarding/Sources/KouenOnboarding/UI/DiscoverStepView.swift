@@ -10,6 +10,7 @@ struct DiscoverStepView: View {
         Point(title: "Sessions you can name and reopen", detail: "Workspaces, sessions, tabs, and panes are real objects. List them, reopen them, script them."),
         Point(title: "Attach from anywhere", detail: "Render a session's full split layout in any terminal, even over SSH. Your work follows you."),
         Point(title: "Agents tell you when they need you", detail: "Kouen spots Claude Code, Codex, Cursor, and Gemini in your panes and pings you when one finishes or gets stuck."),
+        Point(title: "Run Claude Code without opening a pane", detail: "kouen cc run \"prompt\" drives Claude Code headlessly and prints the result — no interactive session needed."),
     ]
 
     var body: some View {

@@ -937,11 +937,11 @@ struct KouenDaemonTools: Sendable {
     /// `ClaudeCodeHarness`) instead of spawning an interactive pty pane. Generates the run
     /// id here so it doubles as the Claude `--session-id` the daemon passes through — no
     /// separate mapping table needed on either side.
-    func kouenCCRun(prompt: String, cwd: String, profile: String?, model: String?) async -> (AnyCodable?, JSONRPCError?) {
+    func kouenCCRun(prompt: String, cwd: String, profile: String?, model: String?, effort: String?) async -> (AnyCodable?, JSONRPCError?) {
         guard isToolAllowed("kouenCCRun") else { return (nil, disabledError("kouenCCRun")) }
         let runID = UUID()
         guard let response = await send(.ccRunStart(
-            id: runID, prompt: prompt, cwd: cwd, profile: profile ?? "edit", model: model
+            id: runID, prompt: prompt, cwd: cwd, profile: profile ?? "edit", model: model, effort: effort
         )) else {
             return (nil, Self.daemonUnavailableError)
         }

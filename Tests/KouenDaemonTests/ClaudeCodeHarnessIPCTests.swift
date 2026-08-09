@@ -79,7 +79,7 @@ final class ClaudeCodeHarnessIPCTests: XCTestCase {
         let id = UUID()
         guard case .ccRunInfo = try client.request(.ccRunStart(
             id: id, prompt: "Reply with exactly the word: pong", cwd: "/tmp",
-            profile: "readonly", model: nil
+            profile: "readonly", model: nil, effort: nil
         )) else {
             return XCTFail("Expected .ccRunInfo from ccRunStart")
         }

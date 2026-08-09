@@ -76,6 +76,7 @@ See [USAGE.md](USAGE.md) for the full install, run, CLI, and remote/headless gui
 - `kouen-cli` automation for creating sessions, sending keys, capturing panes, installing hooks, and driving remote/headless daemons.
 - Agent detection and notifications for Claude Code, Codex, Cursor, Grok, Pi, Hermes, OpenClaw, OpenCode, Aider, Gemini, Goose, and generic agents.
 - Embedded browser pane with `kouen-mcp` — AI agents can open URLs, read DOM snapshots, click elements, fill forms, capture screenshots, and inspect network/storage without a separate Playwright process.
+- Headless Claude Code runs — `kouen cc run` (CLI) or `kouenCCRun`/`kouenCCStatus` (`kouen-mcp`) drive `claude` as a real subprocess for one-shot prompts/automations, no pane or human supervision needed.
 - Multi-agent workflows — run Claude Code, Codex, and Gemini CLI in parallel panes with per-agent statusline showing model, context usage, and rate limits.
 - Optional tmux-style controls: prefix key, status line, copy mode, paste buffers, hooks, command prompt, and many tmux-compatible commands.
 - IDE-like navigation — double-click folders to cd, ⌘P fuzzy jump to any directory via zoxide frecency, ⌘⇧J frecency dir picker (↩ cd · ⌘↩ open new tab), ⌘⇧R saved command recipes, ⌘-click file paths, `:cd` from the command prompt, and **Open With Kouen** from Finder on any source file.
@@ -135,6 +136,7 @@ kouen-cli attach-window --session <name>
 kouen-cli send-keys --surface <uuid> --keys "ls -la Enter"
 kouen-cli capture-pane --surface <uuid> --scrollback
 kouen-cli install-hooks codex
+kouen-cli cc run "summarize the last commit" --cwd ~/Code/myrepo
 ```
 
 More examples are in [USAGE.md](USAGE.md), [docs/COMMANDS.md](docs/COMMANDS.md), and [docs/MULTIPLEXER_GUIDE.md](docs/MULTIPLEXER_GUIDE.md).
@@ -169,6 +171,29 @@ AI agents (Claude Code, Codex, Kiro) can see and interact with the embedded brow
 ```
 
 **Token efficiency:** snapshot returns structured data (~200–500 tokens), not screenshots or raw HTML — significantly cheaper than vision-based browser automation.
+
+## Claude Code Harness
+
+Run `claude` as a real subprocess — `-p --output-format stream-json` — instead of a pty pane. No adapter binary, no screen-scraping; tool access is controlled via `--allowedTools`/`--disallowedTools`. For one-shot prompts and automations where nothing needs to watch it run; use `kouenSpawnAgent`/an interactive pane instead when a human is steering.
+
+**From the terminal, no AI agent needed:**
+
+```bash
+kouen-cli cc run "summarize the last commit" --cwd ~/Code/myrepo
+kouen-cli cc run "add input validation" --profile edit --model sonnet --effort high
+kouen-cli cc status <runId>
+kouen-cli cc list
+kouen-cli cc cancel <runId>
+```
+
+**From an AI agent, via `kouen-mcp`:**
+
+| Capability | Tool | Returns |
+| --- | --- | --- |
+| Start a run | `kouenCCRun` | run id + immediate status |
+| Get / list / cancel | `kouenCCStatus` | run status, result, cost |
+
+**Permission profiles** — `readonly` (Read/Glob/Grep only) or `edit` (default: Edit/Write + a git-readonly Bash allowlist; `rm`/`sudo`/`git push` always denied). Never `bypassPermissions`.
 
 ## Editor & LSP
 

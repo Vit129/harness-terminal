@@ -270,6 +270,7 @@ struct ToolRegistry: Sendable {
                 param("cwd", "string", "Working directory"),
                 param("profile", "string", "'readonly' (Read/Glob/Grep only, no writes) or 'edit' (Edit/Write + git-readonly Bash, rm/sudo/git-push denied). Optional, default 'edit'"),
                 param("model", "string", "Model alias ('sonnet'/'opus'/'fable'/'haiku') or full name (optional, default: unset — inherits the user's own Claude Code config)"),
+                param("effort", "string", "Reasoning effort: 'low'/'medium'/'high'/'xhigh'/'max' (optional, default: unset — inherits the user's own Claude Code config)"),
             ]),
             toolDef("kouenCCStatus", "Get/list/cancel kouenCCRun runs (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
                 param("action", "string", "'get' (default), 'list', or 'cancel'"),
@@ -937,7 +938,8 @@ struct ToolRegistry: Sendable {
         }
         return await daemonTools.kouenCCRun(
             prompt: prompt, cwd: cwd,
-            profile: optionalStringArg(args["profile"]), model: optionalStringArg(args["model"])
+            profile: optionalStringArg(args["profile"]), model: optionalStringArg(args["model"]),
+            effort: optionalStringArg(args["effort"])
         )
     }
 
