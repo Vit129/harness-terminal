@@ -8,7 +8,13 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.11.0] - 2026-08-09
 
 ### Added
-- Release version bump to v4.11.0.
+- Add Claude Code CLI subprocess harness (kouenCCRun/kouenCCStatus) ([`c5f37e2`](https://github.com/Vit129/kouen-terminal/commit/c5f37e204dbc0e8a0c8e640e79f319abb025055f))
+
+### Documentation
+- Resolve M2-M9 competitive gaps to Closed, add M2-M9 feature matrix ([`ba1b713`](https://github.com/Vit129/kouen-terminal/commit/ba1b71305ddb606aa161e320016e38d992031a29))
+
+### Fixed
+- Bump ipcProtocolVersion so M2/M5's new IPC cases force a daemon restart ([`3ec755f`](https://github.com/Vit129/kouen-terminal/commit/3ec755ff5f4ab485d07ed02e12bf9d1b260d1246))
 
 ## [4.10.0] - 2026-08-06
 

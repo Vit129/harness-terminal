@@ -2,6 +2,40 @@
 
 Older releases. See [CHANGELOG.md](../CHANGELOG.md) for recent versions.
 
+## [4.9.3] - 2026-07-31
+
+### Fixed
+- Reload board columns on metadata-only snapshot pushes (release v4.9.3) ([`42ee2f8`](https://github.com/Vit129/kouen-terminal/commit/42ee2f8c0d066fecc6ef63bde4a25b4786bb657c))
+
+## [4.9.2] - 2026-07-29
+
+### Fixed
+- Clamp persisted sidebar width so Cmd+\ toggle can't get stuck at zero-delta (release v4.9.2) ([`ffe984d`](https://github.com/Vit129/kouen-terminal/commit/ffe984d53d59e372111f14825af499cd0f776b1e))
+
+## [4.9.1] - 2026-07-27
+
+### Added
+- AppIntents/Shortcuts (Phase 7), sidebar-width persistence (Phase 5) ([`da59c2a`](https://github.com/Vit129/kouen-terminal/commit/da59c2ae112f18cd628e645944845d1054ff8cce))
+
+### Documentation
+- Fix stale Phase 5 note, record why Phases 4/6/10/11/12 are deliberately deferred ([`1d3a227`](https://github.com/Vit129/kouen-terminal/commit/1d3a22705af90cc158449e4cc01819410dcd1c16))
+- Close P8 and P37, archive completed plan docs ([`7beb315`](https://github.com/Vit129/kouen-terminal/commit/7beb315713a19cce21a081520f0d1e7b674cc5af))
+
+### Fixed
+- Resync GeneratedReleaseNotes.swift; test(notch): fix stale peek-size assertions ([`fa8a08c`](https://github.com/Vit129/kouen-terminal/commit/fa8a08cfd911a12352431751d170392c3547f26d))
+- Prevent FSEventStream teardown race crash in FileTreeWatcher ([`e6d84f8`](https://github.com/Vit129/kouen-terminal/commit/e6d84f8f914297fc32de531fb3b4b814d85a2cb2))
+- Resolve sidebar toggle window via NSApp.windows loop, not keyWindow chain ([`7d76e18`](https://github.com/Vit129/kouen-terminal/commit/7d76e18324fe1b3ba45e0304bc00d5b0eed77798))
+
+## [4.9.0] - 2026-07-26
+
+### Added
+- Approve/deny, quick-reply, exact-pane jump, per-event sounds ([`d590786`](https://github.com/Vit129/kouen-terminal/commit/d59078689bc404f8e9bb9977176e3de2212f3fad))
+
+### Fixed
+- Restore Liquid Glass transparency pipeline and finish browser-pane chrome ([`157e5aa`](https://github.com/Vit129/kouen-terminal/commit/157e5aa6477ffa30540d6719bfb6d5f15474dd2b))
+- Enable arrow-key line editing in release-pipeline prompts ([`cc60fc3`](https://github.com/Vit129/kouen-terminal/commit/cc60fc3484cd057b53052a8aff24c6499d2e24e2))
+- Guard MobileBridgeServer reference for platforms without Network ([`9f7297f`](https://github.com/Vit129/kouen-terminal/commit/9f7297ff046b34daf8b613c50851153ca0cc2fbd))
+
 ## [4.8.0] - 2026-07-25
 
 ### Added
