@@ -265,6 +265,16 @@ struct ToolRegistry: Sendable {
                 param("kind", "string", "'path' or 'stack' — the group being reordered"),
                 param("orderedIds", "array", "Rule UUIDs of this kind, in the desired priority order"),
             ]),
+            toolDef("kouenCCRun", "Run Claude Code headlessly as a subprocess (not a visible pane) — one-shot prompt in, structured result out. Use for automations/analysis where nothing needs to watch it run; use kouenSpawnAgent instead for an interactive session a human will steer. Requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1", [
+                param("prompt", "string", "Prompt to run"),
+                param("cwd", "string", "Working directory"),
+                param("profile", "string", "'readonly' (Read/Glob/Grep only, no writes) or 'edit' (Edit/Write + git-readonly Bash, rm/sudo/git-push denied). Optional, default 'edit'"),
+                param("model", "string", "Model alias ('sonnet'/'opus'/'fable'/'haiku') or full name (optional, default: unset — inherits the user's own Claude Code config)"),
+            ]),
+            toolDef("kouenCCStatus", "Get/list/cancel kouenCCRun runs (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
+                param("action", "string", "'get' (default), 'list', or 'cancel'"),
+                param("runId", "string", "Run id from kouenCCRun (required for 'get'/'cancel', optional for 'list')"),
+            ]),
         ])])
     }
 
@@ -341,6 +351,8 @@ struct ToolRegistry: Sendable {
         case "kouenRoutingRuleUpdate": return await kouenRoutingRuleUpdate(args)
         case "kouenRoutingRuleDelete": return await kouenRoutingRuleDelete(args)
         case "kouenRoutingRuleReorder": return await kouenRoutingRuleReorder(args)
+        case "kouenCCRun": return await kouenCCRun(args)
+        case "kouenCCStatus": return await kouenCCStatus(args)
         default:
             return (nil, JSONRPCError(code: -32602, message: "Unknown tool: \(name)"))
         }
@@ -914,6 +926,24 @@ struct ToolRegistry: Sendable {
         let workspaceId = optionalStringArg(args["workspaceId"])
         let cwd = optionalStringArg(args["cwd"])
         return await daemonTools.kouenSpawnAgent(agent: agent, workspaceId: workspaceId, cwd: cwd)
+    }
+
+    private func kouenCCRun(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(prompt)? = args["prompt"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'prompt' parameter"))
+        }
+        guard case let .string(cwd)? = args["cwd"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'cwd' parameter"))
+        }
+        return await daemonTools.kouenCCRun(
+            prompt: prompt, cwd: cwd,
+            profile: optionalStringArg(args["profile"]), model: optionalStringArg(args["model"])
+        )
+    }
+
+    private func kouenCCStatus(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        let action = optionalStringArg(args["action"]) ?? "get"
+        return await daemonTools.kouenCCStatus(action: action, runId: optionalStringArg(args["runId"]))
     }
 
     // MARK: - Helpers

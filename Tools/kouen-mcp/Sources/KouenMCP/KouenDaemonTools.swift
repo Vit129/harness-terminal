@@ -931,6 +931,69 @@ struct KouenDaemonTools: Sendable {
         ])
     }
 
+    // MARK: - Claude Code Harness (M10)
+
+    /// Starts a headless `claude -p --output-format stream-json` run (see
+    /// `ClaudeCodeHarness`) instead of spawning an interactive pty pane. Generates the run
+    /// id here so it doubles as the Claude `--session-id` the daemon passes through — no
+    /// separate mapping table needed on either side.
+    func kouenCCRun(prompt: String, cwd: String, profile: String?, model: String?) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenCCRun") else { return (nil, disabledError("kouenCCRun")) }
+        let runID = UUID()
+        guard let response = await send(.ccRunStart(
+            id: runID, prompt: prompt, cwd: cwd, profile: profile ?? "edit", model: model
+        )) else {
+            return (nil, Self.daemonUnavailableError)
+        }
+        guard case let .ccRunInfo(summary) = response, let summary else {
+            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to ccRunStart"))
+        }
+        return (toolResult(json: Self.ccRunJSON(summary)), nil)
+    }
+
+    /// `action`: "get" (default, requires `runId`), "list", or "cancel" (requires `runId`).
+    func kouenCCStatus(action: String, runId: String?) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenCCStatus") else { return (nil, disabledError("kouenCCStatus")) }
+        switch action {
+        case "list":
+            guard let response = await send(.ccRunList) else { return (nil, Self.daemonUnavailableError) }
+            guard case let .ccRuns(runs) = response else {
+                return (nil, JSONRPCError(code: -32000, message: "Unexpected response to ccRunList"))
+            }
+            return (toolResult(json: .array(runs.map(Self.ccRunJSON))), nil)
+        case "cancel":
+            guard let id = runId.flatMap(UUID.init) else {
+                return (nil, JSONRPCError(code: -32602, message: "'runId' is required and must be a UUID"))
+            }
+            return await okResponse(for: .ccRunCancel(id: id), expected: "ccRunCancel")
+        default:
+            guard let id = runId.flatMap(UUID.init) else {
+                return (nil, JSONRPCError(code: -32602, message: "'runId' is required and must be a UUID"))
+            }
+            guard let response = await send(.ccRunGet(id: id)) else { return (nil, Self.daemonUnavailableError) }
+            guard case let .ccRunInfo(summary) = response else {
+                return (nil, JSONRPCError(code: -32000, message: "Unexpected response to ccRunGet"))
+            }
+            guard let summary else {
+                return (nil, JSONRPCError(code: -32000, message: "Run not found"))
+            }
+            return (toolResult(json: Self.ccRunJSON(summary)), nil)
+        }
+    }
+
+    private static func ccRunJSON(_ summary: ClaudeRunSummary) -> AnyCodable {
+        .object([
+            "id": .string(summary.id.uuidString),
+            "state": .string(summary.state),
+            "cwd": .string(summary.cwd),
+            "startedAt": .string(taskDateFormatter().string(from: summary.startedAt)),
+            "lastAssistantText": summary.lastAssistantText.map(AnyCodable.string) ?? .null,
+            "resultText": summary.resultText.map(AnyCodable.string) ?? .null,
+            "totalCostUSD": summary.totalCostUSD.map(AnyCodable.double) ?? .null,
+            "exitCode": summary.exitCode.map { AnyCodable.double(Double($0)) } ?? .null,
+        ])
+    }
+
     // MARK: - Helpers
 
     private func send(_ request: IPCRequest) async -> IPCResponse? {
