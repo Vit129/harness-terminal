@@ -10,6 +10,10 @@ import KouenCore
 /// @unchecked Sendable: socket-accept and subscription state are confined to the serial `queue`.
 public final class DaemonServer: @unchecked Sendable {
     public let registry: SurfaceRegistry
+    /// M10: drives `claude -p --output-format stream-json` as a subprocess for headless/
+    /// automation runs. Dispatched directly (see `.ccRunStart` etc. in `handle`), off the
+    /// `registry` lock — same reasoning as `handleWaitFor`, its work is genuinely async.
+    public let claudeCodeHarness = ClaudeCodeHarness()
     /// P25 F3: paired mobile-device table, shared with `MobileBridgeServer` by whichever
     /// caller starts it (`KouenDaemonMain/main.swift`) so IPC (`mobile list-clients`/
     /// `mobile revoke`) and the WS bridge see the same devices.
@@ -475,6 +479,37 @@ public final class DaemonServer: @unchecked Sendable {
                 handler(enabled)
                 send(.ok, to: fd)
                 continue
+            case let .ccRunStart(id, prompt, cwd, profile, model):
+                Task { [weak self] in
+                    guard let self else { return }
+                    let profileValue = ClaudeCodeHarness.Profile(rawValue: profile) ?? .readonly
+                    let summary = await self.claudeCodeHarness.start(
+                        id: id, prompt: prompt, cwd: cwd, profile: profileValue, model: model, resumeSessionID: nil
+                    )
+                    self.queue.async { self.send(.ccRunInfo(Self.wireSummary(summary)), to: fd) }
+                }
+                continue
+            case let .ccRunGet(id):
+                Task { [weak self] in
+                    guard let self else { return }
+                    let summary = await self.claudeCodeHarness.get(id: id)
+                    self.queue.async { self.send(.ccRunInfo(summary.map(Self.wireSummary)), to: fd) }
+                }
+                continue
+            case .ccRunList:
+                Task { [weak self] in
+                    guard let self else { return }
+                    let list = await self.claudeCodeHarness.list()
+                    self.queue.async { self.send(.ccRuns(list.map(Self.wireSummary)), to: fd) }
+                }
+                continue
+            case let .ccRunCancel(id):
+                Task { [weak self] in
+                    guard let self else { return }
+                    let cancelled = await self.claudeCodeHarness.cancel(id: id)
+                    self.queue.async { self.send(cancelled ? .ok : .error("run not found or already finished"), to: fd) }
+                }
+                continue
             default:
                 break
             }
@@ -570,6 +605,16 @@ public final class DaemonServer: @unchecked Sendable {
         default:
             return nil
         }
+    }
+
+    /// `KouenIPC` cannot import `KouenDaemon` (same direction rule as `TaskSummary`), so the
+    /// harness's own `RunSummary` is converted to the wire type here at the dispatch boundary.
+    private static func wireSummary(_ summary: ClaudeCodeHarness.RunSummary) -> ClaudeRunSummary {
+        ClaudeRunSummary(
+            id: summary.id, state: summary.state.rawValue, cwd: summary.cwd, startedAt: summary.startedAt,
+            lastAssistantText: summary.lastAssistantText, resultText: summary.resultText,
+            totalCostUSD: summary.totalCostUSD, exitCode: summary.exitCode
+        )
     }
 
     private enum WriteOutcome { case complete, wouldBlock, failed }

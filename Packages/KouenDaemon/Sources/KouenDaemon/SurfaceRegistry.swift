@@ -288,6 +288,8 @@ public final class SurfaceRegistry: @unchecked Sendable {
             return .ok // intercepted at connection layer; never reaches here
         case .mobileListClients, .mobileRevokeClient, .mobilePairingInfo, .setMobileBridgeEnabled:
             return .ok // intercepted at connection layer; never reaches here
+        case .ccRunStart, .ccRunGet, .ccRunList, .ccRunCancel:
+            return .ok // intercepted at connection layer; never reaches here
         case .ping:
             return .pong
         case .listWorkspaces:

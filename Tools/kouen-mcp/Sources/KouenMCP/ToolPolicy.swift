@@ -40,6 +40,8 @@ struct ToolPolicy: Sendable {
         "kouenRoutingRuleUpdate",
         "kouenRoutingRuleDelete",
         "kouenRoutingRuleReorder",
+        "kouenCCRun",
+        "kouenCCStatus",
     ]
 
     private let allowControl: Bool
