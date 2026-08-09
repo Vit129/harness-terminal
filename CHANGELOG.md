@@ -8,7 +8,7 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.12.0] - 2026-08-09
 
 ### Added
-- Release version bump to v4.12.0.
+- Add --model/--effort passthrough and kouen-cli cc run/status/list/cancel (release v4.12.0) ([`ee63244`](https://github.com/Vit129/kouen-terminal/commit/ee63244b18c51d03cb4da67877fa5fddc79c0d1b))
 
 ## [4.11.0] - 2026-08-09
 
