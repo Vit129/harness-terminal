@@ -7,8 +7,8 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.12.1] - 2026-08-13
 
-### Added
-- Release version bump to v4.12.1.
+### Fixed
+- Force WKWebView repaint after load, flush session state before daemon restart (release v4.12.1) ([`0173222`](https://github.com/Vit129/kouen-terminal/commit/0173222f49425199ef29d3b12f0b7d87241592b3))
 
 ## [4.12.0] - 2026-08-09
 
