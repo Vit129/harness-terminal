@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/BrowserPaneView.swift": {
-    "mtime": 1785990855.6275976,
-    "ast_hash": "8863934acfb4e0dfde1f1323672da467",
+    "mtime": 1786538657.7211378,
+    "ast_hash": "c355e120588aff08d54411efcaed4ad2",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/ContentAreaViewController.swift": {
@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/KouenVersion.swift": {
-    "mtime": 1786283448.4438472,
-    "ast_hash": "7b9bb85a4c88b4f5ef1f4bac7efc68d7",
+    "mtime": 1786596573.8294892,
+    "ast_hash": "c7cceb309a2a19255a517b02022a2f9b",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Layouts/LayoutTemplate.swift": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/GeneratedReleaseNotes.swift": {
-    "mtime": 1786283449.2893572,
-    "ast_hash": "39809dd07e0914d3f6ccc9f9131c7110",
+    "mtime": 1786596576.3144095,
+    "ast_hash": "864192980a5e42cb57a9843a3d7953cc",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/ReleaseNotes.swift": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenDaemon/Sources/KouenDaemon/SurfaceRegistry.swift": {
-    "mtime": 1786279887.057462,
-    "ast_hash": "4ec4d7905e6a38840f1f8473ba37047c",
+    "mtime": 1786325324.9509168,
+    "ast_hash": "2638e62661c21daae2c8c2939c5d5ac8",
     "semantic_hash": ""
   },
   "Packages/KouenDaemon/Sources/KouenDaemon/VersionBannerState.swift": {
@@ -1270,8 +1270,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenIPC/Sources/KouenIPC/IPCMessage.swift": {
-    "mtime": 1786281475.4795496,
-    "ast_hash": "d71c88bc3351edd0dee671ba07c2f4a5",
+    "mtime": 1786325317.208238,
+    "ast_hash": "725330eeccdea186803a27cefc034e23",
     "semantic_hash": ""
   },
   "Packages/KouenIPC/Sources/KouenIPC/Identifiers.swift": {
@@ -1965,8 +1965,8 @@
     "semantic_hash": ""
   },
   "Scripts/install-graceful.sh": {
-    "mtime": 1785510867.6102533,
-    "ast_hash": "6cc90d76f93bec7fe29caba4ecc35934",
+    "mtime": 1786325345.7266755,
+    "ast_hash": "ee7d3c04346d53789a5313e8f7490790",
     "semantic_hash": ""
   },
   "Scripts/install-linux.sh": {
@@ -2075,8 +2075,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/BrowserPaneViewTests.swift": {
-    "mtime": 1785990656.7870517,
-    "ast_hash": "867f701870d9750c3b9fad4d565cffb8",
+    "mtime": 1786539110.4127457,
+    "ast_hash": "9b2086f6ce8cdebb74a48fb6c3dba5d8",
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/DaemonLauncherTests.swift": {
@@ -3295,8 +3295,8 @@
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/KouenCLI.swift": {
-    "mtime": 1786281559.6779642,
-    "ast_hash": "9745ccabd2e4733cb154a69b584a9847",
+    "mtime": 1786325334.560792,
+    "ast_hash": "8fd77a9a128ed701886c6d67dd0ed5cc",
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/RecordClient.swift": {
@@ -3455,8 +3455,8 @@
     "semantic_hash": ""
   },
   "agent-memory/PLAYBOOK.md": {
-    "mtime": 1785510867.6893249,
-    "ast_hash": "b6b92b35407d0d723db394bc261b6cf4",
+    "mtime": 1786325636.3186584,
+    "ast_hash": "aeac4b7320e9269b5fd8080e129dff1a",
     "semantic_hash": ""
   },
   "agent-memory/SKILL-LOG.md": {
@@ -4165,8 +4165,8 @@
     "semantic_hash": ""
   },
   "agent-memory/GATE-STATE.md": {
-    "mtime": 1785989063.0625925,
-    "ast_hash": "a4108ec358cbabd0bbd1e592e74ad274",
+    "mtime": 1786582249.5902605,
+    "ast_hash": "9e8bc8d9c8e736e4f21225958a7b66f8",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/bugs/cmd-backslash-sidebar-keywindow.md": {
@@ -4367,6 +4367,16 @@
   "agent-memory/plans/claude-code-harness/design.md": {
     "mtime": 1786279887.060789,
     "ast_hash": "41cffb0b2e7d2a68b3775145a23f0abc",
+    "semantic_hash": ""
+  },
+  "Tests/KouenDaemonTests/FlushSessionStateTests.swift": {
+    "mtime": 1786325550.681346,
+    "ast_hash": "8058df204c493ad267a5c4d3357dd7aa",
+    "semantic_hash": ""
+  },
+  "agent-memory/knowledge/cases/release-daemon-restart.md": {
+    "mtime": 1786325616.439632,
+    "ast_hash": "f64d7c78f70e95a699e2dda26fabebd2",
     "semantic_hash": ""
   }
 }
