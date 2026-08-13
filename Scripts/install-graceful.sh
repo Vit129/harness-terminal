@@ -97,8 +97,23 @@ if [[ $REUSE_DAEMON -eq 1 ]]; then
 fi
 
 if pgrep -x Kouen > /dev/null 2>&1; then
-  echo "==> Flushing session state (waiting for layout debounce)..."
-  sleep 1
+  # Force a synchronous layout.json write and wait for the daemon's ack before killing it —
+  # a blind sleep only ever raced the 0.5s debounce timer, with no confirmation the write
+  # actually landed (see agent-memory/plans/claude-code-harness/design.md's follow-up
+  # incident notes). Falls back to the old sleep if the CURRENTLY RUNNING daemon predates
+  # this command (e.g. this exact release, before any daemon has it yet) — `flush-session-
+  # state` is itself a new IPC case, so it can't help a daemon that's never seen it.
+  echo "==> Flushing session state..."
+  FLUSH_CLI=""
+  if [[ -x "$APP_SUPPORT_BIN/kouen-cli" ]]; then
+    FLUSH_CLI="$APP_SUPPORT_BIN/kouen-cli"
+  elif [[ -x "$DEST/Contents/MacOS/kouen-cli" ]]; then
+    FLUSH_CLI="$DEST/Contents/MacOS/kouen-cli"
+  fi
+  if [[ -z "$FLUSH_CLI" ]] || ! "$FLUSH_CLI" flush-session-state >/dev/null 2>&1; then
+    echo "==> (flush-session-state unavailable on the running daemon — falling back to a fixed wait)"
+    sleep 1
+  fi
 
   echo "==> Scheduling background installer..."
   # Hand install + relaunch off to a process that survives Kouen dying.

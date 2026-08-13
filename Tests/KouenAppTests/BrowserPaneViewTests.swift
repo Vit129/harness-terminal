@@ -25,6 +25,25 @@ final class BrowserPaneViewTests: XCTestCase {
         XCTAssertEqual(paneView.urlTextField.stringValue, "https://example.com/finish")
     }
 
+    // Regression for the intermittent fully-black content area: WKWebView is
+    // deliberately transparent (drawsBackground=false) so the container's solid
+    // terminalBackground canvas shows through until WebKit actually composites the
+    // page. didFinish must force that compositor commit (kickCompositorRelayout) so
+    // a page that finishes loading but loses the paint race doesn't stay black
+    // until a manual reload.
+    func testDidFinishTriggersCompositorKickToForcePaint() {
+        let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let testURL = URL(string: "https://example.com/test")!
+        mockWebView.mockURL = testURL
+        mockWebView.allowsMagnification = true
+
+        let paneView = BrowserPaneView(url: testURL, paneID: UUID(), webView: mockWebView)
+        paneView.webView(mockWebView, didFinish: nil)
+
+        XCTAssertFalse(mockWebView.setMagnificationCalls.isEmpty,
+            "didFinish should kick the compositor so a completed load can't stay stuck black")
+    }
+
     // MARK: - Design Mode (M3)
 
     func testDesignModeButtonHasExpectedIdentifierAndTooltip() {
@@ -197,5 +216,10 @@ private final class MockWebView: WKWebView {
     var stopLoadingCalled = false
     override func stopLoading() {
         stopLoadingCalled = true
+    }
+
+    var setMagnificationCalls: [(magnification: CGFloat, centeredAt: CGPoint)] = []
+    override func setMagnification(_ magnification: CGFloat, centeredAt point: CGPoint) {
+        setMagnificationCalls.append((magnification, point))
     }
 }

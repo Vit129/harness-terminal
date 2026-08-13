@@ -38,7 +38,11 @@ import Foundation
 /// values (passed through to `claude --effort`). Changes the case's wire shape, same as any
 /// other associated-value change — bump so an old/new pair can't silently decode a case with
 /// the wrong arity.
-public let ipcProtocolVersion: Int = 7
+///
+/// Bumped 2026-08-10: added `.flushSessionState` to `IPCRequest` — daemon-side handler for
+/// `install-graceful.sh`'s pre-kill flush (see that case's doc comment). Same functional-
+/// addition rule as M2/M5/M10 above.
+public let ipcProtocolVersion: Int = 8
 
 public enum IPCRequest: Codable, Sendable {
     case ping
@@ -312,6 +316,12 @@ public enum IPCRequest: Codable, Sendable {
     case ccRunGet(id: UUID)
     case ccRunList
     case ccRunCancel(id: UUID)
+
+    /// Forces an immediate, synchronous `layout.json` write (bypasses the normal 0.5s
+    /// debounce). `install-graceful.sh`'s protocol-changed restart path sends this and waits
+    /// for `.ok` before killing the daemon, instead of a blind `sleep` racing the debounce —
+    /// see `agent-memory/knowledge/cases/` for the incident this closes.
+    case flushSessionState
 }
 
 public enum BrowserRequestPayload: Codable, Sendable {

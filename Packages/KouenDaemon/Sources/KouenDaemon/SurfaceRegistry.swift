@@ -1219,6 +1219,12 @@ public final class SurfaceRegistry: @unchecked Sendable {
         case .showMessages:
             messageLogLock.lock(); defer { messageLogLock.unlock() }
             return .text(messageLog.joined(separator: "\n"))
+        case .flushSessionState:
+            // Synchronous write, bypassing the normal debounce — see the request's own doc
+            // comment. Runs under the registry lock like every other case here, so it can't
+            // race a concurrent layout mutation into `editor.snapshot`.
+            try? store.saveImmediately(editor.snapshot)
+            return .ok
         case let .displayMessage(format):
             // Render via FormatString using whatever context the daemon can
             // build right now (active workspace/tab from snapshot). UI clients

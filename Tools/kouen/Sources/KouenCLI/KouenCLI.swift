@@ -194,6 +194,12 @@ struct KouenCLI {
             case "ping":
                 let response = try checkedRequest(client, .ping)
                 print(response)
+            case "flush-session-state":
+                // install-graceful.sh's pre-kill flush before a protocol-forced daemon
+                // restart. Short timeout: this must fail fast so the caller can fall back
+                // to its own safety margin if the running daemon predates this command.
+                _ = try checkedRequest(client, .flushSessionState, timeout: 2)
+                print("flushed")
             case "send-keys":
                 try handleSendKeys(args, client: client)
             case "capture-pane":

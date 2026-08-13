@@ -182,3 +182,77 @@ user answers.
   window was mid-close, (d) elapsed wait time (~instant vs ~30s) — this alone
   disambiguates H1/H2 vs H3. Resume debug-mantra-workflow at this gate with
   that capture; do not re-derive the hypothesis list from scratch.
+
+---
+
+## Gate: browser-pane-intermittent-black-screen
+
+- Status: OPEN
+- Skill: debug-mantra-workflow
+- Gate: fix approval (before editing code)
+- Bug: Kouen's embedded browser pane (`BrowserPaneView`, WKWebView-based) sometimes
+  renders a fully solid-black content area on navigation — chrome (address bar, tab
+  bar) renders fine, only the WKWebView content is black. Reported on a Facebook
+  group permalink URL (screenshot attached by user), but nature of the bug (see
+  below) is page-agnostic — any page can hit it.
+- Repro confirmed by user: intermittent ("บางทีก็เป็นสีดำ" — sometimes black, not
+  always). Diagnostic question asked: does reload fix it? User answered "Reload
+  แก้ได้เสมอ" (reload always fixes it) — this was the falsify test for the
+  Facebook-blocking/crash hypothesis (H3/H4 below): a genuine server-side block or
+  page-JS crash would very likely re-trigger on reload of the same URL; consistently
+  fixing on reload does not fit that pattern, so H3/H4 are considered disproven.
+- Root cause (STRONG, code evidence):
+  `Apps/Kouen/Sources/KouenApp/UI/Chrome/BrowserPaneView.swift` `setupUI()`:
+  - L188-190: `webView.setValue(false, forKey: "drawsBackground")` +
+    `webView.setValue(NSColor.clear, forKey: "underPageBackgroundColor")` — makes the
+    WKWebView's own CALayer fully transparent. Comment says intent is only "prevents
+    initial white background paint/flash" (i.e. transient), but the setting is never
+    reverted after the page loads.
+  - L258-260: the pane's container view is painted a **solid** color,
+    `KouenChrome.current.terminalBackground` (the active terminal theme's background
+    — black/near-black for dark themes) — this is what shows through the transparent
+    WKWebView when its own content hasn't been composited to screen yet.
+  - `didFinish` (L1252-1271) never forces a repaint/compositor commit of the
+    main-frame webview. There is already an analogous, working fix for a related
+    WebKit compositor-commit bug in the same file:
+    `kickCompositorRelayout(for:)` (L683-694) forces a magnification nudge to make
+    WebKit commit a pending layer change — currently only wired to a nested-iframe
+    scroll-tree-commit bug (JS message `kouenCompositorKick`, fired on
+    pointermove/wheel inside a nested cross-origin iframe), per a documented P35
+    investigation (`agent-memory/knowledge/ui/browser-pane.md`). It is NOT called
+    from `didFinish` for the main frame's own initial paint.
+  - Comment at L1267-1269 explicitly explains why a "blind post-load timer" kick was
+    rejected for the iframe case (races the iframe's async mount) — that reasoning is
+    iframe-specific and does not apply to the top-level frame, which by the time
+    `didFinish` fires has genuinely finished its own navigation.
+  - Transparency was introduced in commit `157e5aa64` ("fix(macos27): restore Liquid
+    Glass transparency pipeline and finish browser-pane chrome", 2026-07-26,
+    Vit129) — before that, no solid-canvas-behind-transparent-webview pairing
+    existed.
+- Mechanism: WKWebView is transparent by design; reload forces a fresh
+  navigation+layout+full compositor setup that reliably paints. First paint on a
+  freshly created/warmed webview occasionally loses the race — content finishes
+  loading (`didFinish` fires, URL bar updates correctly) but the visible CALayer is
+  never actually committed/flushed to screen, leaving the solid dark container color
+  showing through indefinitely until something forces a repaint (manual reload).
+- Weaker/ruled-out hypotheses: H3 Facebook detecting embedded WKWebView / blocking —
+  disproven by reload always fixing it (see above). H4 Kouen's injected
+  console/network-capture scripts crashing Facebook's JS before it paints — same
+  disproof applies (a JS crash would very likely reproduce identically on reload).
+- No prior-art in `agent-memory/knowledge/` specifically for this (checked
+  `PLAYBOOK.md`, `knowledge/bugs/`, `rl-lessons.md` — only unrelated Metal/iframe
+  entries found).
+- Fix applied (user approved "ทำเลย"): `kickCompositorRelayout(for: webView)` now
+  called at the end of `didFinish` (after `applyWebDarkMode()`, before
+  `completeLoading()`) in `BrowserPaneView.swift`.
+- Verification so far: `swift build --product Kouen` clean (no new warnings).
+  Regression test added — `Tests/KouenAppTests/BrowserPaneViewTests.swift`
+  `testDidFinishTriggersCompositorKickToForcePaint` (tracks `setMagnification` calls
+  on a `MockWebView`, asserts `didFinish` triggers at least one) — passes, along
+  with the full `BrowserPaneViewTests` suite (10/10). This proves the wiring is
+  correct; it does NOT prove the real WKWebView compositor bug is fixed (can't be
+  unit-tested — needs a real running build).
+- Next step: user rebuilds (`make preview` or `make install`) and re-tests the
+  original repro (reopen the same/any slow-loading page a few times) to confirm the
+  black screen no longer occurs. Gate stays OPEN until user confirms in the real
+  app — this is the "fix validated" gate, not "fix approval" (already passed).

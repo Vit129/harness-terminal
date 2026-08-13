@@ -1266,7 +1266,15 @@ extension BrowserPaneView: WKNavigationDelegate {
         applyWebDarkMode()
         // The nested-iframe scroll fix (kickCompositorRelayout) is driven by the in-frame
         // pointer-move signal, not from here — a blind post-load timer raced the iframe's
-        // async mount and mis-fired before its scrollable content existed.
+        // async mount and mis-fired before its scrollable content existed. The main frame
+        // has no such async-mount race by the time didFinish fires, so it's safe to kick
+        // its own compositor commit unconditionally here — fixes an intermittent fully
+        // black content area where content finishes loading (URL bar updates correctly)
+        // but WebKit never flushes the paint to screen, leaving the transparent WKWebView
+        // showing the solid terminalBackground canvas behind it. Reload always "fixed" it
+        // because a fresh navigation forces a full compositor setup; this kick gives the
+        // same forced commit without requiring a manual reload.
+        kickCompositorRelayout(for: webView)
         completeLoading()
     }
 
