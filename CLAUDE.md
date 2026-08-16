@@ -1,5 +1,9 @@
 # kouen-terminal — Claude Instructions
 
+## Agent Memory
+
+`agent-memory/` is gitignored here (2026-08-16+) — not tracked in this repo, centrally backed up instead to the private `github.com/Vit129/claude-memory-private` repo (`agent-memory/kouen-terminal/`). Files stay physically in place; only git tracking changed. Missing on a fresh clone? Restore via `~/.claude/scripts/bootstrap-new-machine.sh`, or manually: `rsync -a ~/Git/Personal/claude-memory-private/agent-memory/kouen-terminal/ agent-memory/`.
+
 ## Session Start
 
 - Continuation → read `agent-memory/CONTEXT.md` → invoke `macos-swiftui` skill
