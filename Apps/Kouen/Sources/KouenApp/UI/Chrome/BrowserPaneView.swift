@@ -434,6 +434,11 @@ public final class BrowserPaneView: NSView {
         if isFreshConfiguration { config.limitsNavigationsToAppBoundDomains = false }
         let newWeb = WKWebView(frame: webView.frame, configuration: config)
         newWeb.appearance = isWebDarkModeForced ? NSAppearance(named: .darkAqua) : nil
+        // Without this, kickCompositorRelayout()'s `guard webView.allowsMagnification`
+        // silently no-ops for every tab opened here — the pane's first tab always gets
+        // it set (L94/L1339), but a 2nd/3rd+ tab from Cmd+T or window.open never did,
+        // leaving it permanently stuck on a black first paint that no reload can fix.
+        newWeb.allowsMagnification = true
         newWeb.navigationDelegate = self
         newWeb.uiDelegate = self
         newWeb.translatesAutoresizingMaskIntoConstraints = false

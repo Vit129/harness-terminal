@@ -569,6 +569,10 @@ final class MainSplitViewController: NSViewController {
         }
         sidebarLog.debug("setSidebarWidth width=\(width) totalWidth=\(totalWidth) sidebarOnRight=\(sidebarOnRight) -> setPosition=\(position)")
         split.setPosition(position, ofDividerAt: 0)
+        // Diagnostic for cmd-backslash-sidebar-launch-race-6th's 2026-08-16 recurrence:
+        // setPosition is advisory — NSSplitViewDelegate's constrain methods can silently
+        // clamp it with no error. Log what was actually accepted vs what was asked for.
+        sidebarLog.debug("setSidebarWidth accepted panelWidth=\(self.sidebarContainerView?.frame.width ?? -1) contentWidth=\(self.content.view.frame.width) (asked width=\(width))")
     }
 
     /// Fired by `SplitChromeDelegate` on every split-view resize — animations, `viewDidLayout`,

@@ -44,6 +44,22 @@ final class BrowserPaneViewTests: XCTestCase {
             "didFinish should kick the compositor so a completed load can't stay stuck black")
     }
 
+    // Regression: a tab opened via createTab() (Cmd+T, or a link/window.open that pops
+    // a new tab) must also get allowsMagnification=true, same as the pane's first tab —
+    // otherwise kickCompositorRelayout()'s guard silently no-ops for it forever, and no
+    // amount of reload can fix its stuck-black first paint.
+    func testCreateTabSetsAllowsMagnificationForCompositorKick() {
+        let testURL = URL(string: "https://example.com/test")!
+        let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        mockWebView.mockURL = testURL
+        let paneView = BrowserPaneView(url: testURL, paneID: UUID(), webView: mockWebView)
+
+        let newTabWebView = paneView.createTab(url: URL(string: "https://example.com/new-tab")!)
+
+        XCTAssertTrue(newTabWebView.allowsMagnification,
+            "createTab()'s webview must allow magnification, or the compositor kick in didFinish is a permanent no-op for this tab")
+    }
+
     // MARK: - Design Mode (M3)
 
     func testDesignModeButtonHasExpectedIdentifierAndTooltip() {
