@@ -82,3 +82,7 @@ __pycache__/
 
 # Transient memory-hook marker — leaks into commits periodically (see 79b75bab), never source.
 agent-memory/.memory-pending
+
+# agent-memory is centrally backed up to a private repo (claude-memory-private),
+# not tracked per-project anymore -- see ~/.claude/CLAUDE.md Memory Lifecycle
+agent-memory/
