@@ -143,6 +143,9 @@ struct FileTreeSwiftUIView: View {
     @State private var retiredNodes: [FileTreeNode] = []
     /// Kept alive across expands so child nodes inherit the same status map.
     @State private var currentGitStatus: [String: GitStatusType] = [:]
+    /// Coalesces bursts of `scheduleLoadRoot()` calls (e.g. rapid `.fileTreeDidChange`
+    /// notifications) into a single `loadRoot()` — see its doc comment.
+    @State private var pendingLoadTask: Task<Void, Never>?
     @AppStorage("KouenFileTreeShowsHiddenFiles") private var showsHiddenFiles = false
     @AppStorage("KouenFileTreeShowsHiddenFolders") private var showsHiddenFolders = false
 
@@ -230,10 +233,10 @@ struct FileTreeSwiftUIView: View {
         .onAppear { refreshGitBranch(); updateVisiblePaths() }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("KouenActiveTabGitBranchDidChange"))) { _ in
             refreshGitBranch()
-            Task { await loadRoot() }
+            scheduleLoadRoot()
         }
         .onReceive(NotificationCenter.default.publisher(for: .fileTreeDidChange)) { _ in
-            Task { await loadRoot() }
+            scheduleLoadRoot()
         }
         // React to both path and session changes — different sessions may be on
         // different branches sharing the same rootPath.
@@ -438,6 +441,18 @@ struct FileTreeSwiftUIView: View {
         return results
     }
 
+    /// Debounces `loadRoot()`: cancels any pending call and reschedules 300ms out, so a
+    /// burst of notifications (e.g. many rapid `.fileTreeDidChange` fires during a build)
+    /// coalesces into one `git status` invocation instead of spawning one per fire.
+    private func scheduleLoadRoot() {
+        pendingLoadTask?.cancel()
+        pendingLoadTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await loadRoot()
+        }
+    }
+
     private func loadRoot() async {
         let taskRootPath = rootPath
         let taskSessionID = sessionID
@@ -509,6 +524,10 @@ private struct NodeRow: View {
     let keyboard: FileTreeKeyboardState
     let onPreview: (FileNode) -> Void
     let isSearching: Bool
+
+    /// Debounces `reconcileChildren()` the same way `FileTreeSwiftUIView.scheduleLoadRoot()`
+    /// debounces the root scan — see `reconcileChildren()`'s doc comment for why this exists.
+    @State private var pendingReconcileTask: Task<Void, Never>?
 
     private var isFocused: Bool { keyboard.focusedPath == node.node.path }
 
@@ -589,6 +608,15 @@ private struct NodeRow: View {
                       path == node.node.path else { return }
                 if action == "expand" && !node.isExpanded { node.isExpanded = true }
                 if action == "collapse" && node.isExpanded { node.isExpanded = false }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .fileTreeDidChange)) { _ in
+                guard node.isExpanded else { return }
+                pendingReconcileTask?.cancel()
+                pendingReconcileTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    await reconcileChildren()
+                }
             }
         } else {
             rowLabel(systemImage: "doc")
@@ -725,7 +753,10 @@ private struct NodeRow: View {
     private func newFile(in node: FileNode) {
         let dir = node.isDirectory ? node.path : (node.path as NSString).deletingLastPathComponent
         let path = uniquePath(base: dir, name: "untitled", ext: "")
-        FileManager.default.createFile(atPath: path, contents: nil)
+        guard FileManager.default.createFile(atPath: path, contents: nil) else {
+            showCreateError(path: path)
+            return
+        }
         Self.notifyTreeDidChange()
         renameItem(path: path)
     }
@@ -733,8 +764,25 @@ private struct NodeRow: View {
     private func newFolder(in node: FileNode) {
         let dir = node.isDirectory ? node.path : (node.path as NSString).deletingLastPathComponent
         let path = uniquePath(base: dir, name: "untitled folder", ext: "")
-        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+        do {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+        } catch {
+            showCreateError(path: path, error: error)
+            return
+        }
         Self.notifyTreeDidChange()
+    }
+
+    /// `newFile`/`newFolder` previously discarded failures (`try?` / unchecked `Bool`
+    /// return) — a failed create looked identical to a successful one that just hadn't
+    /// refreshed yet, no dialog, no beep. Surfacing the actual reason here.
+    private func showCreateError(path: String, error: Error? = nil) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn't create \"\((path as NSString).lastPathComponent)\""
+        alert.informativeText = error?.localizedDescription
+            ?? "The item already exists or the location isn't writable."
+        alert.runModal()
     }
 
     private func renameItem(path: String) {
@@ -789,6 +837,22 @@ private struct NodeRow: View {
         } catch {
             node.children = []
         }
+    }
+
+    /// `loadRoot()`'s own reconcile deliberately preserves each node's cached `children`
+    /// ("keep children intact") so nested expand state survives a root refresh, and
+    /// `loadChildren()` only fetches once (`guard children?.isEmpty == true`) — so once a
+    /// folder is expanded, nothing ever re-scans it again. A file created/deleted inside an
+    /// already-expanded folder (e.g. via this tree's own New File/Folder) never showed up
+    /// until the app restarted. Re-scans and merges by id — same identity-preserving
+    /// reconcile `loadRoot()` uses for the root level, so already-expanded nested
+    /// subfolders keep their own `isExpanded` state instead of resetting.
+    private func reconcileChildren() async {
+        guard node.isExpanded,
+              let fresh = try? await watcher.expand(node: node.node, gitStatus: gitStatus, options: scanOptions)
+        else { return }
+        let existingByID = Dictionary(uniqueKeysWithValues: (node.children ?? []).map { ($0.id, $0) })
+        node.children = fresh.map { existingByID[$0.id] ?? FileTreeNode(node: $0) }
     }
 
     private func openFile() {

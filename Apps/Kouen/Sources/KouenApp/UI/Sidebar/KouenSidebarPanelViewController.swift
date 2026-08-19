@@ -934,7 +934,7 @@ final class KouenSidebarPanelViewController: NSViewController {
             process.currentDirectoryURL = URL(fileURLWithPath: path)
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = Pipe()
+            process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()

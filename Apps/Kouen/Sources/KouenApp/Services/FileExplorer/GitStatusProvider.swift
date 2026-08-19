@@ -20,17 +20,25 @@ public actor GitStatusProvider {
 
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe
-        process.standardError = Pipe()   // suppress — non-git dirs exit non-zero
+        process.standardError = FileHandle.nullDevice   // suppress — non-git dirs exit non-zero
 
         do {
             try process.run()
         } catch {
             return [:]
         }
-        // Read output asynchronously so we don't block the actor's thread.
-        let data = await Task.detached(priority: .utility) {
-            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        }.value
+        // Drain on a GCD thread, not `Task.detached`: `readDataToEndOfFile()` blocks
+        // synchronously until the pipe closes, and Task.detached still runs on Swift's
+        // shared cooperative pool. Under bursty concurrent calls that pool can saturate
+        // with these blocking reads, so a queued-but-never-run one leaves its process's
+        // pipe undrained — if that process then writes enough to fill the kernel pipe
+        // buffer, its `write()` blocks forever and the process never exits. GCD's pool
+        // auto-scales instead of sharing Swift concurrency's fixed thread budget.
+        let data = await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+            }
+        }
         process.waitUntilExit()
 
         return parse(data)

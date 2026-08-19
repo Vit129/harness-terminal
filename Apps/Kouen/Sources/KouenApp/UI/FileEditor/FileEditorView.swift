@@ -180,10 +180,13 @@ final class FileEditorView: NSView {
         process.currentDirectoryURL = URL(fileURLWithPath: dir)
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return [:] }
-        process.waitUntilExit()
+        // Drain stdout before waitUntilExit(): a large diff can exceed the pipe's kernel
+        // buffer, so reading only after the child exits deadlocks (child blocks on
+        // write(), waitUntilExit() blocks on the child exiting).
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
         guard let output = String(data: data, encoding: .utf8) else { return [:] }
 
         // "-start[,count]" or "+start[,count]" — count defaults to 1 when omitted.

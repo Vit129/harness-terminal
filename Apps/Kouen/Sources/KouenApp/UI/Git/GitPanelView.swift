@@ -2127,7 +2127,7 @@ final class GitPanelView: NSView {
                 process.currentDirectoryURL = URL(fileURLWithPath: directory)
                 let pipe = Pipe()
                 process.standardOutput = pipe
-                process.standardError = Pipe()
+                process.standardError = FileHandle.nullDevice
                 do {
                     try process.run()
                     // Drain stdout before waitUntilExit(): for output >64KB the pipe
@@ -2164,12 +2164,23 @@ final class GitPanelView: NSView {
                 process.standardError = errPipe
                 do {
                     try process.run()
+                    // Drain both pipes concurrently, before waitUntilExit(): reading them
+                    // sequentially deadlocks if the unread one fills its kernel buffer
+                    // first while the child blocks writing to it (e.g. a large diff on
+                    // stdout racing verbose warnings on stderr).
+                    let errBox = DataBox()
+                    let errGroup = DispatchGroup()
+                    errGroup.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        errBox.value = errPipe.fileHandleForReading.readDataToEndOfFile()
+                        errGroup.leave()
+                    }
                     let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    errGroup.wait()
                     process.waitUntilExit()
                     let out = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if out.isEmpty, process.terminationStatus != 0 {
-                        let err = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let err = String(data: errBox.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                         continuation.resume(returning: err.isEmpty ? "" : "git \(args.first ?? "") failed: \(err)")
                         return
                     }
@@ -2179,6 +2190,14 @@ final class GitPanelView: NSView {
                 }
             }
         }
+    }
+
+    /// Hands a pipe-read result across the `DispatchGroup`-synchronized background read in
+    /// `runGitDiff` without the Sendable-closure-capture warning a plain `var` triggers —
+    /// `errGroup.wait()` is the actual synchronization point, so the mutation is safe despite
+    /// the compiler not being able to see it through the closure boundary.
+    private final class DataBox: @unchecked Sendable {
+        var value = Data()
     }
 
 }

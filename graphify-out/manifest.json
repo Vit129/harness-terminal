@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/BrowserPaneView.swift": {
-    "mtime": 1786538657.7211378,
-    "ast_hash": "c355e120588aff08d54411efcaed4ad2",
+    "mtime": 1786846896.9228914,
+    "ast_hash": "332879613330b8573a1ea87a9a6d1f03",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/ContentAreaViewController.swift": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainSplitViewController.swift": {
-    "mtime": 1785510867.5162973,
-    "ast_hash": "4fed9ed53b7ca0d137591a12a33e9b07",
+    "mtime": 1786846921.093075,
+    "ast_hash": "b039935ac6295c712a564fb34c0cc395",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainWindowController.swift": {
@@ -2075,8 +2075,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/BrowserPaneViewTests.swift": {
-    "mtime": 1786539110.4127457,
-    "ast_hash": "9b2086f6ce8cdebb74a48fb6c3dba5d8",
+    "mtime": 1786846907.8289738,
+    "ast_hash": "583c64f19544c17c453c2a8e8c6cace5",
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/DaemonLauncherTests.swift": {
@@ -4165,8 +4165,8 @@
     "semantic_hash": ""
   },
   "agent-memory/GATE-STATE.md": {
-    "mtime": 1786582249.5902605,
-    "ast_hash": "9e8bc8d9c8e736e4f21225958a7b66f8",
+    "mtime": 1786847003.572054,
+    "ast_hash": "7356e7d9db275b9a87745c78af358fe3",
     "semantic_hash": ""
   },
   "agent-memory/knowledge/bugs/cmd-backslash-sidebar-keywindow.md": {

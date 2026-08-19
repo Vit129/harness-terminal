@@ -251,7 +251,7 @@ final class SidebarListModel {
             process.arguments = ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = Pipe()
+            process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -313,7 +313,7 @@ final class SidebarListModel {
             process.currentDirectoryURL = URL(fileURLWithPath: path)
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = Pipe()
+            process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -348,7 +348,7 @@ final class SidebarListModel {
             revProcess.currentDirectoryURL = URL(fileURLWithPath: path)
             let revPipe = Pipe()
             revProcess.standardOutput = revPipe
-            revProcess.standardError = Pipe()
+            revProcess.standardError = FileHandle.nullDevice
             do {
                 try revProcess.run()
                 let data = revPipe.fileHandleForReading.readDataToEndOfFile()
@@ -373,7 +373,7 @@ final class SidebarListModel {
             process.currentDirectoryURL = URL(fileURLWithPath: rootPath)
             let pipe = Pipe()
             process.standardOutput = pipe
-            process.standardError = Pipe()
+            process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()

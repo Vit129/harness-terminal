@@ -73,26 +73,43 @@ enum GitCloneUpdateChecker {
     /// Runs `git pull origin main` in the checkout root. Callers must only invoke this after
     /// confirming `CheckResult.dirty` is false and getting explicit user confirmation.
     static func pull(gitRoot: String) async -> (success: Bool, output: String) {
-        await Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = gitExecutableURL
-            process.arguments = ["-C", gitRoot, "pull", "origin", "main"]
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-            do {
-                try process.run()
-            } catch {
-                return (false, "Failed to launch git: \(error.localizedDescription)")
+        let process = Process()
+        process.executableURL = gitExecutableURL
+        process.arguments = ["-C", gitRoot, "pull", "origin", "main"]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+        } catch {
+            return (false, "Failed to launch git: \(error.localizedDescription)")
+        }
+        // Drain both pipes concurrently, before waitUntilExit(): a `git pull` with a lot
+        // of stdout (fast-forward summary) or stderr (conflict/warning text) can exceed
+        // the kernel pipe buffer — reading only after exit (or reading the two
+        // sequentially) deadlocks if the unread one fills first.
+        async let stdoutDataTask = drainPipe(stdoutPipe)
+        async let stderrDataTask = drainPipe(stderrPipe)
+        let stdoutData = await stdoutDataTask
+        let stderrData = await stderrDataTask
+        process.waitUntilExit()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        let success = process.terminationStatus == 0
+        let output = success ? stdout : (stderr.isEmpty ? stdout : stderr)
+        return (success, output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Reads a pipe to EOF off the calling thread — `readDataToEndOfFile()` blocks
+    /// synchronously until the write end closes, so running it directly in an async
+    /// context would tie up a cooperative-pool thread for the child process's lifetime.
+    private static func drainPipe(_ pipe: Pipe) async -> Data {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: pipe.fileHandleForReading.readDataToEndOfFile())
             }
-            process.waitUntilExit()
-            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let success = process.terminationStatus == 0
-            let output = success ? stdout : (stderr.isEmpty ? stdout : stderr)
-            return (success, output.trimmingCharacters(in: .whitespacesAndNewlines))
-        }.value
+        }
     }
 
     // MARK: - Private
@@ -103,7 +120,7 @@ enum GitCloneUpdateChecker {
         process.arguments = ["-C", sourceFileDirectory, "rev-parse", "--show-toplevel"]
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
         } catch {
@@ -124,7 +141,7 @@ enum GitCloneUpdateChecker {
         process.arguments = ["-C", gitRoot, "status", "--short", "--untracked-files=normal"]
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
         } catch {

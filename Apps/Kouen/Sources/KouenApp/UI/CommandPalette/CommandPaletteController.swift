@@ -1115,10 +1115,13 @@ extension Process {
         proc.arguments = ["query", "-l"]
         let pipe = Pipe()
         proc.standardOutput = pipe
-        proc.standardError = Pipe()
+        proc.standardError = FileHandle.nullDevice
         try proc.run()
+        // Drain stdout before waitUntilExit(): a long zoxide history can exceed the
+        // pipe's kernel buffer, deadlocking if read only happens after the child exits.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
         guard proc.terminationStatus == 0 else { return nil }
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        return String(data: data, encoding: .utf8)
     }
 }

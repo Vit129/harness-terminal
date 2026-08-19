@@ -5,6 +5,11 @@ All notable changes to Kouen are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each released version
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
+## [4.12.2] - 2026-08-19
+
+### Added
+- Release version bump to v4.12.2.
+
 ## [4.12.1] - 2026-08-13
 
 ### Fixed
