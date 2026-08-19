@@ -64,7 +64,10 @@ UID_NUM=$(id -u)
 # they're UI-only — so the daemon (and every PTY/agent task running under it) can survive
 # the install untouched; only the GUI needs to restart.
 REUSE_DAEMON=0
-if pgrep -f "KouenDaemon" > /dev/null 2>&1; then
+# `pgrep -f`/`-x` unreliably miss this daemon on some macOS builds (observed: false
+# negative even while `ps`/`launchctl print` both confirm it's running) — ask launchd
+# directly instead, since that's already the authority STOP_DAEMON_LINES uses to kill it.
+if launchctl print "gui/$UID_NUM/com.vit129.kouen.daemon" 2>/dev/null | grep -q "state = running"; then
   INSTALLED_CLI=""
   if [[ -x "$APP_SUPPORT_BIN/kouen-cli" ]]; then
     INSTALLED_CLI="$APP_SUPPORT_BIN/kouen-cli"

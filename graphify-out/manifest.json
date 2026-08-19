@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/FileExplorer/GitStatusProvider.swift": {
-    "mtime": 1785510867.5036163,
-    "ast_hash": "0d04899c6cc9894bec2b2551f085f9f2",
+    "mtime": 1787104484.8857584,
+    "ast_hash": "a1a13f640fd9f0e50f8e66418344d590",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/FrecencyDirectoryStore.swift": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/CommandPalette/CommandPaletteController.swift": {
-    "mtime": 1785989063.0509741,
-    "ast_hash": "c4def8c6613a42df3c5d7b7f0d084649",
+    "mtime": 1787112014.1108785,
+    "ast_hash": "9afdc8da2a381fecb6b33bc12bfe6cdb",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/CommandPalette/CommandPromptController.swift": {
@@ -430,8 +430,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileEditor/FileEditorView.swift": {
-    "mtime": 1785510867.5219238,
-    "ast_hash": "f202c19ab87cc1f7c7f5e1e18cba81dc",
+    "mtime": 1787112009.2464075,
+    "ast_hash": "41feb4ed8b666631ccffeee678d4629c",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileEditor/FileTabManager.swift": {
@@ -490,8 +490,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileTree/FileTreeSwiftUIView.swift": {
-    "mtime": 1785989160.3159885,
-    "ast_hash": "8067069c856aa38aa202c249a36ba36c",
+    "mtime": 1787116286.8899503,
+    "ast_hash": "7d3c16ecb4512030645b08382cc1205c",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileTree/WorkspaceFileTreeView.swift": {
@@ -500,8 +500,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Git/GitPanelView.swift": {
-    "mtime": 1785989112.4446652,
-    "ast_hash": "3c8920d7d86d4821c9a2a0ac9f72a5eb",
+    "mtime": 1787112201.7521667,
+    "ast_hash": "ff8f67546209772bf89a7b0d9eb205c6",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Inline/InlineAICompletionController.swift": {
@@ -675,13 +675,13 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Sidebar/KouenSidebarPanelViewController.swift": {
-    "mtime": 1785989063.0525663,
-    "ast_hash": "6dbde28dedfb857764a16df506549ce6",
+    "mtime": 1787112003.9653993,
+    "ast_hash": "7646ab57e985a1cb1cadebd2f145797a",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Sidebar/SidebarListModel.swift": {
-    "mtime": 1785989063.0529025,
-    "ast_hash": "5594da2fdf2b193e11302a526fe7145b",
+    "mtime": 1787111999.5537326,
+    "ast_hash": "8416341cbe6f854d54678dcd190cc27f",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Sidebar/SidebarSessionListView.swift": {
@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/KouenVersion.swift": {
-    "mtime": 1786596573.8294892,
-    "ast_hash": "c7cceb309a2a19255a517b02022a2f9b",
+    "mtime": 1787117112.1130452,
+    "ast_hash": "a2eca92c88ece60f99df4b172dbb9a7f",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Layouts/LayoutTemplate.swift": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/GeneratedReleaseNotes.swift": {
-    "mtime": 1786596576.3144095,
-    "ast_hash": "864192980a5e42cb57a9843a3d7953cc",
+    "mtime": 1787117113.767048,
+    "ast_hash": "752c34b59b259601d5766ae1ca4586d8",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/ReleaseNotes.swift": {
@@ -3395,8 +3395,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1785999813.0649574,
-    "ast_hash": "25425b07396ed8bccc9cd9aed3b7785d",
+    "mtime": 1786892530.4327395,
+    "ast_hash": "bc56e344708e9012456dcaaed7e1fef9",
     "semantic_hash": ""
   },
   "GEMINI.md": {
@@ -3895,8 +3895,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/UpdateCheck/GitCloneUpdateChecker.swift": {
-    "mtime": 1785510867.5092692,
-    "ast_hash": "df196c10625cc4a7521b6ab6453a2953",
+    "mtime": 1787112151.4261227,
+    "ast_hash": "5e54d90982fbe1d627dadf2e1e5ca707",
     "semantic_hash": ""
   },
   "version.json": {
@@ -4377,6 +4377,11 @@
   "agent-memory/knowledge/cases/release-daemon-restart.md": {
     "mtime": 1786325616.439632,
     "ast_hash": "f64d7c78f70e95a699e2dda26fabebd2",
+    "semantic_hash": ""
+  },
+  "Tests/KouenAppTests/GitStatusProviderLargeOutputTests.swift": {
+    "mtime": 1787104648.4319386,
+    "ast_hash": "49f838827e1d74e2fd28fdc3e1140494",
     "semantic_hash": ""
   }
 }

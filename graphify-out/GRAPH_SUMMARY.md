@@ -3,13 +3,13 @@ _Auto-generated from GRAPH_REPORT.md · do not edit manually_
 _Regen: `graphify update .`_
 
 ## Summary
-- 14766 nodes · 35029 edges · 3014 communities (893 shown, 2121 thin omitted)
-- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 3996 edges (avg confidence: 0.8)
+- 14780 nodes · 35018 edges · 3025 communities (902 shown, 2123 thin omitted)
+- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 3946 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 
 ## Graph Freshness
-- Built from commit: `8e04f102`
+- Built from commit: `6ebf1320`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -32,13 +32,13 @@ A high-degree node isn't always architecturally central - a widely-used
 utility/config file can rack up more edges than a real coupler while only
 ever touching one area. This ranks by how many DIFFERENT communities a
 node's neighbors span, not by raw edge count.
-1. `IPCRequest` - bridges 171 areas (191 edges)
-2. `Command` - bridges 101 areas (107 edges)
-3. `IPCResponse` - bridges 72 areas (94 edges)
-4. `SessionCoordinator` - bridges 57 areas (131 edges)
-5. `KouenPaths` - bridges 57 areas (122 edges)
-6. `MenuTarget` - bridges 56 areas (68 edges)
-7. `SurfaceRegistry` - bridges 55 areas (197 edges)
+1. `IPCRequest` - bridges 174 areas (191 edges)
+2. `Command` - bridges 100 areas (107 edges)
+3. `IPCResponse` - bridges 76 areas (94 edges)
+4. `SessionCoordinator` - bridges 61 areas (131 edges)
+5. `SurfaceRegistry` - bridges 58 areas (197 edges)
+6. `MenuTarget` - bridges 58 areas (68 edges)
+7. `KouenPaths` - bridges 56 areas (122 edges)
 8. `AgentKind` - bridges 55 areas (108 edges)
 9. `EngineConformanceTests` - bridges 50 areas (76 edges)
 

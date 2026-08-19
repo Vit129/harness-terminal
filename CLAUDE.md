@@ -21,7 +21,7 @@ AppKit/SwiftUI/macOS → `macos-swiftui` | debugging → `debug-mantra` | review
 | `make preview` | Isolated preview build (own bundle id, socket, state) — dev use |
 | `make prod` | Release build, signs, opens `Kouen.app` at repo root |
 | `make run` | Re-open existing `Kouen.app`, no rebuild |
-| `make install` | Release build, copy to `/Applications/Kouen.app` |
+| `make install-graceful` | Release build, graceful copy to `/Applications/Kouen.app` (preserves session layout; quits/relaunches Kouen) |
 | `swift build --product Kouen` | GUI app only |
 | `swift test` | Full test suite |
 | `swift test --filter <name>` | Filtered test |
