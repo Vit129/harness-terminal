@@ -60,6 +60,33 @@ final class BrowserPaneViewTests: XCTestCase {
             "createTab()'s webview must allow magnification, or the compositor kick in didFinish is a permanent no-op for this tab")
     }
 
+    // Regression for the black screen on tab switch: PaneLifecycleManager's fast path
+    // reveals a cached (previously hidden) pane container by toggling `isHidden` alone,
+    // never re-adding it to the view hierarchy — so WKWebView's remote layer can stay
+    // stale/black unless something explicitly nudges its compositor. forceRepaint()
+    // is that nudge; it must actually fire once the pane is attached to a real window.
+    func testForceRepaintWakesWebViewWhenAttachedToWindow() {
+        let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let testURL = URL(string: "https://example.com/test")!
+        mockWebView.mockURL = testURL
+        mockWebView.allowsMagnification = true
+        let paneView = BrowserPaneView(url: testURL, paneID: UUID(), webView: mockWebView)
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView?.addSubview(paneView)
+        mockWebView.evaluateJavaScriptCalls.removeAll()
+
+        paneView.forceRepaint()
+
+        XCTAssertFalse(mockWebView.evaluateJavaScriptCalls.isEmpty,
+            "forceRepaint() must wake WKWebView's compositor once the pane is in a real window, or a revealed-from-cache tab stays black")
+        // setNeedsDisplay/evaluateJavaScript alone don't force a synchronous compositor
+        // commit — the magnification-nudge kick (already proven in didFinish, see
+        // testDidFinishTriggersCompositorKickToForcePaint) must fire too.
+        XCTAssertFalse(mockWebView.setMagnificationCalls.isEmpty,
+            "forceRepaint() must also kick the compositor via magnification nudge, or a revealed-from-cache tab can still stay stuck black")
+    }
+
     // MARK: - Design Mode (M3)
 
     func testDesignModeButtonHasExpectedIdentifierAndTooltip() {
@@ -237,5 +264,11 @@ private final class MockWebView: WKWebView {
     var setMagnificationCalls: [(magnification: CGFloat, centeredAt: CGPoint)] = []
     override func setMagnification(_ magnification: CGFloat, centeredAt point: CGPoint) {
         setMagnificationCalls.append((magnification, point))
+    }
+
+    var evaluateJavaScriptCalls: [String] = []
+    override func evaluateJavaScript(_ javaScriptString: String, completionHandler: (@MainActor @Sendable (Any?, (any Error)?) -> Void)? = nil) {
+        evaluateJavaScriptCalls.append(javaScriptString)
+        completionHandler?(nil, nil)
     }
 }

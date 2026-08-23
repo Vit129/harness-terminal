@@ -63,6 +63,10 @@ final class PaneLifecycleManager {
                 coordinator.ensureActivePane(for: tab)
                 paneContainer?.refreshChrome(snapshot: coordinator.snapshot)
                 cachedHosts.values.forEach { $0.forceRepaint() }
+                // WKWebView's remote layer can go stale/black across the isHidden
+                // toggle above just like the Metal-rendered terminal hosts — nudge it
+                // the same way (see BrowserPaneView.forceRepaint()).
+                cached.collectBrowserPanes().values.forEach { $0.forceRepaint() }
                 return
             }
             // Hosts were stolen or structure is stale — evict and fall through to rebuild.

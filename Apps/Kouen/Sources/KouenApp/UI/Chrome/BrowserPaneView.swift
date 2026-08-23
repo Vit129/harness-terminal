@@ -153,14 +153,25 @@ public final class BrowserPaneView: NSView {
     override public func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         // When the browser pane is reattached after a pane tree rebuild, WKWebView
-        // may show a blank/pink frame until the next draw cycle. Force a
-        // display to ensure the web content process repaints.
-        if superview != nil, window != nil {
-            webView.setNeedsDisplay(webView.bounds)
-            // Also nudge the web content process by evaluating a trivial script
-            // — this is the most reliable way to wake WKWebView's compositor.
-            webView.evaluateJavaScript("void(0)") { _, _ in }
-        }
+        // may show a blank/pink frame until the next draw cycle.
+        forceRepaint()
+    }
+
+    /// Synchronously wake WKWebView's compositor so content repaints immediately.
+    /// Mirrors TerminalHostView.forceRepaint()'s "hidden container revealed" fix for
+    /// the Metal-rendered terminal path — WKWebView's remote layer can go stale/black
+    /// across a superview reattach or an ancestor's `isHidden` toggle without this nudge.
+    public func forceRepaint() {
+        guard superview != nil, window != nil else { return }
+        webView.setNeedsDisplay(webView.bounds)
+        // Nudge the web content process by evaluating a trivial script — this is the
+        // most reliable way to wake WKWebView's compositor.
+        webView.evaluateJavaScript("void(0)") { _, _ in }
+        // setNeedsDisplay/evaluateJavaScript alone don't guarantee a synchronous layer
+        // commit. kickCompositorRelayout's magnification nudge does — it's the same
+        // mechanism didFinish already relies on to force a completed load off a stuck
+        // black first paint (see testDidFinishTriggersCompositorKickToForcePaint).
+        kickCompositorRelayout(for: webView)
     }
 
     override public func viewWillMove(toWindow newWindow: NSWindow?) {
