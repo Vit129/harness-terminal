@@ -8,7 +8,7 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.13.0] - 2026-08-23
 
 ### Added
-- Release version bump to v4.13.0.
+- Notch auto-hides when idle; fix dead approval buttons and false waiting badge across all agent hooks ([`28562da`](https://github.com/Vit129/kouen-terminal/commit/28562dacd430fdd728d0ef36a6fafedf09fb83cb))
 
 ## [4.12.3] - 2026-08-19
 
