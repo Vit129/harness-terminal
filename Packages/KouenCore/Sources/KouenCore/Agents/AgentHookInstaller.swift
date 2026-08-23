@@ -505,6 +505,13 @@ public enum AgentHookInstaller {
         "\(notifyPrefix) --surface \"$KOUEN_SURFACE\" --title \"\(title)\" --from-hook"
     }
 
+    /// A Stop-hook ("turn finished normally") notify — `--status done` so the daemon sets
+    /// `Tab.status = .done` instead of `.waiting`, keeping the Agent Notch's Reply/Deny/Allow
+    /// controls reserved for a real attention/permission event.
+    private static func notifyDoneCommand(title: String, body: String) -> String {
+        "\(notifyPrefix) --surface \"$KOUEN_SURFACE\" --title \"\(title)\" --body \"\(body)\" --status done"
+    }
+
     /// Emit OSC 26 agent status into the PTY stream. The hook runs inside the same PTY as the
     /// terminal, so printf output is parsed by the emulator and drives the status dot + approval bar.
     private static func osc26Emit(identity: AgentKind, status: String) -> String {
@@ -519,6 +526,11 @@ public enum AgentHookInstaller {
 
     private static func osc26AndNotifyFromHook(identity: AgentKind, status: String, title: String) -> String {
         "\(osc26Emit(identity: identity, status: status)); \(notifyFromHookCommand(title: title))"
+    }
+
+    private static func osc26AndNotifyDone(identity: AgentKind, status: String,
+                                           title: String, body: String) -> String {
+        "\(osc26Emit(identity: identity, status: status)); \(notifyDoneCommand(title: title, body: body))"
     }
 
     /// P38 Phase B — signals a Task-tool subagent starting/stopping. Deliberately NOT routed
@@ -540,7 +552,7 @@ public enum AgentHookInstaller {
                 ]],
                 "Stop": [[
                     "matcher": "*",
-                    "hooks": [["type": "command", "command": osc26AndNotify(identity: .claudeCode, status: "idle", title: "Claude Code", body: "Done")]],
+                    "hooks": [["type": "command", "command": osc26AndNotifyDone(identity: .claudeCode, status: "idle", title: "Claude Code", body: "Done")]],
                 ]],
                 "PreToolUse": [[
                     "matcher": "Task",
@@ -567,7 +579,7 @@ public enum AgentHookInstaller {
                 ]],
                 "Stop": [[
                     "matcher": "*",
-                    "hooks": [["type": "command", "command": osc26AndNotify(identity: .codex, status: "idle", title: "Codex", body: "Done")]],
+                    "hooks": [["type": "command", "command": osc26AndNotifyDone(identity: .codex, status: "idle", title: "Codex", body: "Done")]],
                 ]],
             ],
         ]
@@ -577,14 +589,14 @@ public enum AgentHookInstaller {
         [
             "version": 1,
             "hooks": [
-                "stop": [["command": osc26AndNotify(identity: .cursor, status: "idle", title: "Cursor", body: "Done")]],
+                "stop": [["command": osc26AndNotifyDone(identity: .cursor, status: "idle", title: "Cursor", body: "Done")]],
             ],
         ]
     }
 
     private static var grokPayload: [String: Any] {
         [
-            "on-complete": osc26AndNotify(identity: .grok, status: "idle", title: "Grok", body: "Done"),
+            "on-complete": osc26AndNotifyDone(identity: .grok, status: "idle", title: "Grok", body: "Done"),
             "on-error": osc26AndNotify(identity: .grok, status: "errored", title: "Grok", body: "Error"),
         ]
     }
@@ -595,7 +607,7 @@ public enum AgentHookInstaller {
     private static var antigravityPayload: [String: Any] {
         [
             "kouen-notify": [
-                "Stop": [["type": "command", "command": osc26AndNotify(identity: .antigravity, status: "idle", title: "Antigravity", body: "Done")]],
+                "Stop": [["type": "command", "command": osc26AndNotifyDone(identity: .antigravity, status: "idle", title: "Antigravity", body: "Done")]],
             ],
         ]
     }
@@ -610,7 +622,7 @@ public enum AgentHookInstaller {
         export const KouenNotify = async ({ $ }) => ({
           "session.idle": async () => {
             process.stdout.write('\\x1b]26;identity=opencode;status=idle\\x07')
-            await $`\(notifyPrefix) --surface "${process.env.KOUEN_SURFACE ?? ""}" --title OpenCode --body Done`
+            await $`\(notifyPrefix) --surface "${process.env.KOUEN_SURFACE ?? ""}" --title OpenCode --body Done --status done`
           },
           "permission.asked": async () => {
             process.stdout.write('\\x1b]26;identity=opencode;status=waiting_input\\x07')
@@ -630,7 +642,7 @@ public enum AgentHookInstaller {
         export function activate(api: any) {
           const notify = (body: string) =>
             execSync(
-              `\(notifyPrefix) --surface "${process.env.KOUEN_SURFACE ?? ""}" --title "Pi" --body "${body}"`,
+              `\(notifyPrefix) --surface "${process.env.KOUEN_SURFACE ?? ""}" --title "Pi" --body "${body}" --status done`,
               { stdio: "ignore" }
             )
           const osc26idle = () => process.stdout.write('\\x1b]26;identity=pi;status=idle\\x07')
@@ -646,7 +658,7 @@ public enum AgentHookInstaller {
         """
         hooks:
           - event: stop
-            command: '\(osc26AndNotify(identity: .hermes, status: "idle", title: "Hermes", body: "Done"))'
+            command: '\(osc26AndNotifyDone(identity: .hermes, status: "idle", title: "Hermes", body: "Done"))'
         """
     }
 
@@ -655,7 +667,7 @@ public enum AgentHookInstaller {
         """
         "hooks": {
           "kouen-notify": {
-            "command": "\(escapedForJSON(osc26AndNotify(identity: .openClaw, status: "idle", title: "OpenClaw", body: "Done")))",
+            "command": "\(escapedForJSON(osc26AndNotifyDone(identity: .openClaw, status: "idle", title: "OpenClaw", body: "Done")))",
           },
         },
         """

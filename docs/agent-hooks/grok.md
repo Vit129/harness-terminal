@@ -14,7 +14,7 @@ Writes `~/.grok/hooks/kouen.json`:
 
 ```json
 {
-  "on-complete": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Grok\" --body \"Done\"",
+  "on-complete": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Grok\" --body \"Done\" --status done",
   "on-error": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Grok\" --body \"Error\""
 }
 ```

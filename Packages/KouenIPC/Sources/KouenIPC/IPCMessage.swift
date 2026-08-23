@@ -42,7 +42,14 @@ import Foundation
 /// Bumped 2026-08-10: added `.flushSessionState` to `IPCRequest` — daemon-side handler for
 /// `install-graceful.sh`'s pre-kill flush (see that case's doc comment). Same functional-
 /// addition rule as M2/M5/M10 above.
-public let ipcProtocolVersion: Int = 8
+///
+/// Bumped 2026-08-23: added `.notifyDone` to `IPCRequest` — a Stop-hook ("turn finished
+/// normally") notification distinct from `.notify` ("real attention/permission event"). Both
+/// used to funnel through `.notify`, which unconditionally set `Tab.status = .waiting` and made
+/// the Agent Notch show Reply/Deny/Allow approval controls after every ordinary turn, not just
+/// real permission prompts. Same functional-addition rule as M2/M5/M10 above — bump so
+/// `install-graceful.sh` restarts into a daemon binary that actually has the new handler.
+public let ipcProtocolVersion: Int = 9
 
 public enum IPCRequest: Codable, Sendable {
     case ping
@@ -105,6 +112,11 @@ public enum IPCRequest: Codable, Sendable {
     /// keep-on-quit sessions are left running.
     case closeEphemeralSessions
     case notify(surfaceID: String, title: String, body: String)
+    /// A Stop-hook ("agent finished this turn normally") notification — distinct from
+    /// `.notify`, which is for a real attention/permission event. Sets `Tab.status = .done`
+    /// instead of `.waiting`, so the Agent Notch doesn't show Reply/Deny/Allow controls for a
+    /// turn that needed no decision from the user.
+    case notifyDone(surfaceID: String, title: String, body: String)
     /// Claude Code's `PreToolUse`(Task)/`SubagentStop` hook push (P38 Phase B) — signals a
     /// Task-tool subagent starting/stopping, which proc-scan can't see (it runs in-process,
     /// no child PID). `active` true = start, false = stop.

@@ -17,7 +17,7 @@ into any existing hooks, so your own entries are preserved:
   "version": 1,
   "hooks": {
     "stop": [
-      { "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Cursor\" --body \"Done\"" }
+      { "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Cursor\" --body \"Done\" --status done" }
     ]
   }
 }

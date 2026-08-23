@@ -19,7 +19,7 @@ your comments and trailing commas survive — never reserialized):
   // >>> kouen-managed (do not edit) >>>
   "hooks": {
     "kouen-notify": {
-      "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"OpenClaw\" --body \"Done\"",
+      "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"OpenClaw\" --body \"Done\" --status done",
     },
   },
   // <<< kouen-managed <<<

@@ -19,7 +19,7 @@ import { execSync } from "node:child_process"
 export function activate(api: any) {
   const notify = (body: string) =>
     execSync(
-      `PATH="$HOME/Library/Application Support/Kouen/bin:$PATH" kouen-cli notify --surface "${process.env.KOUEN_SURFACE ?? ""}" --title "Pi" --body "${body}"`,
+      `PATH="$HOME/Library/Application Support/Kouen/bin:$PATH" kouen-cli notify --surface "${process.env.KOUEN_SURFACE ?? ""}" --title "Pi" --body "${body}" --status done`,
       { stdio: "ignore" }
     )
   api.on?.("session_end", () => notify("Done"))

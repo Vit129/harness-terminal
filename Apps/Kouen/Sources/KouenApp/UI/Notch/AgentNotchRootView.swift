@@ -413,53 +413,57 @@ private struct NotchOverviewRow: View {
         onReply?(text)
     }
 
+    /// Not a `Button` — a `Button` nested inside another `Button` does not reliably route taps
+    /// to the inner control on macOS (confirmed live: tapping Allow/Deny/Reply fell through and
+    /// triggered the outer row's open action instead, regardless of the two not overlapping in
+    /// the HStack). `.contentShape` + `.onTapGesture` gives the row an "open on tap" target
+    /// without a competing NSButton, so `approvalControls`' real `Button`s get first claim on
+    /// any tap that lands inside them.
     private var openableRow: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                dot
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title.isEmpty ? "Terminal" : title)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(subtitleColor)
-                        .lineLimit(1)
+        HStack(spacing: 8) {
+            dot
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.isEmpty ? "Terminal" : title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(subtitleColor)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if showsApprovalControls {
+                approvalControls
+            } else {
+                if let relative = relativeTime {
+                    Text(relative)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.38))
                 }
-                Spacer(minLength: 6)
-                if showsApprovalControls {
-                    approvalControls
-                } else {
-                    if let relative = relativeTime {
-                        Text(relative)
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.38))
-                    }
-                    if let badge {
-                        Text(badge.text)
-                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                            .foregroundStyle(badge.color)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(badge.color.opacity(0.16), in: Capsule())
-                    }
+                if let badge {
+                    Text(badge.text)
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(badge.color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(badge.color.opacity(0.16), in: Capsule())
                 }
             }
-            .frame(height: 38)
-            .padding(.horizontal, 8)
-            .background(background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(alignment: .bottomLeading) { progressUnderline }
         }
-        .buttonStyle(NotchRowButtonStyle())
+        .frame(height: 38)
+        .padding(.horizontal, 8)
+        .background(background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(alignment: .bottomLeading) { progressUnderline }
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .accessibilityLabel("\(title), \(subtitle)")
+        .accessibilityAddTraits(.isButton)
+        .onTapGesture(perform: action)
     }
 
-    /// Deliberately plain `Button`s (not `NotchRowButtonStyle`) nested inside the row's own
-    /// button — SwiftUI resolves the innermost control on tap, so Allow/Deny consume the tap
-    /// before it reaches `action` (open row) underneath. No `.simultaneousGesture` trick
-    /// needed since these aren't overlapping the same hit area, just adjacent in the HStack.
+    /// Real `Button`s (`.buttonStyle(.plain)`) — so they get first claim on a tap over the
+    /// row's own `.onTapGesture` (see `openableRow`).
     private var approvalControls: some View {
         HStack(spacing: 6) {
             if onReply != nil {
@@ -557,15 +561,6 @@ private struct NotchOverviewRow: View {
     private var background: Color {
         let base = reduceTransparency ? 0.13 : 0.08
         return Color.white.opacity(hovering ? base + 0.06 : base)
-    }
-}
-
-/// Press feedback: gentle compression, no color flash.
-private struct NotchRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

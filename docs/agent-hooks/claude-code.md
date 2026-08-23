@@ -35,7 +35,7 @@ This writes `~/.claude/settings.json` (backing up any existing file as
         "hooks": [
           {
             "type": "command",
-            "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Claude Code\" --body \"Done\""
+            "command": "PATH=\"$HOME/Library/Application Support/Kouen/bin:$PATH\" kouen-cli notify --surface \"$KOUEN_SURFACE\" --title \"Claude Code\" --body \"Done\" --status done"
           }
         ]
       }

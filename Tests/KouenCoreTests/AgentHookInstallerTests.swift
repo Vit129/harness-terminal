@@ -156,15 +156,34 @@ final class AgentHookInstallerTests: XCTestCase {
 
     /// Helper: pull the single Kouen `Notification` command string out of a Claude config.
     private func claudeNotificationCommand(at url: URL) throws -> String {
+        try claudeHookCommand(at: url, event: "Notification")
+    }
+
+    /// Helper: pull the single Kouen command string out of a Claude config for the given
+    /// event ("Notification" or "Stop").
+    private func claudeHookCommand(at url: URL, event: String) throws -> String {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: try Data(contentsOf: url)) as? [String: Any])
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
-        let notification = try XCTUnwrap(hooks["Notification"] as? [Any])
-        let kouen = notification.compactMap { entry -> String? in
+        let entries = try XCTUnwrap(hooks[event] as? [Any])
+        let kouen = entries.compactMap { entry -> String? in
             ((entry as? [String: Any])?["hooks"] as? [Any])?
                 .compactMap { ($0 as? [String: Any])?["command"] as? String }
                 .first { $0.contains("kouen-cli notify") || $0.contains("kouen-cli notify") }
         }
         return try XCTUnwrap(kouen.first)
+    }
+
+    /// Regression test for the "every normal turn shows as needing approval" bug: the Stop
+    /// hook (turn finished, no decision needed) must pass `--status done` so the daemon sets
+    /// `Tab.status = .done` instead of `.waiting` — while the Notification hook (a real
+    /// attention/permission event) must NOT carry that flag, since it should still set
+    /// `.waiting` and show the notch's Reply/Deny/Allow controls.
+    func testClaudeStopHookMarksDoneNotWaiting() throws {
+        let result = try AgentHookInstaller.install(agent: .claudeCode, homeOverride: home)
+        let stopCommand = try claudeHookCommand(at: result.path, event: "Stop")
+        XCTAssertTrue(stopCommand.contains("--status done"), "Stop hook must mark the tab done, not waiting")
+        let notificationCommand = try claudeNotificationCommand(at: result.path)
+        XCTAssertFalse(notificationCommand.contains("--status done"), "a real attention event must still set waiting")
     }
 
     func testInvalidExistingJSONIsReplacedWithBackup() throws {

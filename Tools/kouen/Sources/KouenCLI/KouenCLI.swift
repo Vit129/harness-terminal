@@ -157,7 +157,7 @@ struct KouenCLI {
                 _ = try checkedRequest(client, .send(surfaceID: surface, text: text))
             case "notify":
                 guard let surface = flagValue(args, flag: "--surface") else {
-                    fputs("Usage: kouen-cli notify --surface <uuid> [--title t] [--body b] [--from-hook] [--subagent start|stop]\n", kouenStderr)
+                    fputs("Usage: kouen-cli notify --surface <uuid> [--title t] [--body b] [--from-hook] [--status done] [--subagent start|stop]\n", kouenStderr)
                     exit(1)
                 }
                 // `--subagent start|stop`: Claude Code's `PreToolUse`(Task)/`SubagentStop` hooks
@@ -187,7 +187,14 @@ struct KouenCLI {
                         ? HookNotificationParser.parse(FileHandle.standardInput.readDataToEndOfFile())
                         : nil
                     let body = HookNotificationParser.resolveBody(parsed: parsed, fallbackBody: fallbackBody)
-                    _ = try checkedRequest(client, .notify(surfaceID: surface, title: title, body: body))
+                    // `--status done`: a Stop-hook ("turn finished normally") notification, not a
+                    // real attention/permission event — sets Tab.status = .done, not .waiting, so
+                    // the Agent Notch doesn't show Reply/Deny/Allow for a turn nobody needs to decide on.
+                    if flagValue(args, flag: "--status") == "done" {
+                        _ = try checkedRequest(client, .notifyDone(surfaceID: surface, title: title, body: body))
+                    } else {
+                        _ = try checkedRequest(client, .notify(surfaceID: surface, title: title, body: body))
+                    }
                 }
             case "install":
                 try installCLI()

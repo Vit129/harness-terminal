@@ -637,6 +637,18 @@ public final class SurfaceRegistry: @unchecked Sendable {
             commit()
             fireHookLocked(.notificationPosted, surfaceKey: surfaceID)
             return .ok
+        case let .notifyDone(surfaceID, title, body):
+            let notification = AgentNotification(
+                surfaceID: UUID(uuidString: surfaceID),
+                daemonSurfaceID: surfaceID,
+                title: title,
+                body: body
+            )
+            NotificationBus.shared.post(notification)
+            markDone(surfaceKey: surfaceID, text: body)
+            commit()
+            fireHookLocked(.notificationPosted, surfaceKey: surfaceID)
+            return .ok
         case let .setSubagentHint(surfaceID, kind, active):
             if active {
                 AgentDetector.registerSubagentHint(kind: kind, forSurfaceKey: surfaceID)
@@ -1649,6 +1661,18 @@ public final class SurfaceRegistry: @unchecked Sendable {
             workspaceID: match.workspaceID,
             tabID: match.tabID,
             status: .waiting,
+            notificationText: text
+        )
+    }
+
+    /// Stop-hook completion: the tab isn't blocking on the user, so `.done` (not `.waiting`) —
+    /// the Agent Notch only shows Reply/Deny/Allow controls for `.waiting`.
+    private func markDone(surfaceKey: String, text: String) {
+        guard let match = editor.tab(forSurfaceKey: surfaceKey) else { return }
+        editor.setTabStatus(
+            workspaceID: match.workspaceID,
+            tabID: match.tabID,
+            status: .done,
             notificationText: text
         )
     }

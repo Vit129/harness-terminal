@@ -259,7 +259,7 @@ extension KouenCLI {
           attach --surface <uuid> [--detach-keys "C-a d"]
           record --surface <uuid> --output <file> [--display]
           replay <file> [--speed <n>] [--no-timing]
-          notify --surface <uuid> [--title t] [--body b] [--from-hook]
+          notify --surface <uuid> [--title t] [--body b] [--from-hook] [--status done]
           daemon-stats [--json] [--pretty]
           list-clients [--json] [--pretty]
           detach-client --client <uuid>

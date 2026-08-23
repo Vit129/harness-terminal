@@ -11,6 +11,7 @@ final class NotchPanelController: NSObject {
     private let coalescer = SnapshotCoalescer()  // cmux: burst → one refresh per runloop turn
     private let maskAnimator = NotchMaskAnimator()  // Zed/Otty: GPU path animation
     private var maskObserver: AnyCancellable?
+    private var visibilityObserver: AnyCancellable?
     private var panel: NotchPanel?
     private var started = false
 
@@ -37,7 +38,28 @@ final class NotchPanelController: NSObject {
         }
         createPanelIfNeeded()
         updatePanelGeometry()
-        panel?.orderFrontRegardless()
+        applyIdleVisibility()
+    }
+
+    /// Orders the panel front/out based on live agent state: hidden while every agent is idle
+    /// and the HUD itself is closed, shown the instant any agent starts working or needs
+    /// approval — independent of which app has focus. A row `.waiting` on approval counts as
+    /// "not idle" too (not just `.working`): hiding the notch while an agent needs input would
+    /// bury the one thing the user actually needs to see.
+    private func applyIdleVisibility() {
+        guard SessionCoordinator.shared.settings.notchVisibilityMode
+            .isEnabled(for: SessionCoordinator.shared.settings.experienceMode),
+            panel != nil
+        else {
+            panel?.orderOut(nil)
+            return
+        }
+        let shouldShow = model.workingCount > 0 || model.waitingCount > 0 || model.presentation != .closed
+        if shouldShow {
+            panel?.orderFrontRegardless()
+        } else {
+            panel?.orderOut(nil)
+        }
     }
 
     func openFromMenu() {
@@ -48,10 +70,12 @@ final class NotchPanelController: NSObject {
         }
         refreshVisibility()
         model.open()
+        applyIdleVisibility()
     }
 
     func closeFromMenu() {
         model.close()
+        applyIdleVisibility()
     }
 
     func toggleFromMenu() {
@@ -62,6 +86,7 @@ final class NotchPanelController: NSObject {
         }
         refreshVisibility()
         model.toggleOpen()
+        applyIdleVisibility()
     }
 
     private func observeNotifications() {
@@ -98,6 +123,13 @@ final class NotchPanelController: NSObject {
             .receive(on: RunLoop.main)
             .dropFirst()  // initial handled by updateNotchMask(animated: false) above
             .sink { [weak self] _, _ in self?.updateNotchMask(animated: true) }
+
+        // Idle-hide: re-evaluate panel ordering whenever agent rows or presentation change,
+        // so a snapshot-driven transition (agent starts working while Kouen isn't frontmost)
+        // brings the panel back without waiting for a menu action or screen-parameter change.
+        visibilityObserver = Publishers.CombineLatest(model.$rows, model.$presentation)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in self?.applyIdleVisibility() }
     }
 
     private func updatePanelGeometry() {

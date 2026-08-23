@@ -17,7 +17,7 @@ Writes `~/.config/opencode/plugins/kouen.js`:
 // kouen-managed — surfaces OpenCode session events in Kouen. Safe to delete.
 export const KouenNotify = async ({ $ }) => ({
   "session.idle": async () => {
-    await $`PATH="$HOME/Library/Application Support/Kouen/bin:$PATH" kouen-cli notify --surface "${process.env.KOUEN_SURFACE ?? ""}" --title OpenCode --body Done`
+    await $`PATH="$HOME/Library/Application Support/Kouen/bin:$PATH" kouen-cli notify --surface "${process.env.KOUEN_SURFACE ?? ""}" --title OpenCode --body Done --status done`
   },
   "permission.asked": async () => {
     await $`PATH="$HOME/Library/Application Support/Kouen/bin:$PATH" kouen-cli notify --surface "${process.env.KOUEN_SURFACE ?? ""}" --title OpenCode --body "Awaiting input"`
