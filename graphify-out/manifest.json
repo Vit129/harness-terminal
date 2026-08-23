@@ -525,8 +525,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Notch/AgentNotchRootView.swift": {
-    "mtime": 1785510867.5281324,
-    "ast_hash": "d01591480990409a6ec6c4c37a2cf61e",
+    "mtime": 1787450734.4192214,
+    "ast_hash": "56902dffa7db7f139184214aa87c0c38",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Notch/AgentNotchViewModel.swift": {
@@ -555,8 +555,8 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Notch/NotchPanelController.swift": {
-    "mtime": 1785510867.5291276,
-    "ast_hash": "69e4b2f9bc46b231f8c21aa48eef7e8a",
+    "mtime": 1787449255.278612,
+    "ast_hash": "4de7ff547fdfa13931fe4137363759e5",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Notch/NotchShape.swift": {
@@ -865,8 +865,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Agents/AgentHookInstaller.swift": {
-    "mtime": 1785510867.5496812,
-    "ast_hash": "a90fed9f4c010f82f58ab495c5d1f4b2",
+    "mtime": 1787452434.8438554,
+    "ast_hash": "5149355441a19a36d5b978f374a8e377",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Agents/AgentHookStrategy.swift": {
@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/KouenVersion.swift": {
-    "mtime": 1787117112.1130452,
-    "ast_hash": "a2eca92c88ece60f99df4b172dbb9a7f",
+    "mtime": 1787453978.0522478,
+    "ast_hash": "9d304cb4052b9d4f17ede9c6e7d1a883",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Layouts/LayoutTemplate.swift": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/GeneratedReleaseNotes.swift": {
-    "mtime": 1787117113.767048,
-    "ast_hash": "752c34b59b259601d5766ae1ca4586d8",
+    "mtime": 1787453979.5019057,
+    "ast_hash": "a17a089bc2c81e8d9ce395b1858d7404",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/ReleaseNotes.swift": {
@@ -1215,8 +1215,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenDaemon/Sources/KouenDaemon/SurfaceRegistry.swift": {
-    "mtime": 1786325324.9509168,
-    "ast_hash": "2638e62661c21daae2c8c2939c5d5ac8",
+    "mtime": 1787450851.2684917,
+    "ast_hash": "a0210f10aafa5aee35b1ea771a9e129c",
     "semantic_hash": ""
   },
   "Packages/KouenDaemon/Sources/KouenDaemon/VersionBannerState.swift": {
@@ -1270,8 +1270,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenIPC/Sources/KouenIPC/IPCMessage.swift": {
-    "mtime": 1786325317.208238,
-    "ast_hash": "725330eeccdea186803a27cefc034e23",
+    "mtime": 1787450839.444801,
+    "ast_hash": "cdce0a2152ee92ce28b157401dd9c492",
     "semantic_hash": ""
   },
   "Packages/KouenIPC/Sources/KouenIPC/Identifiers.swift": {
@@ -1965,8 +1965,8 @@
     "semantic_hash": ""
   },
   "Scripts/install-graceful.sh": {
-    "mtime": 1786325345.7266755,
-    "ast_hash": "ee7d3c04346d53789a5313e8f7490790",
+    "mtime": 1787119698.3456204,
+    "ast_hash": "87f0494a94b911de50f94a21db48666c",
     "semantic_hash": ""
   },
   "Scripts/install-linux.sh": {
@@ -1990,8 +1990,8 @@
     "semantic_hash": ""
   },
   "Scripts/prepare-release.sh": {
-    "mtime": 1785510867.611115,
-    "ast_hash": "90823b4127448236121624cb17abd24b",
+    "mtime": 1787120083.819791,
+    "ast_hash": "7be980e4382e47bab3464dc21eb0b2e4",
     "semantic_hash": ""
   },
   "Scripts/preview.sh": {
@@ -2280,8 +2280,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenCoreTests/AgentHookInstallerTests.swift": {
-    "mtime": 1785510867.6257846,
-    "ast_hash": "4f5c77ff5c30211932dc48c7f321106b",
+    "mtime": 1787452623.0196269,
+    "ast_hash": "abf8d00f7be2afe602cc7719757d5810",
     "semantic_hash": ""
   },
   "Tests/KouenCoreTests/AgentListFormatterTests.swift": {
@@ -3235,8 +3235,8 @@
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/KouenCLI+Info.swift": {
-    "mtime": 1785510867.6804037,
-    "ast_hash": "475734aa6cfe362f7d09e05c741349a8",
+    "mtime": 1787450871.2701502,
+    "ast_hash": "4e95a6d72822241b8780990da11871bf",
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/KouenCLI+InstallTools.swift": {
@@ -3295,8 +3295,8 @@
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/KouenCLI.swift": {
-    "mtime": 1786325334.560792,
-    "ast_hash": "8fd77a9a128ed701886c6d67dd0ed5cc",
+    "mtime": 1787450865.3761687,
+    "ast_hash": "349ea090a05dd5e21cbb9521f816f2f5",
     "semantic_hash": ""
   },
   "Tools/kouen/Sources/KouenCLI/RecordClient.swift": {
@@ -3395,8 +3395,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1786892530.4327395,
-    "ast_hash": "bc56e344708e9012456dcaaed7e1fef9",
+    "mtime": 1787120089.7431471,
+    "ast_hash": "3c6ff30240591e701dce4721e07c0612",
     "semantic_hash": ""
   },
   "GEMINI.md": {
@@ -3755,43 +3755,43 @@
     "semantic_hash": ""
   },
   "docs/agent-hooks/claude-code.md": {
-    "mtime": 1785510867.700558,
-    "ast_hash": "8c436dc336c54d45e26ca0529363d3bb",
+    "mtime": 1787450891.8584092,
+    "ast_hash": "f6dbcc2fa3771b28f12e9abf436a9557",
     "semantic_hash": ""
   },
   "docs/agent-hooks/codex.md": {
-    "mtime": 1785510867.7008386,
-    "ast_hash": "fcaf38a08b1f70a919a1cfb1be5bcda6",
+    "mtime": 1787452436.762786,
+    "ast_hash": "00cd96235ed72587771331d37bde8d34",
     "semantic_hash": ""
   },
   "docs/agent-hooks/cursor.md": {
-    "mtime": 1785510867.7011,
-    "ast_hash": "5cad3cc8ab1331c0c609626ab14b7286",
+    "mtime": 1787452438.335778,
+    "ast_hash": "4a23389a190d6f147984af3eac1d98c9",
     "semantic_hash": ""
   },
   "docs/agent-hooks/grok.md": {
-    "mtime": 1785510867.701459,
-    "ast_hash": "a6dfda4c98ccb090c771a620c546b3c5",
+    "mtime": 1787452439.957386,
+    "ast_hash": "ec31bd891decc634b07e5f21036d1241",
     "semantic_hash": ""
   },
   "docs/agent-hooks/hermes.md": {
-    "mtime": 1785510867.701633,
-    "ast_hash": "cbc3b49cb1f175c70b220928ffe9958d",
+    "mtime": 1787452441.807701,
+    "ast_hash": "be3f0dd81b77b83c69c124e17a30570f",
     "semantic_hash": ""
   },
   "docs/agent-hooks/openclaw.md": {
-    "mtime": 1785510867.7018878,
-    "ast_hash": "adb802d3ea5a7a7b754b32313f054a25",
+    "mtime": 1787452443.3801558,
+    "ast_hash": "36a355210ea6150c787f4ce7b3ec8b7c",
     "semantic_hash": ""
   },
   "docs/agent-hooks/opencode.md": {
-    "mtime": 1785510867.7026203,
-    "ast_hash": "49e8f41615fe4e4af6c79d7dee22c472",
+    "mtime": 1787452446.0039537,
+    "ast_hash": "ee4950f8fb203a9fb9ffaf351602fe31",
     "semantic_hash": ""
   },
   "docs/agent-hooks/pi.md": {
-    "mtime": 1785510867.7027946,
-    "ast_hash": "ad17bb5088fc9d9123ab36865532bcde",
+    "mtime": 1787452447.6578867,
+    "ast_hash": "5d76ac7306e6d39be74f2c5f4d922695",
     "semantic_hash": ""
   },
   "docs/shell-integration/README.md": {
