@@ -7,8 +7,10 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.13.1] - 2026-08-24
 
-### Added
-- Release version bump to v4.13.1.
+### Fixed
+- Wake WKWebView compositor when a cached browser pane is revealed on tab switch ([`dbc950c`](https://github.com/Vit129/kouen-terminal/commit/dbc950c3fef8a2a704084e2a53b97bb3a7cc76ff))
+- Wake WKWebView compositor when BrowserPaneView's own tab switch reveals a webview ([`f6bc6a0`](https://github.com/Vit129/kouen-terminal/commit/f6bc6a083845c4395004ca074b804736524d616e))
+- Wake WKWebView compositor when BrowserPaneView's own tab switch reveals a webview (release v4.13.1) ([`c446c2d`](https://github.com/Vit129/kouen-terminal/commit/c446c2ddf5b953ea93a126141e3a7703f4d62f70))
 
 ## [4.13.0] - 2026-08-23
 
