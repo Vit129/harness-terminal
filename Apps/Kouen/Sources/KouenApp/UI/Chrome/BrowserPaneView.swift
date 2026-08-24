@@ -512,7 +512,7 @@ public final class BrowserPaneView: NSView {
 
     private var mainStack: NSStackView!
 
-    private func selectTab(at index: Int) {
+    func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         let oldWeb = webView
         activeTabIndex = index
@@ -528,6 +528,10 @@ public final class BrowserPaneView: NSView {
             }
             webView = newWeb
             setupProgressObservation()
+            // Reattaching a previously-detached tab's WKWebView to the stack can leave its
+            // remote compositor layer stale/black, same as the reveal-from-cache case
+            // forceRepaint() already fixes elsewhere (see PaneLifecycleManager, dbc950c3).
+            forceRepaint()
         }
         urlTextField.stringValue = newWeb.url?.absoluteString ?? ""
         updateViewSourceButtonVisibility(for: newWeb.url)
