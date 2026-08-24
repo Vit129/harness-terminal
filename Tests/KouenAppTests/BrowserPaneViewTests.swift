@@ -87,6 +87,44 @@ final class BrowserPaneViewTests: XCTestCase {
             "forceRepaint() must also kick the compositor via magnification nudge, or a revealed-from-cache tab can still stay stuck black")
     }
 
+    // Regression for the black screen on tab switch (both plain tab-bar clicks and
+    // closeTab, which both funnel through selectTab): dbc950c3 only wired forceRepaint()
+    // into viewDidMoveToSuperview() and PaneLifecycleManager's cache-reveal path — it
+    // never touched selectTab()'s own webView swap, so switching back to a
+    // previously-detached tab's WKWebView left its compositor layer stale/black with no
+    // nudge to wake it.
+    func testSelectTabWakesRevealedWebViewCompositor() {
+        let mockWebView = MockWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let testURL = URL(string: "https://example.com/test")!
+        mockWebView.mockURL = testURL
+        mockWebView.allowsMagnification = true
+        let paneView = BrowserPaneView(url: testURL, paneID: UUID(), webView: mockWebView)
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView?.addSubview(paneView)
+
+        // Open a second tab — mockWebView (tab 0) is now detached from the stack.
+        _ = paneView.createTab(url: URL(string: "https://example.com/tab2")!)
+
+        // createTab()'s own tab switch just kicked the compositor; let that in-flight
+        // guard (compositorKickInFlight) clear before switching again, or the kick below
+        // gets silently skipped for an unrelated reason and the test proves nothing.
+        let settled = expectation(description: "compositor kick in-flight guard cleared")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { settled.fulfill() }
+        wait(for: [settled], timeout: 1)
+
+        mockWebView.evaluateJavaScriptCalls.removeAll()
+        mockWebView.setMagnificationCalls.removeAll()
+
+        // Switch back to tab 0 — reattaches mockWebView to the stack.
+        paneView.selectTab(at: 0)
+
+        XCTAssertFalse(mockWebView.evaluateJavaScriptCalls.isEmpty,
+            "selectTab() must wake the revealed tab's WKWebView compositor, or switching back to a tab stays black")
+        XCTAssertFalse(mockWebView.setMagnificationCalls.isEmpty,
+            "selectTab() must also kick the compositor via magnification nudge, or the revealed tab can still stay stuck black")
+    }
+
     // MARK: - Design Mode (M3)
 
     func testDesignModeButtonHasExpectedIdentifierAndTooltip() {
