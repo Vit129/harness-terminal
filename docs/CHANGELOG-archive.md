@@ -2,6 +2,27 @@
 
 Older releases. See [CHANGELOG.md](../CHANGELOG.md) for recent versions.
 
+## [4.12.3] - 2026-08-19
+
+### Documentation
+- Note agent-memory is gitignored + centrally backed up (claude-memory-private) ([`9d93a02`](https://github.com/Vit129/kouen-terminal/commit/9d93a0209c39b8d4787a85a13a40bd95b4aa4ab2))
+- Agent-memory-private rename (was claude-memory-private) ([`2d6bdb0`](https://github.com/Vit129/kouen-terminal/commit/2d6bdb0f13e089fa7764d9419f7ac47da621c663))
+
+### Fixed
+- Allow secondary browser tabs to receive the compositor repaint kick ([`3ab1695`](https://github.com/Vit129/kouen-terminal/commit/3ab16956cf0904fe30e4b4573d4f6cf79bf98498))
+- Stop stuck git child processes and fix new file/folder not appearing in an already-expanded file tree folder (release v4.12.2) ([`6ebf132`](https://github.com/Vit129/kouen-terminal/commit/6ebf1320456a9d490c3f712c9db08e8e1b2ca3d9))
+- Use launchctl instead of pgrep for daemon liveness in graceful install (release v4.12.3) ([`f439a8b`](https://github.com/Vit129/kouen-terminal/commit/f439a8b68b44f59603584db878d84ef4a26e8566))
+
+## [4.12.1] - 2026-08-13
+
+### Fixed
+- Force WKWebView repaint after load, flush session state before daemon restart (release v4.12.1) ([`0173222`](https://github.com/Vit129/kouen-terminal/commit/0173222f49425199ef29d3b12f0b7d87241592b3))
+
+## [4.12.0] - 2026-08-09
+
+### Added
+- Add --model/--effort passthrough and kouen-cli cc run/status/list/cancel (release v4.12.0) ([`ee63244`](https://github.com/Vit129/kouen-terminal/commit/ee63244b18c51d03cb4da67877fa5fddc79c0d1b))
+
 ## [4.11.0] - 2026-08-09
 
 ### Added

@@ -8,7 +8,7 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 ## [4.14.0] - 2026-08-31
 
 ### Added
-- Release version bump to v4.14.0.
+- P44 autonomous orchestrator (MCP tools, inline task badges, orchestrator contract) + git diff gutter extraction (release v4.14.0) ([`80bee3a`](https://github.com/Vit129/kouen-terminal/commit/80bee3a1aae2bb04343a6ac66af732e337105eb2))
 
 ## [4.13.1] - 2026-08-24
 
