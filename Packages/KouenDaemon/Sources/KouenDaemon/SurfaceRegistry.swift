@@ -922,8 +922,10 @@ public final class SurfaceRegistry: @unchecked Sendable {
                 .first(where: { $0.id == sessionID })?
                 .activeTab?.cwd
             return .taskInfo(Self.taskSummary(taskStore.create(sessionID: sessionID, title: title, cwd: cwd)))
-        case let .taskUpdate(id, title, done):
-            guard let updated = taskStore.update(id: id, title: title, done: done) else {
+        case let .taskUpdate(id, title, done, status):
+            let coreStatus = status.flatMap { KouenTaskStatus(rawValue: $0.rawValue) }
+            guard let updated = taskStore.update(id: id, title: title, done: done, status: coreStatus)
+            else {
                 return .error("Task not found")
             }
             return .taskInfo(Self.taskSummary(updated))
@@ -2158,6 +2160,7 @@ public final class SurfaceRegistry: @unchecked Sendable {
     private static func taskSummary(_ task: KouenTask) -> TaskSummary {
         TaskSummary(
             id: task.id, sessionID: task.sessionID, title: task.title, done: task.done,
+            status: TaskSummary.Status(rawValue: task.status.rawValue) ?? (task.done ? .done : .open),
             createdAt: task.createdAt, updatedAt: task.updatedAt, cwd: task.cwd
         )
     }

@@ -1,6 +1,7 @@
 // ponytail: intentionally AppKit — NSAttributedString diffstat rendering + per-file row menus need NSTableView; SwiftUI Table lacks row actions and custom cell editing as of macOS 26.
 import AppKit
 import KouenCore
+import KouenIPC
 import CoreServices
 
 @MainActor
@@ -1620,6 +1621,26 @@ final class GitPanelView: NSView {
         return nil
     }
 
+    /// Resolves the session owning the tab attached to the given worktree path (P44b).
+    nonisolated static func sessionID(forWorktreePath path: String, workspaces: [Workspace]) -> SessionID? {
+        for workspace in workspaces {
+            for session in workspace.sessions {
+                for tab in session.tabs {
+                    if tab.cwd == path || tab.worktreePath == path {
+                        return session.id
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Picks the most actionable open task for display in the worktree card meta line (P44b).
+    /// If there are multiple tasks, the first non-done task is shown as the relevant one.
+    nonisolated static func openTask(from tasks: [TaskSummary]) -> TaskSummary? {
+        tasks.first(where: { !$0.done && $0.status != .done })
+    }
+
     private func agentInfo(forWorktreePath path: String) -> (kind: AgentKind, activity: AgentActivity)? {
         let tabs = SessionCoordinator.shared.snapshot.workspaces.flatMap { $0.sessions.flatMap(\.tabs) }
         return Self.agentInfo(forWorktreePath: path, tabs: tabs)
@@ -1817,7 +1838,7 @@ final class GitPanelView: NSView {
         return card
     }
 
-    private func makeWorktreeRow(_ worktree: WorktreeEntry) -> NSView {
+    private func makeWorktreeRow(_ worktree: WorktreeEntry, task: TaskSummary? = nil) -> NSView {
         if let conflict = activeMergeConflicts[worktree.path] {
             return makeConflictCard(sourcePath: worktree.path, branch: worktree.branch, conflict: conflict)
         }
@@ -1882,10 +1903,13 @@ final class GitPanelView: NSView {
         titleRow.translatesAutoresizingMaskIntoConstraints = false
 
         var metaText: String
+        let taskPart = task.map { " · Task: \($0.title) — \($0.status.rawValue)" } ?? ""
         if worktree.isMerged {
-            metaText = "✓ merged · \(worktree.branch)"
+            metaText = "✓ merged · \(worktree.branch)\(taskPart)"
         } else if let agent {
-            metaText = "\(worktree.branch) · \(agent.kind.displayName) — \(agent.activity.rawValue)"
+            metaText = "\(worktree.branch) · \(agent.kind.displayName) — \(agent.activity.rawValue)\(taskPart)"
+        } else if task != nil {
+            metaText = "\(worktree.branch)\(taskPart)"
         } else {
             metaText = worktree.branch
         }
@@ -2089,9 +2113,25 @@ final class GitPanelView: NSView {
         let (finalEntries, output) = await fetchWorktreeEntries(repoPath: path)
         guard generation == refreshGeneration else { return }
 
+        // P44b: Fetch open Task for each worktree's attached session
+        var worktreeTasks: [String: TaskSummary] = [:]
+        let workspaces = SessionCoordinator.shared.snapshot.workspaces
+        for entry in finalEntries {
+            if let sessionID = Self.sessionID(forWorktreePath: entry.path, workspaces: workspaces) {
+                let tasks = await TaskDaemonBridge.list(sessionID: sessionID)
+                if let open = Self.openTask(from: tasks) {
+                    worktreeTasks[entry.path] = open
+                }
+            }
+        }
+        guard generation == refreshGeneration else { return }
+
+        let taskKey = worktreeTasks.map { "\($0.key):\($0.value.id):\($0.value.status.rawValue)" }.sorted().joined(separator: ",")
+        let cacheKey = "\(output)|\(taskKey)"
+
         // Skip rebuild if nothing changed (prevents flicker from FSEvent re-triggers)
-        if output == lastWorktreeOutput { return }
-        lastWorktreeOutput = output
+        if cacheKey == lastWorktreeOutput { return }
+        lastWorktreeOutput = cacheKey
 
         worktreesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -2106,7 +2146,7 @@ final class GitPanelView: NSView {
             worktreesStack.addArrangedSubview(makeLabel("No worktrees"))
         } else {
             for entry in finalEntries {
-                let row = makeWorktreeRow(entry)
+                let row = makeWorktreeRow(entry, task: worktreeTasks[entry.path])
                 worktreesStack.addArrangedSubview(row)
                 row.leadingAnchor.constraint(equalTo: worktreesStack.leadingAnchor).isActive = true
                 row.trailingAnchor.constraint(equalTo: worktreesStack.trailingAnchor).isActive = true

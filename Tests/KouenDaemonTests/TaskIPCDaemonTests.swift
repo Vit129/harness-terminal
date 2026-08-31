@@ -43,21 +43,28 @@ final class TaskIPCDaemonTests: XCTestCase {
         }
         XCTAssertEqual(fetched.id, created.id)
 
-        // Marking done is itself a deletion trigger (see TaskStore.update's doc comment) —
-        // the response still reports done: true, but the Task is already gone afterward.
-        guard case let .taskInfo(updated?) = registry.handle(.taskUpdate(id: created.id, title: nil, done: true)) else {
+        // P44a: marking done no longer deletes the Task — it stays listed/gettable until
+        // an explicit taskDelete.
+        guard case let .taskInfo(updated?) = registry.handle(
+            .taskUpdate(id: created.id, title: nil, done: true, status: nil)
+        ) else {
             return XCTFail("Expected .taskInfo from taskUpdate")
         }
         XCTAssertTrue(updated.done)
+        XCTAssertEqual(updated.status, .done)
 
+        guard case let .taskInfo(stillThere) = registry.handle(.taskGet(id: created.id)) else {
+            return XCTFail("Expected .taskInfo from taskGet after marking done")
+        }
+        XCTAssertNotNil(stillThere)
+
+        guard case .ok = registry.handle(.taskDelete(id: created.id)) else {
+            return XCTFail("Expected .ok from explicit taskDelete")
+        }
         guard case let .taskInfo(gone) = registry.handle(.taskGet(id: created.id)) else {
-            return XCTFail("Expected .taskInfo from taskGet after done-delete")
+            return XCTFail("Expected .taskInfo from taskGet after explicit delete")
         }
         XCTAssertNil(gone)
-
-        guard case .error = registry.handle(.taskDelete(id: created.id)) else {
-            return XCTFail("Expected .error from taskDelete — done already removed it")
-        }
     }
 
     func testTaskListNilSessionIDReturnsAcrossSessions() {
@@ -73,7 +80,7 @@ final class TaskIPCDaemonTests: XCTestCase {
 
     func testUpdateAndDeleteOnMissingIDReturnsError() {
         let registry = SurfaceRegistry()
-        guard case .error = registry.handle(.taskUpdate(id: UUID(), title: "nope", done: nil)) else {
+        guard case .error = registry.handle(.taskUpdate(id: UUID(), title: "nope", done: nil, status: nil)) else {
             return XCTFail("Expected .error from taskUpdate on missing id")
         }
         guard case .error = registry.handle(.taskDelete(id: UUID())) else {

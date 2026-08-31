@@ -1030,3 +1030,50 @@ extension BoardColumnKind {
         }
     }
 }
+
+// MARK: - TaskSummary + BoardColumnKind helpers (P44b)
+
+import KouenIPC
+import KouenCommands
+
+extension TaskSummary.Status {
+    public var columnKind: BoardColumnKind {
+        switch self {
+        case .open: return .idle
+        case .running: return .running
+        case .ciFailing: return .error
+        case .mergeReady: return .needsAttention
+        case .done: return .done
+        }
+    }
+}
+
+extension Collection where Element == TaskSummary {
+    public var aggregateBoardStatus: BoardColumnKind {
+        if contains(where: { $0.status == .ciFailing }) {
+            return .error
+        }
+        if contains(where: { $0.status == .mergeReady }) {
+            return .needsAttention
+        }
+        if contains(where: { $0.status == .running }) {
+            return .running
+        }
+        if !isEmpty && allSatisfy({ $0.done || $0.status == .done }) {
+            return .done
+        }
+        return .idle
+    }
+
+    public var taskTooltipSummary: String {
+        guard !isEmpty else { return "" }
+        let doneCount = filter(\.done).count
+        let header = "Tasks (\(doneCount)/\(count) done)"
+        let lines = map { task in
+            let marker = task.done ? "✓" : "•"
+            return "\(marker) \(task.title) [\(task.status.rawValue)]"
+        }
+        return ([header] + lines).joined(separator: "\n")
+    }
+}
+

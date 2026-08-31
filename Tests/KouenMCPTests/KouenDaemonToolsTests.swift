@@ -81,6 +81,60 @@ final class KouenDaemonToolsTests: XCTestCase {
         }
     }
 
+    /// P44a: kouenPRStatus is read-only (never gated), same tier as gitStatus/gitDiff/
+    /// gitLog — an Orchestrator polling CI shouldn't need KOUEN_MCP_ALLOW_CONTROL.
+    func testKouenPRStatusIsRegisteredReadOnly() async {
+        let missingPolicyURL = temporaryDirectory().appendingPathComponent("missing-policy.json")
+        let policy = ToolPolicy.load(from: missingPolicyURL, environment: [:])
+        XCTAssertTrue(policy.isToolAllowed("kouenPRStatus"))
+
+        let registry = ToolRegistry(policy: { policy })
+        guard case let .object(root) = registry.listTools(),
+              case let .array(tools) = root["tools"]
+        else {
+            XCTFail("Expected listTools() to return { tools: [...] }")
+            return
+        }
+        let names: Set<String> = Set(tools.compactMap {
+            guard case let .object(tool) = $0, case let .string(name) = tool["name"] else { return nil }
+            return name
+        })
+        XCTAssertTrue(names.contains("kouenPRStatus"))
+    }
+
+    /// P44a: kouenSpawnWorker types an arbitrary prompt into a freshly-launched agent —
+    /// same risk tier as sendPaneText, must require the control gate, unlike
+    /// kouenSpawnAgent (launches a fixed known CLI, no arbitrary text typed).
+    func testKouenSpawnWorkerRegisteredAndGated() async {
+        let missingPolicyURL = temporaryDirectory().appendingPathComponent("missing-policy.json")
+        let policy = ToolPolicy.load(from: missingPolicyURL, environment: [:])
+        XCTAssertFalse(policy.isToolAllowed("kouenSpawnWorker"))
+        XCTAssertTrue(policy.isToolAllowed("kouenSpawnAgent"))
+
+        let registry = ToolRegistry(policy: { policy })
+        guard case let .object(root) = registry.listTools(),
+              case let .array(tools) = root["tools"]
+        else {
+            XCTFail("Expected listTools() to return { tools: [...] }")
+            return
+        }
+        let names: Set<String> = Set(tools.compactMap {
+            guard case let .object(tool) = $0, case let .string(name) = tool["name"] else { return nil }
+            return name
+        })
+        XCTAssertTrue(names.contains("kouenSpawnWorker"))
+    }
+
+    func testKouenSpawnWorkerBlockedWhenGateClosed() async {
+        let tools = KouenDaemonTools(controlEnabled: { false })
+        let (result, error) = await tools.kouenSpawnWorker(
+            agent: "claude", workspaceId: nil, cwd: nil,
+            worktreePath: nil, parentRepoPath: nil, taskName: nil, prompt: "do the thing"
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(error, KouenDaemonTools.controlDisabledError)
+    }
+
     func testKouenTaskGetRejectsInvalidUUID() async {
         let tools = KouenDaemonTools(controlEnabled: { true })
         let (result, error) = await tools.taskGet(id: "not-a-uuid")

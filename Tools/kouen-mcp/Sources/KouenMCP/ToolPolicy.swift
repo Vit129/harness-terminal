@@ -17,6 +17,7 @@ struct ToolPolicy: Sendable {
         "sendPaneKeys",
         "setPaneLabel",
         "spawnSession",
+        "kouenSpawnWorker",
         "splitPane",
         "closePane",
         "kouenBrowserOpen",

@@ -278,7 +278,7 @@ public enum IPCRequest: Codable, Sendable {
     case taskList(sessionID: UUID?)
     case taskGet(id: UUID)
     case taskCreate(sessionID: UUID, title: String)
-    case taskUpdate(id: UUID, title: String?, done: Bool?)
+    case taskUpdate(id: UUID, title: String?, done: Bool?, status: TaskSummary.Status?)
     case taskDelete(id: UUID)
 
     // Worktree (MCP resource, P40 F2): wraps `WorktreeManager` 1:1, no new domain logic.

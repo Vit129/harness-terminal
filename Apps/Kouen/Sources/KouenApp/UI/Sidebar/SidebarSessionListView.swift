@@ -1,5 +1,6 @@
 import SwiftUI
 import KouenCore
+import KouenIPC
 
 // MARK: - Main container
 
@@ -198,6 +199,8 @@ private struct SidebarSessionItemRow: View {
     var onPRClick: (String) -> Void
 
     @State private var isHovered = false
+    @State private var tasks: [TaskSummary] = []
+    @State private var taskRefreshTask: Task<Void, Never>?
 
     var body: some View {
         let c = KouenDesign.chrome
@@ -298,6 +301,13 @@ private struct SidebarSessionItemRow: View {
                         .buttonStyle(.plain)
                         .help("Open localhost:\(port) in the browser pane")
                     }
+                    if !tasks.isEmpty {
+                        let doneCount = tasks.filter(\.done).count
+                        let statusKind = tasks.aggregateBoardStatus
+                        let badgeColor = Color(nsColor: statusKind.color)
+                        SidebarBadgeLabel(text: "\(doneCount)/\(tasks.count)", color: badgeColor)
+                            .help(tasks.taskTooltipSummary)
+                    }
                     if let pr = metadata?.prNumber {
                         let prColor: Color = (metadata?.aheadCount ?? 0) > 0
                             ? .green : Color(nsColor: c.accent)
@@ -340,6 +350,21 @@ private struct SidebarSessionItemRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .onHover { isHovered = $0 }
+        .task(id: session.id) {
+            tasks = await TaskDaemonBridge.list(sessionID: session.id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NotificationBus.shared.snapshotChanged)) { _ in
+            // snapshotChanged can fire many times per second (see ScriptRuntime.swift's own
+            // doc comment on the same notification) — debounce the same way GitPanelView's
+            // FSEvent-driven refresh does (cancel-and-reschedule, 0.5s quiet period) so this
+            // doesn't fire a fresh TaskDaemonBridge IPC round-trip per row on every tick.
+            taskRefreshTask?.cancel()
+            taskRefreshTask = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                tasks = await TaskDaemonBridge.list(sessionID: session.id)
+            }
+        }
         .contextMenu {
             sessionContextMenuItems(cwd: cwd, branch: branch, sessionTitle: sessionTitle)
         }

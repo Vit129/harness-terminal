@@ -1,6 +1,11 @@
 import Foundation
 import KouenCore
 
+/// Zero-requirement marker conformance so `Result<_, JSONRPCError>` is usable
+/// (`spawnAgentSurface` below, P44a) — `JSONRPCError` already carries everything an
+/// error needs, this just lets it satisfy `Swift.Error`.
+extension JSONRPCError: Error {}
+
 /// Read-only daemon-backed MCP tools (P12 PBI-ORCH-001): list workspaces/sessions/tabs/panes
 /// and read a pane's output. Wraps `DaemonClientActor` so `ToolRegistry` stays a thin dispatcher.
 struct KouenDaemonTools: Sendable {
@@ -73,6 +78,9 @@ struct KouenDaemonTools: Sendable {
         var obj: [String: AnyCodable] = [
             "id": .string(tab.id.uuidString),
             "title": .string(tab.title),
+            "worktreePath": tab.worktreePath.map(AnyCodable.string) ?? .null,
+            "parentRepoPath": tab.parentRepoPath.map(AnyCodable.string) ?? .null,
+            "taskName": tab.taskName.map(AnyCodable.string) ?? .null,
         ]
         if includePanes {
             obj["panes"] = .array(tab.rootPane.allLeaves().map { leaf in
@@ -315,14 +323,22 @@ struct KouenDaemonTools: Sendable {
         return await okResponse(for: .killPane(paneID: paneID), expected: "killPane")
     }
 
-    /// Spawn a new session and immediately launch an AI agent CLI (claude, codex, kiro, gemini, cursor).
-    func kouenSpawnAgent(
-        agent: String,
-        workspaceId: String?,
-        cwd: String?
-    ) async -> (AnyCodable?, JSONRPCError?) {
-        guard isToolAllowed("kouenSpawnAgent") else { return (nil, disabledError("kouenSpawnAgent")) }
+    struct SpawnedAgentSurface {
+        let sessionID: UUID
+        let surfaceID: String
+        let resolvedAgent: String
+        let agentCommand: String
+    }
 
+    /// Shared spawn+poll+launch core for `kouenSpawnAgent` and `kouenSpawnWorker` (P44a).
+    /// Resolves workspace/agent, maps to a CLI launch command, spawns the session
+    /// (optionally worktree-attached), polls the snapshot for the shell to be ready
+    /// (up to ~2s), and types the launch command — but never a follow-up prompt, that's
+    /// each caller's own concern.
+    private func spawnAgentSurface(
+        agent: String, workspaceId: String?, cwd: String?,
+        worktreePath: String?, parentRepoPath: String?, taskName: String?
+    ) async -> Result<SpawnedAgentSurface, JSONRPCError> {
         // Resolve workspace
         let resolvedWorkspaceId: UUID
         if let wid = workspaceId, let uuid = UUID(uuidString: wid) {
@@ -331,7 +347,7 @@ struct KouenDaemonTools: Sendable {
             guard let snapResp = await send(.getSnapshot),
                   case let .snapshot(snap) = snapResp,
                   let first = snap.workspaces.first
-            else { return (nil, Self.daemonUnavailableError) }
+            else { return .failure(Self.daemonUnavailableError) }
             resolvedWorkspaceId = first.id
         }
 
@@ -374,20 +390,24 @@ struct KouenDaemonTools: Sendable {
             agentLabel = "Cursor"
             agentCommand = cwd.map { "cursor \($0)\n" } ?? "cursor .\n"
         default:
-            return (nil, JSONRPCError(code: -32602,
+            return .failure(JSONRPCError(code: -32602,
                 message: "Unknown agent '\(resolvedAgent)'. Valid values: claude, codex, kiro, gemini, cursor"))
         }
 
-        // Spawn the session
+        // Spawn the session. `worktreePath` (P44a) attaches this session's first tab to a
+        // Worktree at creation time — otherwise unreachable via MCP (`.setTabWorktree` has
+        // no MCP wrapper), so an Orchestrator has no other way to link a spawned Worker to
+        // the Worktree it's meant to work in.
         guard let spawnResp = await send(.newSession(
-            workspaceID: resolvedWorkspaceId, cwd: cwd, name: "\(agentLabel)", shell: nil
-        )) else { return (nil, Self.daemonUnavailableError) }
+            workspaceID: resolvedWorkspaceId, cwd: cwd, name: "\(agentLabel)", shell: nil,
+            worktreePath: worktreePath, parentRepoPath: parentRepoPath, taskName: taskName
+        )) else { return .failure(Self.daemonUnavailableError) }
 
         guard case let .sessionID(sessionID) = spawnResp else {
             if case let .error(msg) = spawnResp {
-                return (nil, JSONRPCError(code: -32000, message: msg))
+                return .failure(JSONRPCError(code: -32000, message: msg))
             }
-            return (nil, JSONRPCError(code: -32000, message: "Unexpected response to newSession"))
+            return .failure(JSONRPCError(code: -32000, message: "Unexpected response to newSession"))
         }
 
         // Poll snapshot until the shell is ready (up to ~2 s)
@@ -407,18 +427,43 @@ struct KouenDaemonTools: Sendable {
         }
 
         guard let sid = surfaceIDString else {
-            return (nil, JSONRPCError(code: -32000, message: "Session spawned but surface not ready in time"))
+            return .failure(JSONRPCError(code: -32000, message: "Session spawned but surface not ready in time"))
         }
 
         // Send the agent launch command
         _ = await send(.send(surfaceID: sid, text: agentCommand))
-        await notifyMCPActivity(surfaceId: sid, tool: "kouenSpawnAgent")
+
+        return .success(SpawnedAgentSurface(
+            sessionID: sessionID, surfaceID: sid, resolvedAgent: resolvedAgent, agentCommand: agentCommand
+        ))
+    }
+
+    /// Spawn a new session and immediately launch an AI agent CLI (claude, codex, kiro, gemini, cursor).
+    func kouenSpawnAgent(
+        agent: String,
+        workspaceId: String?,
+        cwd: String?,
+        worktreePath: String? = nil,
+        parentRepoPath: String? = nil,
+        taskName: String? = nil
+    ) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenSpawnAgent") else { return (nil, disabledError("kouenSpawnAgent")) }
+
+        let spawned: SpawnedAgentSurface
+        switch await spawnAgentSurface(
+            agent: agent, workspaceId: workspaceId, cwd: cwd,
+            worktreePath: worktreePath, parentRepoPath: parentRepoPath, taskName: taskName
+        ) {
+        case let .success(s): spawned = s
+        case let .failure(error): return (nil, error)
+        }
+        await notifyMCPActivity(surfaceId: spawned.surfaceID, tool: "kouenSpawnAgent")
 
         var result: [String: AnyCodable] = [
-            "sessionId": .string(sessionID.uuidString),
-            "surfaceId": .string(sid),
-            "agent": .string(resolvedAgent),
-            "launched": .string(agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)),
+            "sessionId": .string(spawned.sessionID.uuidString),
+            "surfaceId": .string(spawned.surfaceID),
+            "agent": .string(spawned.resolvedAgent),
+            "launched": .string(spawned.agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)),
         ]
         // Signal-file stack guess — the CLI just launched bare with no prompt typed, so this
         // is surfaced for the caller (the orchestrator that requested the spawn) to fold into
@@ -441,6 +486,59 @@ struct KouenDaemonTools: Sendable {
         }
 
         return (toolResult(json: .object(result)), nil)
+    }
+
+    /// Spawn a Worker session and hand it a prompt in one atomic call (P44a) — for an
+    /// Orchestrator delegating a Task, so it doesn't need to poll+send by hand the way
+    /// `kouenSpawnAgent` callers otherwise must. Reuses `spawnAgentSurface`'s real
+    /// surface-readiness poll (not P41 Automations' fixed-delay-then-write heuristic,
+    /// `SurfaceRegistry.fireAutomationLocked`, which never polls at all before its first
+    /// write). ponytail: the delay between launching the CLI binary and typing the prompt
+    /// is still a fixed wait (same ceiling as Automations has today, no CLI-cold-start
+    /// readiness signal exists anywhere in this codebase to poll instead) — upgrade path
+    /// is a real readiness probe (e.g. detect the CLI's own prompt string in pane output)
+    /// if this proves flaky in practice.
+    func kouenSpawnWorker(
+        agent: String, workspaceId: String?, cwd: String?,
+        worktreePath: String?, parentRepoPath: String?, taskName: String?,
+        prompt: String
+    ) async -> (AnyCodable?, JSONRPCError?) {
+        guard isToolAllowed("kouenSpawnWorker") else { return (nil, disabledError("kouenSpawnWorker")) }
+
+        let spawned: SpawnedAgentSurface
+        switch await spawnAgentSurface(
+            agent: agent, workspaceId: workspaceId, cwd: cwd,
+            worktreePath: worktreePath, parentRepoPath: parentRepoPath, taskName: taskName
+        ) {
+        case let .success(s): spawned = s
+        case let .failure(error): return (nil, error)
+        }
+
+        // 'cursor' isn't an interactive CLI — `cursor <path>` launches the GUI editor and
+        // the shell immediately returns to its own prompt. Typing `prompt` there would run
+        // it as an arbitrary shell command instead of handing it to an agent, unlike every
+        // other AgentKind where the prompt safely goes to that agent's own conversational
+        // input. The session is already spawned; just refuse to auto-type into it.
+        guard spawned.resolvedAgent.lowercased() != "cursor" else {
+            return (nil, JSONRPCError(
+                code: -32602,
+                message: "kouenSpawnWorker doesn't support 'cursor' — it's a GUI launcher, not an interactive "
+                    + "agent, so a follow-up prompt would run as a shell command instead of reaching an agent. "
+                    + "Session \(spawned.sessionID.uuidString) was spawned; use kouenSpawnAgent for cursor instead."
+            ))
+        }
+
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        _ = await send(.send(surfaceID: spawned.surfaceID, text: prompt + "\n"))
+        await notifyMCPActivity(surfaceId: spawned.surfaceID, tool: "kouenSpawnWorker")
+
+        return (toolResult(json: .object([
+            "sessionId": .string(spawned.sessionID.uuidString),
+            "surfaceId": .string(spawned.surfaceID),
+            "agent": .string(spawned.resolvedAgent),
+            "launched": .string(spawned.agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)),
+            "promptSent": .string(prompt),
+        ])), nil)
     }
 
     // MARK: - waitForPaneOutput
@@ -539,11 +637,22 @@ struct KouenDaemonTools: Sendable {
         return (toolResult(json: Self.taskJSON(task)), nil)
     }
 
-    func taskUpdate(id: String, title: String?, done: Bool?) async -> (AnyCodable?, JSONRPCError?) {
+    func taskUpdate(
+        id: String, title: String?, done: Bool?, status: String?
+    ) async -> (AnyCodable?, JSONRPCError?) {
         guard let uuid = UUID(uuidString: id) else {
             return (nil, JSONRPCError(code: -32602, message: "'id' is not a valid UUID"))
         }
-        guard let response = await send(.taskUpdate(id: uuid, title: title, done: done)) else {
+        var taskStatus: TaskSummary.Status?
+        if let status {
+            guard let parsed = TaskSummary.Status(rawValue: status) else {
+                let allowed = TaskSummary.Status.allCases.map(\.rawValue).joined(separator: ", ")
+                return (nil, JSONRPCError(code: -32602, message: "'status' must be one of: \(allowed)"))
+            }
+            taskStatus = parsed
+        }
+        guard let response = await send(.taskUpdate(id: uuid, title: title, done: done, status: taskStatus))
+        else {
             return (nil, Self.daemonUnavailableError)
         }
         switch response {
@@ -578,6 +687,7 @@ struct KouenDaemonTools: Sendable {
             "sessionId": .string(task.sessionID.uuidString),
             "title": .string(task.title),
             "done": .bool(task.done),
+            "status": .string(task.status.rawValue),
             "createdAt": .string(taskDateFormatter().string(from: task.createdAt)),
             "updatedAt": .string(taskDateFormatter().string(from: task.updatedAt)),
             "cwd": task.cwd.map(AnyCodable.string) ?? .null,

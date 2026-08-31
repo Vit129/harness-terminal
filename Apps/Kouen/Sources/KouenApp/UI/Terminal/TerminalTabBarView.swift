@@ -332,6 +332,8 @@ private struct TabPillView: View {
 
     @State private var isHovered = false
     @State private var showsMCPBadge = false
+    @State private var tasks: [TaskSummary] = []
+    @State private var taskRefreshTask: Task<Void, Never>?
 
     var body: some View {
         let _ = model.chromeEpoch
@@ -396,6 +398,26 @@ private struct TabPillView: View {
                 .fill(Color(statusColor(for: tab.status)))
                 .frame(width: 6, height: 6)
                 .help(statusHelp(for: tab.status))
+
+            if !tasks.isEmpty {
+                let doneCount = tasks.filter(\.done).count
+                let statusKind = tasks.aggregateBoardStatus
+                let badgeColor = Color(nsColor: statusKind.color)
+                HStack(spacing: 2) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 7, weight: .semibold))
+                    Text("\(doneCount)/\(tasks.count)")
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                }
+                .foregroundStyle(badgeColor)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: KouenDesign.Radius.badge, style: .continuous)
+                        .fill(badgeColor.opacity(c.isDark ? 0.16 : 0.12))
+                )
+                .help(tasks.taskTooltipSummary)
+            }
 
             if tab.persistent {
                 Image(systemName: "pin.fill")
@@ -475,6 +497,21 @@ private struct TabPillView: View {
         .gesture(dragGesture)
         .task(id: tab.lastMCPControlAt) {
             await updateMCPBadge(lastAt: tab.lastMCPControlAt)
+        }
+        .task(id: tab.id) {
+            await updateTasks()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NotificationBus.shared.snapshotChanged)) { _ in
+            // snapshotChanged can fire many times per second (see ScriptRuntime.swift's own
+            // doc comment on the same notification) — debounce the same way GitPanelView's
+            // FSEvent-driven refresh does (cancel-and-reschedule, 0.5s quiet period) so this
+            // doesn't fire a fresh TaskDaemonBridge IPC round-trip per tab on every tick.
+            taskRefreshTask?.cancel()
+            taskRefreshTask = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                await updateTasks()
+            }
         }
     }
 
@@ -577,6 +614,15 @@ private struct TabPillView: View {
             return "\(sub.kind.displayName) (\(source), \(elapsed)s)"
         }
         return ([kind.displayName] + lines).joined(separator: "\n")
+    }
+
+    private func updateTasks() async {
+        let snap = SessionCoordinator.shared.snapshot
+        guard let sessionID = snap.workspaces.flatMap(\.sessions).first(where: { $0.tabs.contains(where: { $0.id == tab.id }) })?.id else {
+            tasks = []
+            return
+        }
+        tasks = await TaskDaemonBridge.list(sessionID: sessionID)
     }
 }
 

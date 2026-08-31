@@ -26,10 +26,10 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertFalse(store.delete(id: created.id))
     }
 
-    /// Marking a Task done is a deletion trigger, not just a flag flip — see
-    /// `TaskStore.update`'s doc comment. The caller still gets `done: true` back (so a
-    /// `kouenTaskUpdate` call reads as success), but the store forgets it immediately.
-    func testMarkingDoneDeletesTheTaskImmediately() {
+    /// P44a: marking a Task done used to delete it immediately (see git history) — an
+    /// Auto-Fix Loop needs a durable status history, so completion no longer implies
+    /// deletion. Only explicit `delete(id:)` removes a Task now.
+    func testMarkingDoneKeepsTheTaskListed() {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let store = TaskStore(url: url)
@@ -37,11 +37,68 @@ final class TaskStoreTests: XCTestCase {
         let created = store.create(sessionID: sessionID, title: "finish this")
 
         let updated = store.update(id: created.id, done: true)
-        XCTAssertEqual(updated?.done, true, "caller still sees the completed state")
+        XCTAssertEqual(updated?.done, true)
+        XCTAssertEqual(updated?.status, .done, "'done' also moves status to .done for legacy callers")
 
-        XCTAssertNil(store.get(id: created.id), "but the store no longer has it")
-        XCTAssertEqual(store.list(sessionID: sessionID).count, 0)
-        XCTAssertFalse(store.delete(id: created.id), "already gone — nothing left to explicitly delete")
+        XCTAssertNotNil(store.get(id: created.id), "the store keeps it listed now")
+        XCTAssertEqual(store.list(sessionID: sessionID).count, 1)
+
+        XCTAssertTrue(store.delete(id: created.id), "only explicit delete removes it")
+        XCTAssertNil(store.get(id: created.id))
+    }
+
+    func testStatusPersistsAcrossUpdateAndReopen() {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let sessionID = SessionID()
+        let created: KouenTask
+        do {
+            let store = TaskStore(url: url)
+            created = store.create(sessionID: sessionID, title: "spawn worker")
+            XCTAssertEqual(created.status, .open, "new Tasks default to .open")
+
+            let updated = store.update(id: created.id, status: .running)
+            XCTAssertEqual(updated?.status, .running)
+            XCTAssertEqual(updated?.done, false, "status alone doesn't flip done except at .done")
+
+            let ciFailed = store.update(id: created.id, status: .ciFailing)
+            XCTAssertEqual(ciFailed?.status, .ciFailing)
+        }
+        let reopened = TaskStore(url: url)
+        XCTAssertEqual(reopened.get(id: created.id)?.status, .ciFailing, "status survives reload from disk")
+    }
+
+    func testStatusOverridesDoneWhenBothPassed() {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = TaskStore(url: url)
+        let created = store.create(sessionID: SessionID(), title: "race")
+        let updated = store.update(id: created.id, done: false, status: .mergeReady)
+        XCTAssertEqual(updated?.status, .mergeReady, "explicit status wins over a simultaneous done arg")
+        XCTAssertEqual(updated?.done, false, "mergeReady isn't done — done only tracks .done status")
+    }
+
+    func testDecodingLegacyTasksJSONWithoutStatusKeyDefaultsFromDone() {
+        // Regression guard: tasks.json written before this field existed has no "status"
+        // key at all. A done=true legacy task should decode to .done, not .open, so a
+        // pre-P44a completed-but-not-yet-deleted... N/A here since legacy always deleted
+        // on done — but decode must still not crash/backup the whole file either way.
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let openID = UUID()
+        let doneID = UUID()
+        let now = ISO8601DateFormatter().string(from: Date())
+        let legacyJSON = """
+        [
+          {"id":"\(openID.uuidString)","sessionID":"\(UUID().uuidString)","title":"open one","done":false,"createdAt":"\(now)","updatedAt":"\(now)"},
+          {"id":"\(doneID.uuidString)","sessionID":"\(UUID().uuidString)","title":"done one","done":true,"createdAt":"\(now)","updatedAt":"\(now)"}
+        ]
+        """
+        try! legacyJSON.write(to: url, atomically: true, encoding: .utf8)
+
+        let store = TaskStore(url: url)
+        XCTAssertEqual(store.get(id: openID)?.status, .open)
+        XCTAssertEqual(store.get(id: doneID)?.status, .done)
     }
 
     func testListWithNilSessionIDReturnsAllSessions() {

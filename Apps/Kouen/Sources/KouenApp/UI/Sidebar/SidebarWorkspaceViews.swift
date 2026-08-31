@@ -323,7 +323,11 @@ struct SidebarFooterView: View {
         HStack(spacing: 2) {
             FooterIconButton(symbol: "gearshape", tooltip: "Settings (⌘,)", chromeEpoch: epoch, action: onSettings)
             Spacer()
+            // P44b: Task Dashboard board UI retired in favor of inline status indicators
+            // (tab bar / sidebar / git panel). Keep code for potential future reuse.
+            #if false
             FooterIconButton(symbol: "checklist", tooltip: "Tasks", chromeEpoch: epoch, action: onTasks)
+            #endif
             FooterIconButton(symbol: "sparkles", tooltip: "Agents", chromeEpoch: epoch, badgeCount: needsAttention, action: onAgents)
             RecentProjectsMenuButton(chromeEpoch: epoch, provider: recentProjectsProvider, onSelect: onOpenRecent)
             FooterIconButton(symbol: "plus", tooltip: "New session", chromeEpoch: epoch, action: onNewSession)

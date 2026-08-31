@@ -114,6 +114,9 @@ struct ToolRegistry: Sendable {
                 param("path", "string", "Path to the git repository"),
                 param("count", "number", "Number of commits (default 10)"),
             ]),
+            toolDef("kouenPRStatus", "Get PR/CI status (checks, mergeable, review decision) for the current branch's PR in a repository — for an Orchestrator polling a Worker's progress (P44a)", [
+                param("path", "string", "Path to the git repository (or worktree)"),
+            ]),
             toolDef("kouenBrowserOpen", "Open a new browser pane. Check kouenList first to reuse existing panes (requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1)", [
                 param("url", "string", "URL to load"),
                 param("direction", "string", "Split direction: right, left, up, or down (optional)"),
@@ -180,6 +183,18 @@ struct ToolRegistry: Sendable {
                 param("agent", "string", "Agent to launch: 'claude', 'codex', 'kiro', 'gemini', or 'cursor'"),
                 param("workspaceId", "string", "Workspace UUID (optional, uses active workspace if omitted)"),
                 param("cwd", "string", "Working directory for the new session (optional)"),
+                param("worktreePath", "string", "Attach the new session's first tab to this git worktree path (optional) — makes it visible via kouenList's tabJSON"),
+                param("parentRepoPath", "string", "The worktree's parent repo path (optional, paired with worktreePath)"),
+                param("taskName", "string", "Display-name override for the tab, e.g. the Task title it's working on (optional)"),
+            ]),
+            toolDef("kouenSpawnWorker", "Spawn a Worker session, launch its agent CLI, and hand it a prompt in one atomic call — for an Orchestrator delegating a Task (P44a). Reliable alternative to kouenSpawnAgent + a manual follow-up send: polls for the shell to actually be ready before typing anything. 'cursor' is not supported (GUI launcher, not an interactive agent — use kouenSpawnAgent for it instead). Requires MCP policy allowlist or KOUEN_MCP_ALLOW_CONTROL=1", [
+                param("agent", "string", "Agent to launch: 'claude', 'codex', 'kiro', or 'gemini' ('cursor' not supported here — see tool description)"),
+                param("workspaceId", "string", "Workspace UUID (optional, uses active workspace if omitted)"),
+                param("cwd", "string", "Working directory for the new session (optional)"),
+                param("worktreePath", "string", "Attach the new session's first tab to this git worktree path (optional)"),
+                param("parentRepoPath", "string", "The worktree's parent repo path (optional, paired with worktreePath)"),
+                param("taskName", "string", "Display-name override for the tab, e.g. the Task title it's working on (optional)"),
+                param("prompt", "string", "The prompt to type into the agent once it's ready"),
             ]),
             toolDef("kouenTaskList", "List Tasks — checklist items scoped to a session. Omit sessionId to list across every session (powers the Task Dashboard)", [
                 param("sessionId", "string", "Session UUID to filter by (optional, omit for all sessions)"),
@@ -191,10 +206,14 @@ struct ToolRegistry: Sendable {
                 param("sessionId", "string", "Session UUID this Task belongs to"),
                 param("title", "string", "Task title"),
             ]),
-            toolDef("kouenTaskUpdate", "Update a Task's title and/or done state", [
+            toolDef("kouenTaskUpdate", "Update a Task's title, done state, and/or status", [
                 param("id", "string", "Task UUID"),
                 param("title", "string", "New title (optional)"),
                 param("done", "boolean", "New done state (optional)"),
+                param(
+                    "status", "string",
+                    "New status (optional): open, running, ciFailing, mergeReady, or done. Overrides 'done' if both are given."
+                ),
             ]),
             toolDef("kouenTaskDelete", "Delete a Task", [
                 param("id", "string", "Task UUID"),
@@ -310,6 +329,7 @@ struct ToolRegistry: Sendable {
         case "gitStatus": return await gitStatus(args)
         case "gitDiff": return await gitDiff(args)
         case "gitLog": return await gitLog(args)
+        case "kouenPRStatus": return await kouenPRStatus(args)
         case "kouenFind": return await kouenFind(args)
         case "kouenGrep": return await kouenGrep(args)
         case "kouenRecent": return await kouenRecent(args)
@@ -329,6 +349,7 @@ struct ToolRegistry: Sendable {
         case "kouenBrowserGoForward": return await kouenBrowserGoForward(args)
         case "kouenBrowserReload": return await kouenBrowserReload(args)
         case "kouenSpawnAgent": return await kouenSpawnAgent(args)
+        case "kouenSpawnWorker": return await kouenSpawnWorker(args)
         case "kouenTaskList": return await kouenTaskList(args)
         case "kouenTaskGet": return await kouenTaskGet(args)
         case "kouenTaskCreate": return await kouenTaskCreate(args)
@@ -462,7 +483,10 @@ struct ToolRegistry: Sendable {
         }
         let done: Bool?
         if case let .bool(d)? = args["done"] { done = d } else { done = nil }
-        return await daemonTools.taskUpdate(id: id, title: optionalStringArg(args["title"]), done: done)
+        return await daemonTools.taskUpdate(
+            id: id, title: optionalStringArg(args["title"]), done: done,
+            status: optionalStringArg(args["status"])
+        )
     }
 
     private func kouenTaskDelete(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
@@ -746,6 +770,36 @@ struct ToolRegistry: Sendable {
         return (toolResult(out.isEmpty ? "No commits" : out), nil)
     }
 
+    /// Direct in-process `gh` shell-out via `GitHubCLIClient`, no daemon round-trip —
+    /// same pattern as `gitStatus`/`gitDiff`/`gitLog` above. Offloaded to a background
+    /// queue (`GitHubCLIClient.prForCurrentBranch` blocks on `Process.waitUntilExit()`)
+    /// so it never stalls the calling Task, mirroring `shell()`'s own continuation shape.
+    private func kouenPRStatus(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(path)? = args["path"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'path' parameter"))
+        }
+        let info: GitHubCLIClient.PRInfo? = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: GitHubCLIClient().prForCurrentBranch(repoPath: path))
+            }
+        }
+        guard let info else {
+            return (toolResult("No PR found for the current branch (or gh unavailable/unauthenticated)"), nil)
+        }
+        return (toolResult(json: .object([
+            "number": .int(info.number),
+            "title": .string(info.title),
+            "state": .string(info.state.rawValue),
+            "url": .string(info.url),
+            "headRefName": .string(info.headRefName),
+            "baseRefName": .string(info.baseRefName),
+            "isDraft": .bool(info.isDraft),
+            "checksStatus": .string(info.checksStatus.rawValue),
+            "mergeable": .bool(info.mergeable),
+            "reviewDecision": info.reviewDecision.map(AnyCodable.string) ?? .null,
+        ])), nil)
+    }
+
     private func kouenFind(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
         guard let cwd = await daemonTools.getActiveCWD() else {
             return (nil, JSONRPCError(code: -32000, message: "No active workspace or session found"))
@@ -926,7 +980,29 @@ struct ToolRegistry: Sendable {
         }
         let workspaceId = optionalStringArg(args["workspaceId"])
         let cwd = optionalStringArg(args["cwd"])
-        return await daemonTools.kouenSpawnAgent(agent: agent, workspaceId: workspaceId, cwd: cwd)
+        return await daemonTools.kouenSpawnAgent(
+            agent: agent, workspaceId: workspaceId, cwd: cwd,
+            worktreePath: optionalStringArg(args["worktreePath"]),
+            parentRepoPath: optionalStringArg(args["parentRepoPath"]),
+            taskName: optionalStringArg(args["taskName"])
+        )
+    }
+
+    private func kouenSpawnWorker(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
+        guard case let .string(agent)? = args["agent"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'agent' parameter"))
+        }
+        guard case let .string(prompt)? = args["prompt"] else {
+            return (nil, JSONRPCError(code: -32602, message: "Missing 'prompt' parameter"))
+        }
+        return await daemonTools.kouenSpawnWorker(
+            agent: agent, workspaceId: optionalStringArg(args["workspaceId"]),
+            cwd: optionalStringArg(args["cwd"]),
+            worktreePath: optionalStringArg(args["worktreePath"]),
+            parentRepoPath: optionalStringArg(args["parentRepoPath"]),
+            taskName: optionalStringArg(args["taskName"]),
+            prompt: prompt
+        )
     }
 
     private func kouenCCRun(_ args: [String: AnyCodable]) async -> (AnyCodable?, JSONRPCError?) {
@@ -981,6 +1057,12 @@ struct ToolRegistry: Sendable {
                 "text": .string(text),
             ])]),
         ])
+    }
+
+    private func toolResult(json value: AnyCodable) -> AnyCodable {
+        let data = try? JSONEncoder().encode(value)
+        let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return toolResult(text)
     }
 
     private func toolDef(_ name: String, _ description: String, _ properties: [AnyCodable]) -> AnyCodable {

@@ -177,6 +177,25 @@ final class FileViewerViewController: NSViewController {
         quickLookView?.isHidden = true
         syntaxView.isHidden = false
         syntaxView.load(text: text, fileExtension: ext, resetScroll: resetScroll)
+        if ["diff", "patch"].contains(ext) {
+            let diffLines = GitDiffGutter.contentLines(text)
+            syntaxView.setDiffLines(diffLines)
+            if resetScroll, let firstChangedLine = diffLines.keys.min() {
+                syntaxView.navigateTo(line: firstChangedLine, column: 1)
+            }
+        } else {
+            let path = url.path
+            Task.detached(priority: .utility) {
+                let diffLines = await GitDiffGutter.diffLines(for: path)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.syntaxView.setDiffLines(diffLines)
+                    if resetScroll, let firstChangedLine = diffLines.keys.min() {
+                        self.syntaxView.navigateTo(line: firstChangedLine, column: 1)
+                    }
+                }
+            }
+        }
         lspSession.open(url: url, text: text, fileExtension: ext)
         view.window?.makeFirstResponder(syntaxView)
     }

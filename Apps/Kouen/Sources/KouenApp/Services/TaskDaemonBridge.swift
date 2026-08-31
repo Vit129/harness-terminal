@@ -28,7 +28,9 @@ enum TaskDaemonBridge {
     @discardableResult
     static func update(id: UUID, title: String? = nil, done: Bool? = nil) async -> TaskSummary? {
         await Task.detached(priority: .utility) {
-            guard let response = try? DaemonClient().request(.taskUpdate(id: id, title: title, done: done)),
+            guard let response = try? DaemonClient().request(
+                .taskUpdate(id: id, title: title, done: done, status: nil)
+            ),
                   case let .taskInfo(task) = response
             else { return nil }
             return task
