@@ -112,6 +112,18 @@ final class ScrollbackTests: XCTestCase {
         XCTAssertEqual(term.historyCount, 0)
     }
 
+    // TUI CLIs (interactive agent tools) redraw their screen with `ESC[3J` far more casually
+    // than a user-initiated `clear`; wiping scrollback on every one of those reads as the
+    // terminal spontaneously scrolling to the very top. Mode 3 must clear the visible screen
+    // without touching history — matching how other terminals guard against this abuse.
+    func testEraseSavedLinesDoesNotWipeScrollback() {
+        let term = TerminalEmulator(cols: 4, rows: 2)
+        for i in 0 ..< 5 { term.feed("\(i)\r\n") }
+        XCTAssertEqual(term.historyCount, 4)
+        term.feed("\u{1b}[3J") // ED mode 3 — erase saved lines
+        XCTAssertEqual(term.historyCount, 4, "scrollback must survive ESC[3J")
+    }
+
     func testLazyReflowDuringLiveResize() {
         let term = TerminalEmulator(cols: 4, rows: 2)
         term.maxScrollbackLines = 20

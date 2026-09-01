@@ -1666,6 +1666,13 @@ final class TerminalScreen {
 
     /// ED — erase in display. mode 0: cursor→end, 1: start→cursor, 2/3: all. Cleared full rows
     /// no longer continue a wrapped line, so their soft-wrap flags reset.
+    ///
+    /// Mode 3 ("erase saved lines") is spec'd to also wipe scrollback, but real-world CLIs
+    /// (interactive/TUI agents redrawing their screen) send it far more casually than a
+    /// user-initiated `clear`, and losing scrollback on every redraw reads as the terminal
+    /// spontaneously jumping to the very top. Terminals like iTerm2 guard against this same
+    /// abuse; mirror that here by treating mode 3 like mode 2 — clear the visible screen, keep
+    /// history intact.
     func eraseInDisplay(mode: Int) {
         let blank = erasedCell()
         switch mode {
@@ -1678,8 +1685,7 @@ final class TerminalScreen {
         case 2, 3:
             fillCells(0, cells.count, with: blank)
             for r in 0 ..< rows { rowWrapped[r] = false; rowMarks[r] = nil }
-            clearImages()   // ED 2/3 clears the screen (and scrollback for 3) → drop images
-            if mode == 3 { history.removeAll() }
+            clearImages()   // ED 2/3 clears the screen → drop images
             markFullyDirty()
         default: // 0
             // Cursor → end of its row, then every full row below in one bulk fill.
