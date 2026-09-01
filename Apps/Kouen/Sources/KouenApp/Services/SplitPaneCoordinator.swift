@@ -20,7 +20,11 @@ final class SplitPaneCoordinator {
               // would fail server-side with "Pane not found".
               let paneID = coord.activeSurfaceID.flatMap({ paneID(for: $0, in: tab.rootPane) })
                 ?? tab.rootPane.allLeaves().last?.id
-        else { return }
+        else {
+            NSLog("[DBG-activestate] splitActivePane() no-op: workspace=\(coord.snapshot.activeWorkspace?.id.uuidString ?? "nil") tab=\(coord.snapshot.activeWorkspace?.activeTab?.id.uuidString ?? "nil") activeSurfaceID=\(coord.activeSurfaceID?.uuidString ?? "nil")")
+            return
+        }
+        NSLog("[DBG-activestate] splitActivePane() workspace=\(workspace.id) tab=\(tab.id) paneID=\(paneID)")
         Task {
             await coord.requestDaemon(.newSplit(tabID: tab.id, paneID: paneID, direction: direction, shell: coord.settings.defaultShell, before: before))
             await coord.syncFromDaemon()

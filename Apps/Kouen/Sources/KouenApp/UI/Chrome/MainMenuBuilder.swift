@@ -402,7 +402,11 @@ final class MenuTarget: NSObject, NSMenuItemValidation, NSMenuDelegate {
         // Force a sync to ensure activeSession/activeTab reflect the currently visible tab,
         // not a stale snapshot from before the user's last tab switch.
         coordinator.syncFromDaemon()
-        guard let id = coordinator.snapshot.activeWorkspaceID else { return }
+        guard let id = coordinator.snapshot.activeWorkspaceID else {
+            NSLog("[DBG-activestate] newSession() no-op: activeWorkspaceID nil after sync")
+            return
+        }
+        NSLog("[DBG-activestate] newSession() workspaceID=\(id)")
         coordinator.addSession(to: id)
     }
 
