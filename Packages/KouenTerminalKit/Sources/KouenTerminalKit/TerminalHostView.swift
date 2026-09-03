@@ -378,6 +378,13 @@ public final class TerminalHostView: NSView {
         native.onScrollChanged = { [weak self] topLine, totalLines, visibleRows in
             self?.scrollbar.show(topLine: topLine, totalLines: totalLines, visibleRows: visibleRows)
         }
+        scrollbar.onScrollToProgress = { [weak self] progress in
+            guard let self else { return }
+            let historyCount = self.nativeView.emulatorSync { $0.historyCount }
+            guard historyCount > 0 else { return }
+            let targetBufferLine = Int(round(progress * CGFloat(historyCount)))
+            self.nativeView.scrollToBufferLine(targetBufferLine)
+        }
 
         applyNativeAppearance()
     }

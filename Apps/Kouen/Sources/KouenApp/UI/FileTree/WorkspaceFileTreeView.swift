@@ -34,6 +34,8 @@ final class WorkspaceFileTreeView: NSView {
     private let watcher = FileTreeWatcher()
     private let context: FileTreeContext
     private var hostingView: NSHostingView<FileTreeSwiftUIView>!
+    private let scrollbar = TerminalScrollbarView()
+    private weak var observedScrollView: NSScrollView?
     let keyboard = FileTreeKeyboardNavigator()
 
     var onFilePreview: ((FileNode) -> Void)?
@@ -198,23 +200,98 @@ final class WorkspaceFileTreeView: NSView {
         guard hostingView.superview == nil else { return }
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hostingView)
+        addSubview(scrollbar)
         NSLayoutConstraint.activate([
             hostingView.topAnchor.constraint(equalTo: topAnchor),
             hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
             hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
             hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            scrollbar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollbar.topAnchor.constraint(equalTo: topAnchor),
+            scrollbar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollbar.widthAnchor.constraint(equalToConstant: TerminalScrollbarView.stripWidth),
         ])
+        scrollbar.applyColor(KouenChrome.current.textSecondary)
+        scrollbar.onScrollToProgress = { [weak self] progress in
+            guard let self, let scroll = self.findScrollView(), let doc = scroll.documentView else { return }
+            let maxScroll = max(0, doc.frame.height - scroll.contentView.bounds.height)
+            guard maxScroll > 0 else { return }
+            let targetY = progress * maxScroll
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        setupScrollObservationIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        setupScrollObservationIfNeeded()
+        fileTreeBoundsDidChange()
+    }
+
+    private func setupScrollObservationIfNeeded() {
+        guard let scroll = findScrollView() else { return }
+        if scroll !== observedScrollView {
+            observedScrollView = scroll
+            scroll.postsBoundsChangedNotifications = true
+            NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: nil)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(fileTreeBoundsDidChange),
+                name: NSView.boundsDidChangeNotification,
+                object: scroll.contentView
+            )
+            if let doc = scroll.documentView {
+                doc.postsFrameChangedNotifications = true
+                NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: nil)
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(fileTreeBoundsDidChange),
+                    name: NSView.frameDidChangeNotification,
+                    object: doc
+                )
+            }
+        }
+        scroll.verticalScroller?.isHidden = true
+    }
+
+    @objc private func fileTreeBoundsDidChange() {
+        guard let scroll = observedScrollView ?? findScrollView(),
+              let doc = scroll.documentView else { return }
+        let totalHeight = doc.frame.height
+        let visibleHeight = scroll.contentView.bounds.height
+        let scrollY = scroll.contentView.bounds.origin.y
+        scrollbar.show(
+            topLine: Int(max(0, scrollY)),
+            totalLines: Int(totalHeight),
+            visibleRows: Int(visibleHeight)
+        )
+    }
+
+    private func findScrollView() -> NSScrollView? {
+        func search(_ v: NSView) -> NSScrollView? {
+            if let s = v as? NSScrollView { return s }
+            for sub in v.subviews {
+                if let s = search(sub) { return s }
+            }
+            return nil
+        }
+        return search(hostingView)
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil {
+            NotificationCenter.default.removeObserver(self)
+            observedScrollView = nil
             // Detach the hosting view so SwiftUI stops re-evaluating the body
             // after the backing context is freed (zombie @Observable access → crash).
             // Also cancel pending layout to prevent a queued re-render race.
             hostingView?.needsLayout = false
             hostingView?.needsDisplay = false
             hostingView?.removeFromSuperview()
+            scrollbar.removeFromSuperview()
         }
     }
 
@@ -224,6 +301,9 @@ final class WorkspaceFileTreeView: NSView {
         // removes the hosting view on detach, but the view can come back alive
         // (e.g. sidebar position swap removes/re-adds the container). Without this
         // the file tree stays permanently blank.
-        if window != nil { attachHostingView() }
+        if window != nil {
+            attachHostingView()
+            setupScrollObservationIfNeeded()
+        }
     }
 }

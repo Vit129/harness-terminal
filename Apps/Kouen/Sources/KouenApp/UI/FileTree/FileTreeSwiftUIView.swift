@@ -217,6 +217,7 @@ struct FileTreeSwiftUIView: View {
                 }
                 .listStyle(.sidebar)
                 .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
                 .onChange(of: filteredNodes.map(\.node.path)) { _, _ in
                     updateVisiblePaths()
                 }
