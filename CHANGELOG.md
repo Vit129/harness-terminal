@@ -5,6 +5,14 @@ All notable changes to Kouen are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Each released version
 has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
+## [4.15.0] - 2026-09-03
+
+### Added
+- Interactive drag-to-scroll support for terminal and file tree sidebar scrollbars with hover expansion.
+
+### Fixed
+- Prevent terminal scrollback history from being wiped on ESC[3J erase-saved-lines sequence.
+
 ## [4.14.0] - 2026-08-31
 
 ### Added
