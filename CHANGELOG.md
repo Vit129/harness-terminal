@@ -7,16 +7,10 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.15.1] - 2026-09-04
 
-### Added
-- Release version bump to v4.15.1.
-
-## [4.15.0] - 2026-09-03
-
-### Added
-- Interactive drag-to-scroll support for terminal and file tree sidebar scrollbars with hover expansion.
-
 ### Fixed
-- Prevent terminal scrollback history from being wiped on ESC[3J erase-saved-lines sequence.
+- Don't wipe scrollback on ESC[3J (erase saved lines) ([`d1860af`](https://github.com/Vit129/kouen-terminal/commit/d1860afd3310d11e3f0adba5185a84f3b2c73c63))
+- Support drag-to-scroll on terminal and file view scrollbars ([`86acdf7`](https://github.com/Vit129/kouen-terminal/commit/86acdf71266351e8fe0e3fb2d53284c245eb68ed))
+- Fire scrollbar update immediately on pane split + register hover tracking area reliably (release v4.15.1) ([`fb9e095`](https://github.com/Vit129/kouen-terminal/commit/fb9e0953ff54f6be9677fecdad5c3ff2272fe17e))
 
 ## [4.14.0] - 2026-08-31
 
