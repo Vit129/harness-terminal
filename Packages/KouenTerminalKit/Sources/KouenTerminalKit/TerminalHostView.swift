@@ -378,6 +378,11 @@ public final class TerminalHostView: NSView {
         native.onScrollChanged = { [weak self] topLine, totalLines, visibleRows in
             self?.scrollbar.show(topLine: topLine, totalLines: totalLines, visibleRows: visibleRows)
         }
+        // Fire once immediately instead of waiting for the pane's first scroll event -- a pane
+        // split at runtime (Cmd+D/Cmd+Shift+D) can already have more history than fits on screen
+        // (e.g. a shell that printed its MOTD/prompt) but the scrollbar stayed dark until the
+        // user happened to scroll it once, since `onScrollChanged` had never fired yet.
+        native.notifyScrollChanged(historyCount: native.emulatorSync { $0.historyCount })
         scrollbar.onScrollToProgress = { [weak self] progress in
             guard let self else { return }
             let historyCount = self.nativeView.emulatorSync { $0.historyCount }

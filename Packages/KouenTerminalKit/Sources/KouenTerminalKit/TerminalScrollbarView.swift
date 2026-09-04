@@ -64,6 +64,18 @@ public final class TerminalScrollbarView: NSView {
         trackingArea = area
     }
 
+    // A pane split at runtime (Cmd+D/Cmd+Shift+D) adds this view to the window well after
+    // app launch. AppKit doesn't reliably re-run updateTrackingAreas() the moment a view is
+    // inserted into an already-visible window -- it's normally driven by the layout pass, and a
+    // freshly split pane can miss that pass, leaving the hover tracking area (and thus the
+    // whole hover-to-reveal/drag path) never registered for that specific pane. Forcing it here
+    // guarantees every pane gets a working tracking area regardless of when it was created.
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        updateTrackingAreas()
+    }
+
     public override func mouseEntered(with event: NSEvent) {
         guard hasScrollableContent else { return }
         isHovered = true
