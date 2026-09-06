@@ -575,24 +575,35 @@ final class MainSplitViewController: NSViewController {
 
     private func setSidebarWidth(_ width: CGFloat) {
         let totalWidth = split.bounds.width
-        guard totalWidth > 0 else {
-            sidebarLog.debug("setSidebarWidth totalWidth=0, deferring to next runloop turn (width=\(width))")
+        guard totalWidth > 0, let panel = sidebarContainerView else {
+            sidebarLog.debug("setSidebarWidth totalWidth=0 or no panel, deferring to next runloop turn (width=\(width))")
             DispatchQueue.main.async { [weak self] in self?.setSidebarWidth(width) }
             return
         }
         let sidebarOnRight = SessionCoordinator.shared.settings.sidebarOnRight
-        let position: CGFloat
+        let dividerThickness = split.dividerThickness
+        let clampedWidth = max(0, min(width, totalWidth - dividerThickness))
+        let contentWidth = totalWidth - clampedWidth - dividerThickness
+        let height = split.bounds.height
+        // `NSSplitView.setPosition` is documented as advisory and, in practice, can
+        // silently clamp against a stale internally-cached arrangement that never
+        // recomputed for the split view's current (live) bounds — verified 2026-09-06:
+        // after a real window resize while the sidebar was collapsed, setPosition kept
+        // leaving content pinned to the *pre-resize* width no matter what position was
+        // requested, even though every geometry read (bounds/frame/window.frame) agreed
+        // on the new size and the constrain delegate methods returned the correct,
+        // unclamped values. `updateSidebarPlacement()` below already works around this
+        // same unreliability by assigning subview frames directly — do the same here
+        // instead of trusting setPosition.
         if sidebarOnRight {
-            position = totalWidth > width ? (totalWidth - width) : 0
+            content.view.frame = NSRect(x: 0, y: 0, width: contentWidth, height: height)
+            panel.frame = NSRect(x: contentWidth + dividerThickness, y: 0, width: clampedWidth, height: height)
         } else {
-            position = width
+            panel.frame = NSRect(x: 0, y: 0, width: clampedWidth, height: height)
+            content.view.frame = NSRect(x: clampedWidth + dividerThickness, y: 0, width: contentWidth, height: height)
         }
-        sidebarLog.debug("setSidebarWidth width=\(width) totalWidth=\(totalWidth) sidebarOnRight=\(sidebarOnRight) -> setPosition=\(position)")
-        split.setPosition(position, ofDividerAt: 0)
-        // Diagnostic for cmd-backslash-sidebar-launch-race-6th's 2026-08-16 recurrence:
-        // setPosition is advisory — NSSplitViewDelegate's constrain methods can silently
-        // clamp it with no error. Log what was actually accepted vs what was asked for.
-        sidebarLog.debug("setSidebarWidth accepted panelWidth=\(self.sidebarContainerView?.frame.width ?? -1) contentWidth=\(self.content.view.frame.width) (asked width=\(width))")
+        split.needsDisplay = true
+        sidebarLog.debug("setSidebarWidth width=\(width) totalWidth=\(totalWidth) sidebarOnRight=\(sidebarOnRight) -> panelWidth=\(clampedWidth) contentWidth=\(contentWidth)")
     }
 
     /// Fired by `SplitChromeDelegate` on every split-view resize — animations, `viewDidLayout`,
@@ -638,7 +649,7 @@ final class MainSplitViewController: NSViewController {
 }
 
 @MainActor
-final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
+private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
     /// The floor a *user drag* can't shrink the sidebar below, on either side. Also the
     /// floor `MainSplitViewController` clamps a persisted `sidebarWidth` to before
     /// treating it as a toggle target — a width below this reaching disk is exactly how
@@ -648,12 +659,12 @@ final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
     /// sidebar can fully disappear. At rest it's false, so a *user drag* still floors
     /// at `sidebarMinWidth` and can't shrink the sidebar to an unusable sliver.
     var allowFullCollapse = false
-    /// The sidebar's own container view — used to tell AppKit it's genuinely collapsed
-    /// (`isSubviewCollapsed`) and to let the constrain floors below yield to a width of 0
-    /// whenever it's hidden, not just mid-animation (`allowFullCollapse`). Without this,
-    /// a relayout while the sidebar sits idle-but-hidden (screen change, window resize)
-    /// reasserts the drag floor and pulls a visible sliver back in even though nothing
-    /// is drawn there.
+    /// The sidebar's own container view — lets the constrain floors below yield to a
+    /// width of 0 whenever it's hidden, not just mid-animation (`allowFullCollapse`),
+    /// and lets `shouldAdjustSizeOfSubview` opt it back into automatic resize while
+    /// hidden so a real window resize (not just an explicit toggle) grows the content
+    /// pane correctly. See `setSidebarWidth` for why the divider position itself is
+    /// driven by direct frame assignment rather than these constrain values alone.
     weak var sidebarPanel: NSView?
     /// Fired on every resize (drag or programmatic) — the owner filters for genuine
     /// user drags via `NSEvent.pressedMouseButtons`.
@@ -661,10 +672,6 @@ final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
         onResize?()
-    }
-
-    func splitView(_ splitView: NSSplitView, isSubviewCollapsed subview: NSView) -> Bool {
-        return subview === sidebarPanel && subview.isHidden
     }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimum: CGFloat, ofSubviewAt index: Int) -> CGFloat {
@@ -706,6 +713,15 @@ final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
         let right = SessionCoordinator.shared.settings.sidebarOnRight
         let sidebarIndex = right ? 1 : 0
         guard splitView.subviews.count > sidebarIndex, splitView.subviews[sidebarIndex] === subview else { return true }
+        // Opting the sidebar out of auto-resize keeps it a fixed width while *visible*
+        // (only the terminal absorbs window growth/shrink) — but while it's hidden/
+        // collapsed, that same opt-out was blocking NSSplitView's own adjustSubviews()
+        // from handing the resize delta to the content pane at all (a real window
+        // resize/zoom while collapsed left content pinned at its pre-resize width,
+        // even though sidebarPanel is already 0pt wide and opting it back in changes
+        // nothing visually). Let it participate in redistribution while hidden so the
+        // content pane actually grows/shrinks with the window.
+        if sidebarPanel?.isHidden == true { return true }
         return false
     }
 }

@@ -141,49 +141,44 @@ final class SidebarPlacementSyncTests: XCTestCase {
         }
     }
 
-    /// Regression test for the collapsed-sidebar screen-change/resize bug: with the
-    /// sidebar collapsed (`isHidden == true`) but idle (`allowFullCollapse == false`),
-    /// `SplitChromeDelegate`'s constrain methods used to still reserve the ~200pt drag
-    /// floor for a relayout (screen change, window resize), pulling a blank (still
-    /// hidden) sidebar-shaped gap back into view. `isSubviewCollapsed` and the
-    /// hidden-aware constrain floors must relax the moment the sidebar panel is
-    /// hidden, not only mid-animation (`allowFullCollapse`).
+    /// Regression test for the 2026-09-06 cross-screen/resize "content pane stuck at
+    /// old width" bug: confirmed live (device logs, moving the window from a MacBook
+    /// display to an external Dell display and then zooming to fill it) that
+    /// `NSSplitView.setPosition` — documented as advisory — silently clamped against a
+    /// stale internally-cached arrangement that never recomputed for the split view's
+    /// live bounds after a real resize while the sidebar sat collapsed. The delegate's
+    /// own constrain methods returned the correct, unclamped values throughout; the
+    /// divider position itself just didn't move. Net effect: ~480pt of the split view
+    /// belonged to neither subview (nothing drawn there — the wallpaper showing through
+    /// in the original report), no matter what position was requested.
     ///
-    /// Exercises the delegate directly rather than through a real NSSplitView
-    /// relayout: `shouldAdjustSizeOfSubview` already opts the sidebar out of
-    /// AppKit's automatic subview resize on a plain window/view resize, so a
-    /// synthetic `setFrameSize` never reaches the broken constrain path — the
-    /// delegate's own return values are the actual mechanism that broke.
-    func testCollapsedSidebarConstraintsRelaxWhenHiddenAtRest() {
+    /// Root-cause fix: `setSidebarWidth` no longer trusts `setPosition` at all — it
+    /// assigns `content.view.frame` / the sidebar panel's frame directly (the same
+    /// escape hatch `updateSidebarPlacement()` already uses), which guarantees by
+    /// construction that content + divider + sidebar always sum to the split view's
+    /// current bounds, live-resize staleness or not.
+    func testContentPaneFillsBoundsAcrossAResizeWhileCollapsed() {
         withTemporaryKouenHome {
-            let split = NSSplitView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
-            let panel = NSView()
-            panel.isHidden = true
-            let delegate = SplitChromeDelegate()
-            delegate.sidebarPanel = panel
-            XCTAssertFalse(delegate.allowFullCollapse)
-
-            XCTAssertTrue(delegate.splitView(split, isSubviewCollapsed: panel))
-
             SessionCoordinator.shared.settings.sidebarOnRight = true
-            XCTAssertEqual(
-                delegate.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0), 1000, accuracy: 0.5,
-                "right-side sidebar hidden at rest must let the content pane reach full width")
+            SessionCoordinator.shared.settings.sidebarVisible = false
+            let vc = makeSplitController(width: 1440)
+            vc.setSidebarVisible(false, animated: false)
+            XCTAssertEqual(vc.contentVC.view.frame.width, 1440, accuracy: 2)
 
-            SessionCoordinator.shared.settings.sidebarOnRight = false
-            XCTAssertEqual(
-                delegate.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0), 0, accuracy: 0.5,
-                "left-side sidebar hidden at rest must let the divider reach 0")
+            // Simulate the real repro: window moved to a wider display, then zoomed,
+            // while the sidebar is still collapsed.
+            vc.view.setFrameSize(NSSize(width: 1920, height: 600))
+            vc.view.layoutSubtreeIfNeeded()
+            vc.setSidebarVisible(false, animated: false)
 
-            // Once visible again, the ~200pt drag floor must still apply.
-            panel.isHidden = false
-            XCTAssertFalse(delegate.splitView(split, isSubviewCollapsed: panel))
-            SessionCoordinator.shared.settings.sidebarOnRight = true
             XCTAssertEqual(
-                delegate.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0), 800, accuracy: 0.5)
-            SessionCoordinator.shared.settings.sidebarOnRight = false
+                vc.contentVC.view.frame.width, 1920, accuracy: 2,
+                "content pane must fill the new bounds after a resize while the sidebar is collapsed")
+
+            vc.setSidebarVisible(true, animated: false)
             XCTAssertEqual(
-                delegate.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0), 200, accuracy: 0.5)
+                vc.contentVC.view.frame.width, 1920 - KouenDesign.sidebarWidth, accuracy: 2,
+                "expanding after a resize must use the live bounds, not a stale pre-resize width")
         }
     }
 }
