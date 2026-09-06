@@ -27,34 +27,38 @@ final class NotchPanelController: NSObject {
         refreshVisibility()
     }
 
+    /// The panel is created (and kept) unconditionally, even with the persistent HUD off —
+    /// a transient "finished/errored/needs input" peek should still surface like a system
+    /// notification (see `applyIdleVisibility`), and that needs somewhere to render into.
     func refreshVisibility() {
         model.refreshFromCoordinator()
-        guard SessionCoordinator.shared.settings.notchVisibilityMode
-            .isEnabled(for: SessionCoordinator.shared.settings.experienceMode)
-        else {
-            model.close()
-            panel?.orderOut(nil)
-            return
-        }
         createPanelIfNeeded()
         updatePanelGeometry()
+        if !SessionCoordinator.shared.settings.notchVisibilityMode
+            .isEnabled(for: SessionCoordinator.shared.settings.experienceMode) {
+            model.close()
+        }
         applyIdleVisibility()
     }
 
-    /// Orders the panel front/out based on live agent state: hidden while every agent is idle
-    /// and the HUD itself is closed, shown the instant any agent starts working or needs
-    /// approval — independent of which app has focus. A row `.waiting` on approval counts as
-    /// "not idle" too (not just `.working`): hiding the notch while an agent needs input would
-    /// bury the one thing the user actually needs to see.
+    /// Orders the panel front/out based on live agent state.
+    ///
+    /// With the persistent HUD **on** (`notchVisibilityMode` resolves enabled): hidden while
+    /// every agent is idle and the HUD itself is closed, shown the instant any agent starts
+    /// working or needs approval — independent of which app has focus. A row `.waiting` on
+    /// approval counts as "not idle" too (not just `.working`): hiding the notch while an
+    /// agent needs input would bury the one thing the user actually needs to see.
+    ///
+    /// With it **off** (the default): the always-visible-while-working bar never appears, but
+    /// a transient `.peek` (agent finished/errored/needs input) still pops up and auto-dismisses
+    /// — same as any other OS notification, not tied to the persistent-HUD toggle.
     private func applyIdleVisibility() {
-        guard SessionCoordinator.shared.settings.notchVisibilityMode
-            .isEnabled(for: SessionCoordinator.shared.settings.experienceMode),
-            panel != nil
-        else {
-            panel?.orderOut(nil)
-            return
-        }
-        let shouldShow = model.workingCount > 0 || model.waitingCount > 0 || model.presentation != .closed
+        guard panel != nil else { return }
+        let enabled = SessionCoordinator.shared.settings.notchVisibilityMode
+            .isEnabled(for: SessionCoordinator.shared.settings.experienceMode)
+        let shouldShow = enabled
+            ? (model.workingCount > 0 || model.waitingCount > 0 || model.presentation != .closed)
+            : model.isPeeking
         if shouldShow {
             panel?.orderFrontRegardless()
         } else {
