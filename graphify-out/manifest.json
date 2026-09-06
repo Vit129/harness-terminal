@@ -200,7 +200,7 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/Services/SplitPaneCoordinator.swift": {
-    "mtime": 1788250252.6518054,
+    "mtime": 1788427082.4259746,
     "ast_hash": "816d90afe1b6f3c71ac8c09193b7683b",
     "semantic_hash": ""
   },
@@ -355,13 +355,13 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainMenuBuilder.swift": {
-    "mtime": 1788250239.965164,
+    "mtime": 1788427082.4262295,
     "ast_hash": "249ffa0b84300bd4e28c936bd848659d",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainSplitViewController.swift": {
-    "mtime": 1786846921.093075,
-    "ast_hash": "b039935ac6295c712a564fb34c0cc395",
+    "mtime": 1788660367.6793249,
+    "ast_hash": "8343cbcf4743e693809d031200ab4e02",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Chrome/MainWindowController.swift": {
@@ -485,12 +485,12 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileTree/FileTreeSwiftUIView.swift": {
-    "mtime": 1788426185.9482648,
+    "mtime": 1788427082.4264753,
     "ast_hash": "774067491192e847f8170ef22bc0e4a1",
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/FileTree/WorkspaceFileTreeView.swift": {
-    "mtime": 1788426185.9601614,
+    "mtime": 1788427082.4267097,
     "ast_hash": "0e9fc8c5489d22420f63d63720e02ed3",
     "semantic_hash": ""
   },
@@ -670,7 +670,7 @@
     "semantic_hash": ""
   },
   "Apps/Kouen/Sources/KouenApp/UI/Sidebar/KouenSidebarPanelViewController.swift": {
-    "mtime": 1788250284.1644433,
+    "mtime": 1788427082.426903,
     "ast_hash": "4a2c176ff40e30134d434e25e07c605f",
     "semantic_hash": ""
   },
@@ -990,8 +990,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/KouenVersion.swift": {
-    "mtime": 1788185406.126235,
-    "ast_hash": "655074db61bdaf583d218c414ab12275",
+    "mtime": 1788660836.2540011,
+    "ast_hash": "baa8787fcd88e0c3d17acbc9db9b7787",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/Layouts/LayoutTemplate.swift": {
@@ -1080,8 +1080,8 @@
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/GeneratedReleaseNotes.swift": {
-    "mtime": 1788185406.8367784,
-    "ast_hash": "2e1fbd3750691329e7a4f3b5c2477aec",
+    "mtime": 1788660836.8999243,
+    "ast_hash": "cb2620d62dab496a2be4fdfcee033e24",
     "semantic_hash": ""
   },
   "Packages/KouenCore/Sources/KouenCore/ReleaseNotes/ReleaseNotes.swift": {
@@ -1655,7 +1655,7 @@
     "semantic_hash": ""
   },
   "Packages/KouenTerminalEngine/Sources/KouenTerminalEngine/Screen/TerminalScreen.swift": {
-    "mtime": 1788252923.3262258,
+    "mtime": 1788427082.4273953,
     "ast_hash": "7803f58afbd92e74ff655c746c6298f7",
     "semantic_hash": ""
   },
@@ -1760,13 +1760,13 @@
     "semantic_hash": ""
   },
   "Packages/KouenTerminalKit/Sources/KouenTerminalKit/TerminalHostView.swift": {
-    "mtime": 1788426185.938709,
-    "ast_hash": "490ae5a06603d4a86efe5f8f70b1fff6",
+    "mtime": 1788509098.0106442,
+    "ast_hash": "8e6f93f6385676e07425d7dd742c9d99",
     "semantic_hash": ""
   },
   "Packages/KouenTerminalKit/Sources/KouenTerminalKit/TerminalScrollbarView.swift": {
-    "mtime": 1788426185.9303384,
-    "ast_hash": "826bb92d2476208563ed8eca3111475b",
+    "mtime": 1788509069.9274821,
+    "ast_hash": "a35e87cc611ebd31d4a6a80623e4cde0",
     "semantic_hash": ""
   },
   "Packages/KouenTerminalKit/Sources/KouenTerminalKit/ThemeManager.swift": {
@@ -2190,8 +2190,8 @@
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/SidebarPlacementSyncTests.swift": {
-    "mtime": 1785510867.621269,
-    "ast_hash": "8fb14138ca7fa3c89ec002ee5bd7cf95",
+    "mtime": 1788660367.6872797,
+    "ast_hash": "9891f839ab2b42c81f13a54f110616cf",
     "semantic_hash": ""
   },
   "Tests/KouenAppTests/SurfaceProgressTrackerTests.swift": {
@@ -2955,7 +2955,7 @@
     "semantic_hash": ""
   },
   "Tests/KouenTerminalEngineTests/ScrollbackTests.swift": {
-    "mtime": 1788252987.1981137,
+    "mtime": 1788427082.4299414,
     "ast_hash": "bf9fc5569544d0a4d2bb3e4b0b79d161",
     "semantic_hash": ""
   },

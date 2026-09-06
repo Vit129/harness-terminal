@@ -73,9 +73,18 @@ final class NotchPanelController: NSObject {
         applyIdleVisibility()
     }
 
+    /// Mirrors `openFromMenu`: an explicit menu "Close" is a persistent user override, not
+    /// just a `.close()` of the expanded content — otherwise `applyIdleVisibility`'s
+    /// by-design "show while any agent is working/awaiting" behavior immediately brings the
+    /// compact bar right back, and the menu action looks like it did nothing.
     func closeFromMenu() {
+        let coordinator = SessionCoordinator.shared
+        if coordinator.settings.notchVisibilityMode.isEnabled(for: coordinator.settings.experienceMode) {
+            coordinator.settings.notchVisibilityMode = .off
+            try? coordinator.settings.save()
+        }
         model.close()
-        applyIdleVisibility()
+        refreshVisibility()
     }
 
     func toggleFromMenu() {

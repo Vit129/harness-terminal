@@ -37,14 +37,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func rebuild(_ menu: NSMenu, snapshot: SessionSnapshot) {
         menu.removeAllItems()
 
-        addHeader("Active Agents", to: menu)
-        let rows = activeAgentRows(snapshot)
+        addHeader("Sessions", to: menu)
+        let rows = sessionRows(snapshot)
         if rows.isEmpty {
-            let none = NSMenuItem(title: "No active agents", action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            menu.addItem(none)
+            let empty = NSMenuItem(title: "No sessions", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
         } else {
-            for row in rows { menu.addItem(agentItem(row)) }
+            for row in rows { menu.addItem(sessionItem(row)) }
         }
 
         menu.addItem(.separator())
@@ -57,19 +57,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let notchSettings = NSMenuItem(title: "Notch HUD Settings…", action: #selector(openNotchSettings), keyEquivalent: "")
         notchSettings.target = self
         menu.addItem(notchSettings)
-
-        menu.addItem(.separator())
-        addHeader("Sessions", to: menu)
-        let sessions = snapshot.workspaces.flatMap { ws in ws.sessions.map { (ws, $0) } }
-        if sessions.isEmpty {
-            let empty = NSMenuItem(title: "No sessions", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
-        } else {
-            for (workspace, session) in sessions {
-                menu.addItem(sessionItem(workspace, session))
-            }
-        }
 
         menu.addItem(.separator())
         let open = NSMenuItem(title: "Open Kouen", action: #selector(openKouen), keyEquivalent: "")
@@ -90,29 +77,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    private func agentItem(_ row: AgentRow) -> NSMenuItem {
-        let item = NSMenuItem(title: row.kind.displayName, action: #selector(activate(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = MenuRef(row.workspaceID, row.sessionID)
-        let tint = NSColor.fromHex(SessionCoordinator.shared.settings.agentColorHex(for: row.kind)) ?? .secondaryLabelColor
-        item.image = AgentIconRenderer.coloredOrMonogramImage(for: row.kind, size: 15, color: tint)
-
-        let title = NSMutableAttributedString(string: row.kind.displayName, attributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-            .foregroundColor: NSColor.labelColor,
-        ])
-        title.append(NSAttributedString(string: "   \(row.sessionName)", attributes: [
-            .font: NSFont.systemFont(ofSize: 11.5),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        item.attributedTitle = title
-        if let badge = stateLabel(row.activity) {
-            item.badge = NSMenuItemBadge(string: badge)
-        }
-        return item
-    }
-
-    private func sessionItem(_ workspace: Workspace, _ session: SessionGroup) -> NSMenuItem {
+    private func sessionItem(_ row: SessionRow) -> NSMenuItem {
+        let workspace = row.workspace
+        let session = row.session
         let item = NSMenuItem(title: session.name, action: #selector(activate(_:)), keyEquivalent: "")
         item.target = self
         item.representedObject = MenuRef(workspace.id, session.id)
@@ -120,7 +87,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         let name = session.name.isEmpty ? sessionFolder(session) : session.name
         let title = NSMutableAttributedString(string: name, attributes: [
-            .font: NSFont.systemFont(ofSize: 12.5),
+            .font: NSFont.systemFont(ofSize: 12.5, weight: row.agentKind != nil ? .medium : .regular),
             .foregroundColor: NSColor.labelColor,
         ])
         let detail = sessionDetail(session)
@@ -132,28 +99,29 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         item.attributedTitle = title
 
-        if let tab = session.activeTab ?? session.tabs.first,
-           let kind = tab.effectiveAgentKind {
+        if let kind = row.agentKind {
             let tint = NSColor.fromHex(SessionCoordinator.shared.settings.agentColorHex(for: kind)) ?? .secondaryLabelColor
-            item.image = AgentIconRenderer.coloredOrMonogramImage(for: kind, size: 13, color: tint)
+            item.image = AgentIconRenderer.coloredOrMonogramImage(for: kind, size: 14, color: tint)
+        }
+        if let activity = row.activity, let badge = stateLabel(activity) {
+            item.badge = NSMenuItemBadge(string: badge)
         }
         return item
     }
 
     // MARK: - Data
 
-    private struct AgentRow {
-        let workspaceID: WorkspaceID
-        let sessionID: SessionID
-        let kind: AgentKind
-        let activity: AgentActivity
-        let sessionName: String
+    private struct SessionRow {
+        let workspace: Workspace
+        let session: SessionGroup
+        let agentKind: AgentKind?
+        let activity: AgentActivity?
     }
 
-    /// One row per session that has a detected agent, carrying its highest-attention
-    /// agent state. Sorted so sessions needing input (awaiting/errored) sit on top.
-    private func activeAgentRows(_ snapshot: SessionSnapshot) -> [AgentRow] {
-        var rows: [AgentRow] = []
+    /// One row per session, carrying its highest-attention agent state (if any tab has a
+    /// detected agent). Sorted so sessions needing input (awaiting/errored) sit on top.
+    private func sessionRows(_ snapshot: SessionSnapshot) -> [SessionRow] {
+        var rows: [SessionRow] = []
         for workspace in snapshot.workspaces {
             for session in workspace.sessions {
                 var best: (AgentKind, AgentActivity)?
@@ -162,22 +130,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                     let activity = tab.agent?.activity ?? (tab.status == .waiting ? .awaiting : .idle)
                     if best == nil || rank(activity) > rank(best!.1) { best = (kind, activity) }
                 }
-                if let best {
-                    let name = session.name.isEmpty ? sessionFolder(session) : session.name
-                    rows.append(AgentRow(workspaceID: workspace.id, sessionID: session.id,
-                                         kind: best.0, activity: best.1, sessionName: name))
-                }
+                rows.append(SessionRow(workspace: workspace, session: session, agentKind: best?.0, activity: best?.1))
             }
         }
         return rows.sorted { rank($0.activity) > rank($1.activity) }
     }
 
-    private func rank(_ activity: AgentActivity) -> Int {
+    private func rank(_ activity: AgentActivity?) -> Int {
         switch activity {
         case .awaiting: return 3
         case .errored: return 2
         case .working: return 1
         case .idle: return 0
+        case nil: return -1
         }
     }
 

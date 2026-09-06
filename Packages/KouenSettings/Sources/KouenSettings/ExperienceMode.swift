@@ -66,8 +66,8 @@ public enum ExperienceMode: String, Codable, Sendable, CaseIterable {
     public var showsStatusLineByDefault: Bool { self == .full }
 
     /// Whether the top-center Agent Notch HUD is enabled by default (the `.automatic`
-    /// notch policy resolves through this). Only the Agent Workspace foregrounds it.
-    public var notchEnabledByDefault: Bool { self == .agent }
+    /// notch policy resolves through this). Off for every mode by default.
+    public var notchEnabledByDefault: Bool { false }
 
     /// Whether sessions created in this mode persist across a *clean* GUI quit by default.
     /// Only `plain` is ephemeral. (A daemon or GUI crash never tears sessions down in any

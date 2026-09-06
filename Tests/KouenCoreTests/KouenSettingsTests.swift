@@ -304,7 +304,7 @@ final class KouenSettingsTests: XCTestCase {
         XCTAssertFalse(NotchVisibilityMode.automatic.isEnabled(for: .plain))
         XCTAssertFalse(NotchVisibilityMode.automatic.isEnabled(for: .persistent))
         XCTAssertFalse(NotchVisibilityMode.automatic.isEnabled(for: .full))
-        XCTAssertTrue(NotchVisibilityMode.automatic.isEnabled(for: .agent))
+        XCTAssertFalse(NotchVisibilityMode.automatic.isEnabled(for: .agent))
         XCTAssertTrue(NotchVisibilityMode.on.isEnabled(for: .plain))
         XCTAssertFalse(NotchVisibilityMode.off.isEnabled(for: .agent))
     }

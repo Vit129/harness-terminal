@@ -77,12 +77,12 @@ final class ExperienceModeTests: XCTestCase {
     // MARK: - Per-component (decoupled) chrome overrides
 
     func testPerComponentDefaultsByMode() {
-        // Prefix + status line default on only for Full; the notch only for Agent.
+        // Prefix + status line default on only for Full; the notch defaults off for every mode.
         XCTAssertTrue(ExperienceMode.full.showsPrefixByDefault)
         XCTAssertTrue(ExperienceMode.full.showsStatusLineByDefault)
         XCTAssertFalse(ExperienceMode.plain.showsPrefixByDefault)
         XCTAssertFalse(ExperienceMode.plain.showsStatusLineByDefault)
-        XCTAssertTrue(ExperienceMode.agent.notchEnabledByDefault)
+        XCTAssertFalse(ExperienceMode.agent.notchEnabledByDefault)
         XCTAssertFalse(ExperienceMode.full.notchEnabledByDefault)
     }
 
