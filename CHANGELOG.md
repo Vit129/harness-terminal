@@ -7,8 +7,9 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.15.3] - 2026-09-06
 
-### Added
-- Release version bump to v4.15.3.
+### Fixed
+- Stop trusting NSSplitView.setPosition, assign sidebar/content frames directly ([`f3e0cba`](https://github.com/Vit129/kouen-terminal/commit/f3e0cba9bfabecfb457c55d604f84c1add939d65))
+- Turn off Agent Notch HUD by default, merge menu-bar sessions list, fix Close toggle (release v4.15.3) ([`36220c9`](https://github.com/Vit129/kouen-terminal/commit/36220c944e4942281c7e76964ac198219091b8c9))
 
 ## [4.15.2] - 2026-09-06
 
