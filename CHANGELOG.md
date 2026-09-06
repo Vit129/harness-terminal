@@ -7,8 +7,8 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.15.4] - 2026-09-06
 
-### Added
-- Release version bump to v4.15.4.
+### Fixed
+- Keep transient notch peek notification independent of the persistent HUD toggle (release v4.15.4) ([`9457638`](https://github.com/Vit129/kouen-terminal/commit/9457638dc30e649bf6f60ed5a81c40d888e2a7bc))
 
 ## [4.15.3] - 2026-09-06
 
