@@ -62,6 +62,7 @@ final class MainSplitViewController: NSViewController {
         // strip even though both regions request the same theme color.
         let sidebarContainer = NSView()
         KouenDesign.makeClear(sidebarContainer)
+        splitDelegate.sidebarPanel = sidebarContainer
         // Deliberately NOT translatesAutoresizingMaskIntoConstraints = false here (unlike
         // `sidebar.view` below): `sidebarContainer` is an NSSplitView arranged subview —
         // NSSplitView positions/sizes it via direct frame assignment (setPosition/adjustSubviews),
@@ -166,6 +167,25 @@ final class MainSplitViewController: NSViewController {
             name: Notification.Name("KouenSidebarPlacementChanged"),
             object: nil
         )
+        // Moving the window to a display with a different scale/size (or a plain resize)
+        // makes NSSplitView redistribute subview widths. With the sidebar collapsed
+        // (isHidden, width 0) but idle (allowFullCollapse == false), that redistribution
+        // used to reassert the ~200pt drag floor and pull the divider back in even though
+        // nothing is drawn there. isSubviewCollapsed + the hidden-aware constrain floors
+        // below are the real fix; this is a defensive backstop that re-zeroes the width
+        // if a redistribution still slips through.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeScreen),
+            name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
+    }
+
+    @objc private func windowDidChangeScreen(_ note: Notification) {
+        guard let window = note.object as? NSWindow, window === view.window else { return }
+        guard let panel = sidebarContainerView, panel.isHidden else { return }
+        setSidebarWidth(0)
     }
 
     /// Settings window changed `sidebarOnRight` directly (bypassing `toggleSidebarPosition()`,
@@ -618,7 +638,7 @@ final class MainSplitViewController: NSViewController {
 }
 
 @MainActor
-private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
+final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
     /// The floor a *user drag* can't shrink the sidebar below, on either side. Also the
     /// floor `MainSplitViewController` clamps a persisted `sidebarWidth` to before
     /// treating it as a toggle target — a width below this reaching disk is exactly how
@@ -628,6 +648,13 @@ private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
     /// sidebar can fully disappear. At rest it's false, so a *user drag* still floors
     /// at `sidebarMinWidth` and can't shrink the sidebar to an unusable sliver.
     var allowFullCollapse = false
+    /// The sidebar's own container view — used to tell AppKit it's genuinely collapsed
+    /// (`isSubviewCollapsed`) and to let the constrain floors below yield to a width of 0
+    /// whenever it's hidden, not just mid-animation (`allowFullCollapse`). Without this,
+    /// a relayout while the sidebar sits idle-but-hidden (screen change, window resize)
+    /// reasserts the drag floor and pulls a visible sliver back in even though nothing
+    /// is drawn there.
+    weak var sidebarPanel: NSView?
     /// Fired on every resize (drag or programmatic) — the owner filters for genuine
     /// user drags via `NSEvent.pressedMouseButtons`.
     var onResize: (() -> Void)?
@@ -636,24 +663,30 @@ private final class SplitChromeDelegate: NSObject, NSSplitViewDelegate {
         onResize?()
     }
 
+    func splitView(_ splitView: NSSplitView, isSubviewCollapsed subview: NSView) -> Bool {
+        return subview === sidebarPanel && subview.isHidden
+    }
+
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimum: CGFloat, ofSubviewAt index: Int) -> CGFloat {
         let right = SessionCoordinator.shared.settings.sidebarOnRight
+        let hidden = sidebarPanel?.isHidden ?? false
         if right {
             guard index == 0 else { return proposedMinimum }
             let totalWidth = splitView.bounds.width
             return totalWidth - 320
         } else {
             guard index == 0 else { return proposedMinimum }
-            return allowFullCollapse ? 0 : Self.sidebarMinWidth
+            return (allowFullCollapse || hidden) ? 0 : Self.sidebarMinWidth
         }
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximum: CGFloat, ofSubviewAt index: Int) -> CGFloat {
         let right = SessionCoordinator.shared.settings.sidebarOnRight
+        let hidden = sidebarPanel?.isHidden ?? false
         if right {
             guard index == 0 else { return proposedMaximum }
             let totalWidth = splitView.bounds.width
-            return allowFullCollapse ? totalWidth : (totalWidth - Self.sidebarMinWidth)
+            return (allowFullCollapse || hidden) ? totalWidth : (totalWidth - Self.sidebarMinWidth)
         } else {
             return index == 0 ? 320 : proposedMaximum
         }

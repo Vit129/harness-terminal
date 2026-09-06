@@ -140,4 +140,50 @@ final class SidebarPlacementSyncTests: XCTestCase {
             XCTAssertEqual(vc.contentVC.view.frame.width, 1000 - 200, accuracy: 1)
         }
     }
+
+    /// Regression test for the collapsed-sidebar screen-change/resize bug: with the
+    /// sidebar collapsed (`isHidden == true`) but idle (`allowFullCollapse == false`),
+    /// `SplitChromeDelegate`'s constrain methods used to still reserve the ~200pt drag
+    /// floor for a relayout (screen change, window resize), pulling a blank (still
+    /// hidden) sidebar-shaped gap back into view. `isSubviewCollapsed` and the
+    /// hidden-aware constrain floors must relax the moment the sidebar panel is
+    /// hidden, not only mid-animation (`allowFullCollapse`).
+    ///
+    /// Exercises the delegate directly rather than through a real NSSplitView
+    /// relayout: `shouldAdjustSizeOfSubview` already opts the sidebar out of
+    /// AppKit's automatic subview resize on a plain window/view resize, so a
+    /// synthetic `setFrameSize` never reaches the broken constrain path — the
+    /// delegate's own return values are the actual mechanism that broke.
+    func testCollapsedSidebarConstraintsRelaxWhenHiddenAtRest() {
+        withTemporaryKouenHome {
+            let split = NSSplitView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+            let panel = NSView()
+            panel.isHidden = true
+            let delegate = SplitChromeDelegate()
+            delegate.sidebarPanel = panel
+            XCTAssertFalse(delegate.allowFullCollapse)
+
+            XCTAssertTrue(delegate.splitView(split, isSubviewCollapsed: panel))
+
+            SessionCoordinator.shared.settings.sidebarOnRight = true
+            XCTAssertEqual(
+                delegate.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0), 1000, accuracy: 0.5,
+                "right-side sidebar hidden at rest must let the content pane reach full width")
+
+            SessionCoordinator.shared.settings.sidebarOnRight = false
+            XCTAssertEqual(
+                delegate.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0), 0, accuracy: 0.5,
+                "left-side sidebar hidden at rest must let the divider reach 0")
+
+            // Once visible again, the ~200pt drag floor must still apply.
+            panel.isHidden = false
+            XCTAssertFalse(delegate.splitView(split, isSubviewCollapsed: panel))
+            SessionCoordinator.shared.settings.sidebarOnRight = true
+            XCTAssertEqual(
+                delegate.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0), 800, accuracy: 0.5)
+            SessionCoordinator.shared.settings.sidebarOnRight = false
+            XCTAssertEqual(
+                delegate.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0), 200, accuracy: 0.5)
+        }
+    }
 }
