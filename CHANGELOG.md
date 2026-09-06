@@ -7,8 +7,8 @@ has a matching `vX.Y.Z` tag and a signed, notarized DMG on
 [GitHub Releases](https://github.com/Vit129/kouen-terminal/releases).
 ## [4.15.2] - 2026-09-06
 
-### Added
-- Release version bump to v4.15.2.
+### Fixed
+- Keep collapsed sidebar hidden across screen/window resize (release v4.15.2) ([`2f370d8`](https://github.com/Vit129/kouen-terminal/commit/2f370d887912d34c0ab8bc3bd2e8832928ae0740))
 
 ## [4.15.1] - 2026-09-04
 
